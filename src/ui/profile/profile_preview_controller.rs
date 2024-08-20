@@ -2,10 +2,7 @@ use nostrdb::{Ndb, Transaction};
 
 use crate::{Damus, DisplayName, Result};
 
-use super::{
-    preview::{get_display_name, get_profile_url, SimpleProfilePreview},
-    ProfilePic,
-};
+use super::{get_display_name, get_profile_url, preview::SimpleProfilePreview, ProfilePic};
 
 #[derive(Debug)]
 pub enum ProfilePreviewOp {
