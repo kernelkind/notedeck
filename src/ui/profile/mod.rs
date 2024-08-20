@@ -3,7 +3,7 @@ pub mod preview;
 pub mod profile_preview_controller;
 pub mod profile_view;
 
-use egui::{load::TexturePoll, RichText, Sense};
+use egui::{load::TexturePoll, Color32, RichText, Sense};
 use nostrdb::ProfileRecord;
 pub use picture::ProfilePic;
 pub use preview::ProfilePreview;
@@ -28,10 +28,11 @@ pub(crate) fn get_profile_url<'a>(profile: Option<&'a ProfileRecord<'a>>) -> &'a
     }
 }
 
-pub(crate) fn display_name_widget(
-    display_name: DisplayName<'_>,
+pub(crate) fn display_name_widget<'a>(
+    display_name: DisplayName<'a>,
+    nip05: Option<&'a str>,
     add_placeholder_space: bool,
-) -> impl egui::Widget + '_ {
+) -> impl egui::Widget + 'a {
     move |ui: &mut egui::Ui| match display_name {
         DisplayName::One(n) => {
             let name_response =
@@ -50,11 +51,19 @@ pub(crate) fn display_name_widget(
                 RichText::new(display_name).text_style(NotedeckTextStyle::Heading3.text_style()),
             );
 
-            ui.label(
-                RichText::new(format!("@{}", username))
-                    .size(12.0)
-                    .color(colors::MID_GRAY),
-            )
+            ui.horizontal(|ui| {
+                let mut response = ui.label(
+                    RichText::new(format!("@{}", username))
+                        .size(12.0)
+                        .color(colors::MID_GRAY),
+                );
+
+                if let Some(nip05) = nip05 {
+                    response = ui.colored_label(Color32::from_rgb(0x00, 0x80, 0x80), nip05);
+                }
+                response
+            })
+            .inner
         }
     }
 }
@@ -82,6 +91,10 @@ pub(crate) fn banner(ui: &mut egui::Ui, profile: &ProfileRecord<'_>) -> egui::Re
         // TODO: default banner texture
         ui.label("")
     }
+}
+
+fn get_nip5<'a>(profile: Option<&'a ProfileRecord>) -> Option<&'a str> {
+    return profile.and_then(|profile| profile.record().profile().and_then(|p| p.nip05()));
 }
 
 fn banner_texture(

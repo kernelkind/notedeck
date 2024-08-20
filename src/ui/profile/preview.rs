@@ -4,7 +4,9 @@ use egui::{Frame, Widget};
 use egui_extras::Size;
 use nostrdb::ProfileRecord;
 
-use super::{about_section_widget, banner, display_name_widget, get_display_name, get_profile_url};
+use super::{
+    about_section_widget, banner, display_name_widget, get_display_name, get_nip5, get_profile_url,
+};
 
 pub struct ProfilePreview<'a, 'cache> {
     profile: &'a ProfileRecord<'a>,
@@ -31,6 +33,7 @@ impl<'a, 'cache> ProfilePreview<'a, 'cache> {
             ui.add(ProfilePic::new(self.cache, get_profile_url(Some(self.profile))).size(80.0));
             ui.add(display_name_widget(
                 get_display_name(Some(self.profile)),
+                get_nip5(Some(self.profile)),
                 false,
             ));
             ui.add(about_section_widget(self.profile));
@@ -68,7 +71,11 @@ impl<'a, 'cache> egui::Widget for SimpleProfilePreview<'a, 'cache> {
             .show(ui, |ui| {
                 ui.add(ProfilePic::new(self.cache, get_profile_url(self.profile)).size(48.0));
                 ui.vertical(|ui| {
-                    ui.add(display_name_widget(get_display_name(self.profile), true));
+                    ui.add(display_name_widget(
+                        get_display_name(self.profile),
+                        get_nip5(self.profile),
+                        true,
+                    ));
                 });
             })
             .response
