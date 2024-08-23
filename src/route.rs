@@ -1,5 +1,5 @@
 use egui::{Response, RichText};
-use enostr::NoteId;
+use enostr::{Keypair, NoteId, Pubkey};
 use std::fmt::{self};
 
 use crate::{ui::AccountManagementView, Damus};
@@ -12,6 +12,7 @@ pub enum Route {
     Thread(NoteId),
     Reply(NoteId),
     Relays,
+    Profile(Pubkey),
 }
 
 impl fmt::Display for Route {
@@ -22,6 +23,7 @@ impl fmt::Display for Route {
             Route::Thread(_id) => write!(f, "Thread"),
             Route::Reply(_id) => write!(f, "Reply"),
             Route::Relays => write!(f, "Relays"),
+            Route::Profile(_) => write!(f, "Profile"), // TODO: probably should include user's display name
         }
     }
 }
@@ -41,6 +43,7 @@ impl Route {
             Route::Reply(_) => RichText::new("Reply"),
             Route::Relays => RichText::new("Relays"),
             Route::Timeline(_) => RichText::new("Timeline"),
+            Route::Profile(_) => RichText::new("Profile"),
         }
     }
 }

@@ -154,6 +154,7 @@ impl Threads {
             .expect("thread_expected_mut used but there was no thread")
     }
 
+    /// Get a thread by root id, if it doesn't exist, query ndb for the thread's notes & add the new thread to the cache
     pub fn thread_mut<'a>(
         &'a mut self,
         ndb: &Ndb,

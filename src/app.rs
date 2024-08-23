@@ -14,6 +14,7 @@ use crate::route::Route;
 use crate::thread::{DecrementResult, Threads};
 use crate::timeline::{Timeline, TimelineSource, ViewFilter};
 use crate::ui::note::PostAction;
+use crate::ui::profile::ProfileView;
 use crate::ui::{self, AccountSelectionWidget, DesktopGlobalPopup};
 use crate::ui::{DesktopSidePanel, RelayView, View};
 use crate::Result;
@@ -1066,6 +1067,34 @@ fn render_nav(routes: Vec<Route>, timeline_ind: usize, app: &mut Damus, ui: &mut
                 });
 
                 Some(response)
+            }
+
+            Route::Profile(pubkey) => {
+                let app = &mut app_ctx.borrow_mut();
+
+                let txn = if let Ok(txn) = Transaction::new(&app.ndb) {
+                    txn
+                } else {
+                    ui.label("can't get transaction");
+                    return None;
+                };
+
+                let profile =
+                    if let Ok(profile) = app.ndb.get_profile_by_pubkey(&txn, pubkey.bytes()) {
+                        profile
+                    } else {
+                        ui.label("unknown profile for pubkey");
+                        return None;
+                    };
+
+                ProfileView::new(
+                    app,
+                    &Keypair::new(*pubkey, None),
+                    &profile,
+                    &mut app_ctx.borrow_mut().img_cache,
+                )
+                .ui(ui);
+                None
             }
         });
 

@@ -37,7 +37,7 @@ impl<'a, 'cache> ProfileView<'a, 'cache> {
         }
     }
 
-    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+    pub fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         ui.vertical(|ui| {
             ui.add_sized([ui.available_size().x, 80.0], |ui: &mut egui::Ui| {
                 banner(ui, self.profile)
