@@ -1,8 +1,10 @@
+use crate::route::Route;
 use crate::timeline::Timeline;
 use crate::{actionbar::BarResult, draft::DraftSource, ui, ui::note::PostAction, Damus};
 use egui::containers::scroll_area::ScrollBarVisibility;
 use egui::{Direction, Layout};
 use egui_tabs::TabColor;
+use enostr::Pubkey;
 use nostrdb::Transaction;
 use tracing::{debug, info, warn};
 
@@ -116,6 +118,13 @@ pub fn timeline_ui(
                             }
                         } else if resp.response.clicked() {
                             debug!("clicked note");
+                        } else if resp.profile_clicked {
+                            debug!("clicked profile");
+                            let timeline = &mut app.timelines[timeline_id];
+                            timeline
+                                .routes
+                                .push(Route::Profile(Pubkey::new(note.pubkey())));
+                            timeline.navigating = true;
                         }
                     });
 

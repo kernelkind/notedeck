@@ -21,6 +21,7 @@ pub struct NoteView<'a> {
 pub struct NoteResponse {
     pub response: egui::Response,
     pub action: Option<BarAction>,
+    pub profile_clicked: bool,
 }
 
 impl<'a> View for NoteView<'a> {
@@ -234,7 +235,7 @@ impl<'a> NoteView<'a> {
         note_key: NoteKey,
         profile: &Result<nostrdb::ProfileRecord<'_>, nostrdb::Error>,
         ui: &mut egui::Ui,
-    ) {
+    ) -> egui::Response {
         if !self.options().has_wide() {
             ui.spacing_mut().item_spacing.x = 16.0;
         } else {
@@ -243,6 +244,7 @@ impl<'a> NoteView<'a> {
 
         let pfp_size = self.options().pfp_size();
 
+        let sense = Sense::click();
         match profile
             .as_ref()
             .ok()
@@ -256,7 +258,8 @@ impl<'a> NoteView<'a> {
                 let note_key = note_key.as_u64();
 
                 if self.app.is_mobile() {
-                    ui.add(ui::ProfilePic::new(&mut self.app.img_cache, pic));
+                    ui.add(ui::ProfilePic::new(&mut self.app.img_cache, pic))
+                        .interact(sense)
                 } else {
                     let (rect, size, _resp) = ui::anim::hover_expand(
                         ui,
@@ -277,14 +280,15 @@ impl<'a> NoteView<'a> {
                             &mut self.app.img_cache,
                         ));
                     });
+                    _resp
                 }
             }
-            None => {
-                ui.add(
+            None => ui
+                .add(
                     ui::ProfilePic::new(&mut self.app.img_cache, ui::ProfilePic::no_pfp_url())
                         .size(pfp_size),
-                );
-            }
+                )
+                .interact(sense),
         }
     }
 
@@ -293,6 +297,7 @@ impl<'a> NoteView<'a> {
             NoteResponse {
                 response: self.textmode_ui(ui),
                 action: None,
+                profile_clicked: false,
             }
         } else {
             self.show_standard(ui)
@@ -327,10 +332,12 @@ impl<'a> NoteView<'a> {
         let mut note_action: Option<BarAction> = None;
         let profile = self.app.ndb.get_profile_by_pubkey(txn, self.note.pubkey());
 
+        let mut profile_clicked = false;
+
         // wide design
         let response = if self.options().has_wide() {
             ui.horizontal(|ui| {
-                self.pfp(note_key, &profile, ui);
+                profile_clicked = self.pfp(note_key, &profile, ui).clicked();
 
                 let size = ui.available_size();
                 ui.vertical(|ui| {
@@ -372,7 +379,7 @@ impl<'a> NoteView<'a> {
         } else {
             // main design
             ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
-                self.pfp(note_key, &profile, ui);
+                profile_clicked = self.pfp(note_key, &profile, ui).clicked();
 
                 ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
                     NoteView::note_header(ui, self.app, self.note, &profile);
@@ -411,6 +418,7 @@ impl<'a> NoteView<'a> {
         NoteResponse {
             response,
             action: note_action,
+            profile_clicked,
         }
     }
 }

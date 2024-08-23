@@ -1070,30 +1070,9 @@ fn render_nav(routes: Vec<Route>, timeline_ind: usize, app: &mut Damus, ui: &mut
             }
 
             Route::Profile(pubkey) => {
-                let app = &mut app_ctx.borrow_mut();
-
-                let txn = if let Ok(txn) = Transaction::new(&app.ndb) {
-                    txn
-                } else {
-                    ui.label("can't get transaction");
-                    return None;
-                };
-
-                let profile =
-                    if let Ok(profile) = app.ndb.get_profile_by_pubkey(&txn, pubkey.bytes()) {
-                        profile
-                    } else {
-                        ui.label("unknown profile for pubkey");
-                        return None;
-                    };
-
-                ProfileView::new(
-                    app,
-                    &Keypair::new(*pubkey, None),
-                    &profile,
-                    &mut app_ctx.borrow_mut().img_cache,
-                )
-                .ui(ui);
+                debug!("routing to profile view for: {}", pubkey);
+                let mut app = app_ctx.borrow_mut();
+                ProfileView::new(&mut app, &Keypair::new(*pubkey, None)).ui(ui);
                 None
             }
         });
