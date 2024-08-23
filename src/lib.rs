@@ -23,6 +23,8 @@ mod note;
 mod notecache;
 mod post;
 mod profile;
+mod profile_state;
+mod profiles;
 pub mod relay_pool_manager;
 mod result;
 mod route;

@@ -7,7 +7,8 @@ use crate::{Damus, Result};
 use crate::route::Route;
 
 use egui_virtual_list::VirtualList;
-use nostrdb::{Filter, Note, Subscription, Transaction};
+use enostr::{Filter, Pubkey};
+use nostrdb::{Note, Subscription, Transaction};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -18,6 +19,7 @@ use tracing::{debug, error};
 pub enum TimelineSource<'a> {
     Column { ind: usize },
     Thread(&'a [u8; 32]),
+    Profile(Pubkey),
 }
 
 impl<'a> TimelineSource<'a> {
@@ -44,6 +46,10 @@ impl<'a> TimelineSource<'a> {
 
                 &mut thread.view
             }
+            TimelineSource::Profile(pubkey) => {
+                let profile = app.profiles.get_profile_state_mut(&pubkey).unwrap();
+                profile.timeline.view_mut(filter)
+            }
         }
     }
 
@@ -60,6 +66,10 @@ impl<'a> TimelineSource<'a> {
                 };
 
                 thread.subscription()
+            }
+            TimelineSource::Profile(pubkey) => {
+                let profile = app.profiles.get_profile_state_mut(&pubkey).unwrap();
+                profile.timeline.subscription.as_ref()
             }
         }
     }

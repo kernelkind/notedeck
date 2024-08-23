@@ -5,7 +5,7 @@ use nostr::bech32::Hrp;
 use std::fmt;
 use tracing::debug;
 
-#[derive(Debug, Eq, PartialEq, Clone, Hash)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash, Copy)]
 pub struct Pubkey([u8; 32]);
 
 static HRP_NPUB: Hrp = Hrp::parse_unchecked("npub");

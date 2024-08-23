@@ -1,3 +1,4 @@
+use crate::timeline::Timeline;
 use crate::{actionbar::BarResult, draft::DraftSource, ui, ui::note::PostAction, Damus};
 use egui::containers::scroll_area::ScrollBarVisibility;
 use egui::{Direction, Layout};
@@ -22,7 +23,14 @@ impl<'a> TimelineView<'a> {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        timeline_ui(ui, self.app, self.timeline, self.reverse);
+        timeline_ui(
+            ui,
+            self.app,
+            self.reverse,
+            |app| &app.timelines[self.timeline],
+            |app| &mut app.timelines[self.timeline],
+            |_| self.timeline,
+        );
     }
 
     pub fn reversed(mut self) -> Self {
@@ -31,30 +39,38 @@ impl<'a> TimelineView<'a> {
     }
 }
 
-fn timeline_ui(ui: &mut egui::Ui, app: &mut Damus, timeline: usize, reversed: bool) {
+pub fn timeline_ui(
+    ui: &mut egui::Ui,
+    app: &mut Damus,
+    reversed: bool,
+    get_timeline: impl Fn(&Damus) -> &Timeline,
+    mut get_timeline_mut: impl FnMut(&mut Damus) -> &mut Timeline,
+    get_timeline_identifier: impl Fn(&Damus) -> usize,
+) {
     //padding(4.0, ui, |ui| ui.heading("Notifications"));
     /*
     let font_id = egui::TextStyle::Body.resolve(ui.style());
     let row_height = ui.fonts(|f| f.row_height(&font_id)) + ui.spacing().item_spacing.y;
     */
+    let timeline_id = get_timeline_identifier(app);
 
-    if timeline == 0 {
+    if timeline_id == 0 {
         postbox_view(app, ui);
     }
 
-    app.timelines[timeline].selected_view = tabs_ui(ui);
+    get_timeline_mut(app).selected_view = tabs_ui(ui);
 
     // need this for some reason??
     ui.add_space(3.0);
 
-    let scroll_id = egui::Id::new(("tlscroll", app.timelines[timeline].selected_view, timeline));
+    let scroll_id = egui::Id::new(("tlscroll", get_timeline(app).selected_view, timeline_id));
     egui::ScrollArea::vertical()
         .id_source(scroll_id)
         .animated(false)
         .auto_shrink([false, false])
         .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
         .show(ui, |ui| {
-            let view = app.timelines[timeline].current_view();
+            let view = get_timeline(app).current_view();
             let len = view.notes.len();
             let mut bar_result: Option<BarResult> = None;
             let txn = if let Ok(txn) = Transaction::new(&app.ndb) {
@@ -77,7 +93,7 @@ fn timeline_ui(ui: &mut egui::Ui, app: &mut Damus, timeline: usize, reversed: bo
                         start_index
                     };
 
-                    let note_key = app.timelines[timeline].current_view().notes[ind].key;
+                    let note_key = get_timeline(app).current_view().notes[ind].key;
 
                     let note = if let Ok(note) = app.ndb.get_note_by_key(&txn, note_key) {
                         note
@@ -94,7 +110,7 @@ fn timeline_ui(ui: &mut egui::Ui, app: &mut Damus, timeline: usize, reversed: bo
                             .show(ui);
 
                         if let Some(action) = resp.action {
-                            let br = action.execute(app, timeline, note.id(), &txn);
+                            let br = action.execute(app, timeline_id, note.id(), &txn);
                             if br.is_some() {
                                 bar_result = br;
                             }
@@ -163,7 +179,7 @@ fn postbox_view(app: &mut Damus, ui: &mut egui::Ui) {
     }
 }
 
-fn tabs_ui(ui: &mut egui::Ui) -> i32 {
+pub fn tabs_ui(ui: &mut egui::Ui) -> i32 {
     ui.spacing_mut().item_spacing.y = 0.0;
 
     let tab_res = egui_tabs::Tabs::new(2)

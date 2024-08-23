@@ -1,9 +1,9 @@
 use egui::{Align, Button, Layout};
 use egui_extras::Size;
-use enostr::{FullKeypair, Keypair};
+use enostr::Keypair;
 use nostrdb::ProfileRecord;
 
-use crate::{colors::PURPLE, images, imgcache::ImageCache};
+use crate::{colors::PURPLE, imgcache::ImageCache, ui::timeline::timeline_ui, Damus};
 
 use super::{
     about_section_widget, banner, display_name_widget, get_display_name, get_nip5, get_profile_url,
@@ -15,20 +15,25 @@ pub struct ProfileView<'a, 'cache> {
     profile: &'a ProfileRecord<'a>,
     cache: &'cache mut ImageCache,
     banner_height: Size,
+    app: &'a mut Damus,
 }
 
 impl<'a, 'cache> ProfileView<'a, 'cache> {
     pub fn new(
+        app: &'a mut Damus,
         user_key: &'a Keypair,
         profile: &'a ProfileRecord<'a>,
         cache: &'cache mut ImageCache,
     ) -> Self {
         let banner_height = Size::exact(80.0);
+        app.profiles
+            .create_profile_state_if_nonexistent(&user_key.pubkey);
         ProfileView {
             profile,
             cache,
             banner_height,
             user_key,
+            app,
         }
     }
 
@@ -82,6 +87,28 @@ impl<'a, 'cache> ProfileView<'a, 'cache> {
                         }
                     }
                 });
+
+                ui.add_space(8.0);
+
+                timeline_ui(
+                    ui,
+                    self.app,
+                    false,
+                    |app| {
+                        &app.profiles
+                            .get_profile_state(&self.user_key.pubkey)
+                            .unwrap()
+                            .timeline
+                    },
+                    |app| {
+                        &mut app
+                            .profiles
+                            .get_profile_state_mut(&self.user_key.pubkey)
+                            .unwrap()
+                            .timeline
+                    },
+                    |_| 0,
+                );
             });
         })
         .response
@@ -97,36 +124,65 @@ fn get_lud16<'a>(profile: Option<&'a ProfileRecord>) -> Option<&'a str> {
 }
 
 mod previews {
+    use enostr::Pubkey;
+
     use crate::{
-        test_data::test_profile_record,
+        app::update_damus,
+        test_data::{self, test_profile_record},
         ui::{Preview, PreviewConfig, View},
     };
 
     use super::*;
 
     pub struct ProfileViewPreview<'a> {
+        app: Damus,
         profile: ProfileRecord<'a>,
         cache: ImageCache,
+        first: bool,
+        wills_key: Keypair,
     }
 
     impl<'a> ProfileViewPreview<'a> {
-        pub fn new() -> Self {
+        pub fn new(is_mobile: bool) -> Self {
             let profile = test_profile_record();
             let cache = ImageCache::new(ImageCache::rel_datadir().into());
-            ProfileViewPreview { profile, cache }
+            let app = test_data::test_app(is_mobile);
+            let wills_key = Keypair::new(
+                Pubkey::from_hex(
+                    "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245",
+                )
+                .ok()
+                .unwrap(),
+                None,
+            );
+            ProfileViewPreview {
+                app,
+                profile,
+                cache,
+                wills_key,
+                first: true,
+            }
         }
     }
 
     impl<'a> Default for ProfileViewPreview<'a> {
         fn default() -> Self {
-            ProfileViewPreview::new()
+            ProfileViewPreview::new(false)
         }
     }
 
     impl<'a> View for ProfileViewPreview<'a> {
         fn ui(&mut self, ui: &mut egui::Ui) {
+            if self.first {
+                self.first = false;
+                self.app
+                    .profiles
+                    .create_profile_state_if_nonexistent(&self.wills_key.pubkey);
+            }
+            update_damus(&mut self.app, ui.ctx());
             ProfileView::new(
-                &FullKeypair::generate().to_keypair(),
+                &mut self.app,
+                &self.wills_key,
                 &self.profile,
                 &mut self.cache,
             )
@@ -138,8 +194,8 @@ mod previews {
         /// A preview of the profile preview :D
         type Prev = ProfileViewPreview<'a>;
 
-        fn preview(_cfg: PreviewConfig) -> Self::Prev {
-            ProfileViewPreview::new()
+        fn preview(cfg: PreviewConfig) -> Self::Prev {
+            ProfileViewPreview::new(cfg.is_mobile)
         }
     }
 }

@@ -8,6 +8,7 @@ use crate::imgcache::ImageCache;
 use crate::key_storage::KeyStorageType;
 use crate::note::NoteRef;
 use crate::notecache::{CachedNote, NoteCache};
+use crate::profiles::Profiles;
 use crate::relay_pool_manager::RelayPoolManager;
 use crate::route::Route;
 use crate::thread::{DecrementResult, Threads};
@@ -16,8 +17,9 @@ use crate::ui::note::PostAction;
 use crate::ui::{self, AccountSelectionWidget, DesktopGlobalPopup};
 use crate::ui::{DesktopSidePanel, RelayView, View};
 use crate::Result;
+use egui::ahash::HashMapExt;
 use egui_nav::{Nav, NavAction};
-use enostr::{ClientMessage, Keypair, RelayEvent, RelayMessage, RelayPool, SecretKey};
+use enostr::{ClientMessage, Keypair, Pubkey, RelayEvent, RelayMessage, RelayPool, SecretKey};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -51,6 +53,7 @@ pub struct Damus {
     pub textmode: bool,
 
     pub timelines: Vec<Timeline>,
+    pub profiles: Profiles,
     pub selected_timeline: i32,
 
     pub ndb: Ndb,
@@ -97,10 +100,19 @@ fn send_initial_filters(damus: &mut Damus, relay_url: &str) {
     info!("Sending initial filters to {}", relay_url);
     let mut c: u32 = 1;
 
+    let mut combined_timelines = Vec::new();
+    combined_timelines.extend(damus.timelines.iter());
+    combined_timelines.extend(
+        damus
+            .profiles
+            .get_iterator()
+            .map(|(_, state)| &state.timeline),
+    );
+
     for relay in &mut damus.pool.relays {
         let relay = &mut relay.relay;
         if relay.url == relay_url {
-            for timeline in &damus.timelines {
+            for timeline in &combined_timelines {
                 let filter = timeline.filter.clone();
                 let new_filters = filter.into_iter().map(|f| {
                     // limit the size of remote filters
@@ -213,6 +225,18 @@ fn try_process_event(damus: &mut Damus, ctx: &egui::Context) -> Result<()> {
     let mut unknown_ids: HashSet<UnknownId> = HashSet::new();
     for timeline in 0..damus.timelines.len() {
         let src = TimelineSource::column(timeline);
+        if let Err(err) = src.poll_notes_into_view(damus, &txn, &mut unknown_ids) {
+            error!("{}", err);
+        }
+    }
+
+    let profile_pubkeys = damus
+        .profiles
+        .get_pubkeys()
+        .cloned()
+        .collect::<Vec<Pubkey>>();
+    for key in profile_pubkeys {
+        let src = TimelineSource::Profile(key);
         if let Err(err) = src.poll_notes_into_view(damus, &txn, &mut unknown_ids) {
             error!("{}", err);
         }
@@ -350,50 +374,67 @@ fn setup_profiling() {
 fn setup_initial_nostrdb_subs(damus: &mut Damus) -> Result<()> {
     let timelines = damus.timelines.len();
     for i in 0..timelines {
-        let filters = damus.timelines[i].filter.clone();
-        damus.timelines[i].subscription = Some(damus.ndb.subscribe(filters.clone())?);
-        let txn = Transaction::new(&damus.ndb)?;
-        debug!(
-            "querying nostrdb sub {} {:?}",
-            damus.timelines[i].subscription.as_ref().unwrap().id,
-            damus.timelines[i].filter
-        );
-        let results = damus.ndb.query(
-            &txn,
-            filters,
-            damus.timelines[i].filter[0]
-                .limit()
-                .unwrap_or(crate::filter::default_limit()) as i32,
+        setup_init_subs_tmp(damus, |app| &app.timelines[i], |app| &mut app.timelines[i])?;
+    }
+
+    for i in 0..damus.profiles.num_profiles() {
+        setup_init_subs_tmp(
+            damus,
+            |app| &app.profiles.get_profile_at_index(i).unwrap().1.timeline,
+            |app| &mut app.profiles.get_profile_at_index_mut(i).unwrap().1.timeline,
         )?;
-
-        let filters = {
-            let views = &damus.timelines[i].views;
-            let filters: Vec<fn(&CachedNote, &Note) -> bool> =
-                views.iter().map(|v| v.filter.filter()).collect();
-            filters
-        };
-
-        for result in results {
-            for (j, filter) in filters.iter().enumerate() {
-                if filter(
-                    damus
-                        .note_cache_mut()
-                        .cached_note_or_insert_mut(result.note_key, &result.note),
-                    &result.note,
-                ) {
-                    damus.timelines[i].views[j].notes.push(NoteRef {
-                        key: result.note_key,
-                        created_at: result.note.created_at(),
-                    })
-                }
-            }
-        }
     }
 
     Ok(())
 }
 
-fn update_damus(damus: &mut Damus, ctx: &egui::Context) {
+fn setup_init_subs_tmp(
+    damus: &mut Damus,
+    get_timeline: impl Fn(&Damus) -> &Timeline,
+    mut get_timeline_mut: impl FnMut(&mut Damus) -> &mut Timeline,
+) -> Result<()> {
+    let filters = get_timeline(damus).filter.clone();
+    get_timeline_mut(damus).subscription = Some(damus.ndb.subscribe(filters.clone())?);
+    let txn = Transaction::new(&damus.ndb)?;
+    debug!(
+        "querying nostrdb sub {} {:?}",
+        get_timeline(damus).subscription.as_ref().unwrap().id,
+        get_timeline(damus).filter
+    );
+    let results = damus.ndb.query(
+        &txn,
+        filters,
+        get_timeline(damus).filter[0]
+            .limit()
+            .unwrap_or(crate::filter::default_limit()) as i32,
+    )?;
+
+    let filters = {
+        let views = &get_timeline(damus).views;
+        let filters: Vec<fn(&CachedNote, &Note) -> bool> =
+            views.iter().map(|v| v.filter.filter()).collect();
+        filters
+    };
+
+    for result in results {
+        for (j, filter) in filters.iter().enumerate() {
+            if filter(
+                damus
+                    .note_cache_mut()
+                    .cached_note_or_insert_mut(result.note_key, &result.note),
+                &result.note,
+            ) {
+                get_timeline_mut(damus).views[j].notes.push(NoteRef {
+                    key: result.note_key,
+                    created_at: result.note.created_at(),
+                })
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn update_damus(damus: &mut Damus, ctx: &egui::Context) {
     if damus.state == DamusState::Initializing {
         #[cfg(feature = "profiling")]
         setup_profiling();
@@ -730,6 +771,7 @@ impl Damus {
             state: DamusState::Initializing,
             img_cache: ImageCache::new(imgcache_dir),
             note_cache: NoteCache::default(),
+            profiles: Profiles::new(),
             selected_timeline: 0,
             timelines: parsed_args.timelines,
             textmode: false,
@@ -761,6 +803,7 @@ impl Damus {
             pool: RelayPool::new(),
             img_cache: ImageCache::new(imgcache_dir),
             note_cache: NoteCache::default(),
+            profiles: Profiles::new(),
             selected_timeline: 0,
             timelines,
             textmode: false,
