@@ -22,6 +22,7 @@ mod key_storage;
 pub mod login_manager;
 mod macos_key_storage;
 mod note;
+mod note_stream;
 mod notecache;
 mod post;
 mod profile;

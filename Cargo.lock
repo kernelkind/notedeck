@@ -1189,7 +1189,7 @@ dependencies = [
  "ewebsock",
  "hex",
  "nostr",
- "nostrdb",
+ "nostrdb 0.3.4 (git+https://github.com/damus-io/nostrdb-rs?rev=6d22af6d5159be4c9e4579f8c9d3af836e0d470a)",
  "serde",
  "serde_derive",
  "serde_json",
@@ -2439,6 +2439,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nostrdb"
+version = "0.3.4"
+source = "git+https://github.com/kernelkind/nostrdb-rs#3697155699ea95cc44c7c50d83e892bec9f9a8dc"
+dependencies = [
+ "bindgen",
+ "cc",
+ "flatbuffers",
+ "libc",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "notedeck"
 version = "0.1.0"
 dependencies = [
@@ -2459,7 +2473,7 @@ dependencies = [
  "hex",
  "image",
  "log",
- "nostrdb",
+ "nostrdb 0.3.4 (git+https://github.com/kernelkind/nostrdb-rs)",
  "poll-promise",
  "puffin",
  "puffin_egui",
