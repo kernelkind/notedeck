@@ -7,6 +7,9 @@ use crate::frame_history::FrameHistory;
 use crate::imgcache::ImageCache;
 use crate::key_storage::KeyStorageType;
 use crate::note::NoteRef;
+use crate::note_stream::note_stream_impl::process_note_streams;
+use crate::note_stream::note_stream_interactor::NoteStreamInteractor;
+use crate::note_stream::note_stream_manager::NoteStreamManager;
 use crate::notecache::{CachedNote, NoteCache};
 use crate::relay_pool_manager::RelayPoolManager;
 use crate::route::Route;
@@ -62,6 +65,8 @@ pub struct Damus {
     frame_history: crate::frame_history::FrameHistory,
     pub show_account_switcher: bool,
     pub show_global_popup: bool,
+    pub note_stream_manager: NoteStreamManager,
+    pub note_stream_interactor: NoteStreamInteractor,
 }
 
 fn relay_setup(pool: &mut RelayPool, ctx: &egui::Context) {
@@ -401,6 +406,7 @@ fn update_damus(damus: &mut Damus, ctx: &egui::Context) {
         damus.state = DamusState::Initialized;
         setup_initial_nostrdb_subs(damus).expect("home subscription failed");
     }
+    process_note_streams(damus);
 
     if let Err(err) = try_process_event(damus, ctx) {
         error!("error processing event: {}", err);
@@ -740,6 +746,8 @@ impl Damus {
             show_account_switcher: false,
             show_global_popup: false,
             global_nav: Vec::new(),
+            note_stream_manager: NoteStreamManager::default(),
+            note_stream_interactor: NoteStreamInteractor::default(),
         }
     }
 
@@ -770,6 +778,8 @@ impl Damus {
             show_account_switcher: false,
             show_global_popup: true,
             global_nav: Vec::new(),
+            note_stream_manager: NoteStreamManager::default(),
+            note_stream_interactor: NoteStreamInteractor::default(),
         }
     }
 
