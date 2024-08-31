@@ -872,65 +872,6 @@ fn render_panel(ctx: &egui::Context, app: &mut Damus, timeline_ind: usize) {
     });
 }
 
-/// Local thread unsubscribe
-fn thread_unsubscribe(app: &mut Damus, id: &[u8; 32]) {
-    let (unsubscribe, remote_subid) = {
-        let txn = Transaction::new(&app.ndb).expect("txn");
-        let root_id = crate::note::root_note_id_from_selected_id(app, &txn, id);
-
-        let thread = app.threads.thread_mut(&app.ndb, &txn, root_id).get_ptr();
-        let unsub = thread.decrement_sub();
-
-        let mut remote_subid: Option<String> = None;
-        if let Ok(DecrementResult::LastSubscriber(_subid)) = unsub {
-            *thread.subscription_mut() = None;
-            remote_subid = thread.remote_subscription().to_owned();
-            *thread.remote_subscription_mut() = None;
-        }
-
-        (unsub, remote_subid)
-    };
-
-    match unsubscribe {
-        Ok(DecrementResult::LastSubscriber(sub)) => {
-            if let Err(e) = app.ndb.unsubscribe(sub) {
-                error!(
-                    "failed to unsubscribe from thread: {e}, subid:{}, {} active subscriptions",
-                    sub.id(),
-                    app.ndb.subscription_count()
-                );
-            } else {
-                info!(
-                    "Unsubscribed from thread subid:{}. {} active subscriptions",
-                    sub.id(),
-                    app.ndb.subscription_count()
-                );
-            }
-
-            // unsub from remote
-            if let Some(subid) = remote_subid {
-                app.pool.unsubscribe(subid);
-            }
-        }
-
-        Ok(DecrementResult::ActiveSubscribers) => {
-            info!(
-                "Keeping thread subscription. {} active subscriptions.",
-                app.ndb.subscription_count()
-            );
-            // do nothing
-        }
-
-        Err(e) => {
-            // something is wrong!
-            error!(
-                "Thread unsubscribe error: {e}. {} active subsciptions.",
-                app.ndb.subscription_count()
-            );
-        }
-    }
-}
-
 fn render_nav(routes: Vec<Route>, timeline_ind: usize, app: &mut Damus, ui: &mut egui::Ui) {
     let navigating = app.timelines[timeline_ind].navigating;
     let returning = app.timelines[timeline_ind].returning;
@@ -1013,7 +954,19 @@ fn render_nav(routes: Vec<Route>, timeline_ind: usize, app: &mut Damus, ui: &mut
     if let Some(NavAction::Returned) = nav_response.action {
         let popped = app.timelines[timeline_ind].routes.pop();
         if let Some(Route::Thread(id)) = popped {
-            thread_unsubscribe(&mut app, id.bytes());
+            let note_stream_id = if let Some(thread) = app.threads.get_thread(id.bytes()) {
+                Some(thread.note_stream_id.clone())
+            } else {
+                None
+            };
+
+            if let Some(note_stream_id) = note_stream_id {
+                app.note_stream_interactor.pause_searching(&note_stream_id);
+                info!(
+                    "pausing search for thread {:?} with noteStreamInstanceId: {:?}",
+                    id, note_stream_id
+                );
+            }
         }
         app.timelines[timeline_ind].returning = false;
     } else if let Some(NavAction::Navigated) = nav_response.action {

@@ -113,11 +113,10 @@ fn timeline_ui(ui: &mut egui::Ui, app: &mut Damus, timeline: usize, reversed: bo
                 match br {
                     // update the thread for next render if we have new notes
                     BarResult::NewThreadNotes(new_notes) => {
-                        let thread = app
-                            .threads
-                            .thread_mut(&app.ndb, &txn, new_notes.root_id.bytes())
-                            .get_ptr();
-                        new_notes.process(thread);
+                        if let Some(thread) = app.threads.get_thread_mut(new_notes.root_id.bytes())
+                        {
+                            new_notes.process(thread);
+                        }
                     }
                 }
             }
