@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::{note::NoteRef, Damus};
 
 use super::{
+    misc::NoteStreamInstanceState,
     note_stream_interactor::{NoteStreamCommand, NoteStreamInteractor},
     note_stream_manager::NoteStreamManager,
 };
@@ -52,7 +53,13 @@ fn process_new_note_queries(
             let last_seen = last_note.created_at;
             note_stream_manager.update_last_seen(&id, last_seen);
         }
-        note_stream_interactor.cache.insert(id, notes);
+        note_stream_interactor.cache.insert(id.clone(), notes);
+
+        if let Some(instance) = note_stream_manager.get_note_stream_instance_mut(&id) {
+            if *instance.get_status() == NoteStreamInstanceState::Reactivating {
+                instance.set_status(NoteStreamInstanceState::Active);
+            }
+        }
     }
 }
 
