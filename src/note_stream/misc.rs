@@ -52,7 +52,7 @@ impl HashableFilter {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum NoteStreamInstanceState {
     Active,
     Inactive,
@@ -117,8 +117,15 @@ impl NoteStream {
         self.instances.remove(instance);
     }
 
-    pub fn get_instance(&self, instance: &NoteStreamInstanceId) -> Option<&NoteStreamInstance> {
-        self.instances.get(instance)
+    pub fn get_instance(&self, id: &NoteStreamInstanceId) -> Option<&NoteStreamInstance> {
+        self.instances.get(id)
+    }
+
+    pub fn get_instance_mut(
+        &mut self,
+        id: &NoteStreamInstanceId,
+    ) -> Option<&mut NoteStreamInstance> {
+        self.instances.get_mut(id)
     }
 
     pub fn get_instances(&self) -> &HashMap<NoteStreamInstanceId, NoteStreamInstance> {
@@ -179,6 +186,10 @@ impl NoteStreamInstance {
 
     pub fn get_status(&self) -> &NoteStreamInstanceState {
         &self.status
+    }
+
+    pub fn set_status(&mut self, status: NoteStreamInstanceState) {
+        self.status = status;
     }
 }
 

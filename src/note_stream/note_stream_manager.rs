@@ -28,7 +28,7 @@ impl NoteStreamManager {
     pub(crate) fn take_ndb_subscription_deletions(&mut self) -> Vec<SubscriptionId> {
         let mut deletions = Vec::new();
         for (_, stream) in self.hash_to_stream.iter_mut() {
-            if !stream.is_active() {
+            if !stream.is_active() && stream.has_subscription() {
                 if let Some(sub_id) = stream.unsubscribe() {
                     deletions.push(sub_id);
                 }
@@ -50,7 +50,7 @@ impl NoteStreamManager {
             .iter()
             .filter_map(|(_hash, stream)| {
                 if stream.is_active() {
-                    let filters = stream.get_filter_id().as_vec();
+                    let stream_filters = stream.get_filter_id().as_vec();
                     Some(
                         stream
                             .get_instances()
@@ -58,16 +58,16 @@ impl NoteStreamManager {
                             .filter_map(|(id, instance)| match instance.get_status() {
                                 NoteStreamInstanceState::Reactivating => {
                                     if let Some(last_seen) = instance.get_last_seen() {
-                                        let mut cur_filters = filters.clone();
-                                        cur_filters
+                                        let mut reactivating_filters = stream_filters.clone();
+                                        reactivating_filters
                                             .push(FilterBuilder::new().since(last_seen).build());
-                                        Some((id.clone(), cur_filters))
+                                        Some((id.clone(), reactivating_filters))
                                     } else {
                                         None
                                     }
                                 }
                                 NoteStreamInstanceState::Active => {
-                                    Some((id.clone(), filters.clone()))
+                                    Some((id.clone(), stream_filters.clone()))
                                 }
                                 NoteStreamInstanceState::Inactive => None,
                             })
@@ -125,5 +125,17 @@ impl NoteStreamManager {
                 });
             }
         }
+    }
+
+    pub(crate) fn get_note_stream_instance_mut(
+        &mut self,
+        id: &NoteStreamInstanceId,
+    ) -> Option<&mut NoteStreamInstance> {
+        if let Some(filter_hash) = self.id_to_filter_hash.get(id) {
+            if let Some(stream) = self.hash_to_stream.get_mut(filter_hash) {
+                return stream.get_instance_mut(id);
+            }
+        }
+        None
     }
 }
