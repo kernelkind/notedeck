@@ -18,9 +18,9 @@ fn process_new_subscriptions(
     for filters in note_stream_manager.find_new_ndb_subscriptions() {
         let sub = ndb.subscribe(filters.clone());
         let subid = Uuid::new_v4().to_string();
-        pool.subscribe(subid.clone(), filters);
+        pool.subscribe(subid.clone(), filters.clone());
         if let Ok(sub) = sub {
-            note_stream_manager.save_subscription(sub, subid);
+            note_stream_manager.save_subscription(filters, sub, subid);
         }
     }
 }

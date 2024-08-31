@@ -7,7 +7,7 @@ use std::{
 
 use enostr::Filter;
 
-#[derive(Hash, Eq, PartialEq, Clone)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct NoteStreamInstanceId {
     id: u64,
 }

@@ -1,4 +1,4 @@
-use crate::{actionbar::BarResult, timeline::TimelineSource, ui, Damus};
+use crate::{actionbar::BarResult, thread::ThreadResult, timeline::TimelineSource, ui, Damus};
 use nostrdb::{NoteKey, Transaction};
 use std::collections::HashSet;
 use tracing::warn;
@@ -71,23 +71,38 @@ impl<'a> ThreadView<'a> {
                         .map_or_else(|| self.selected_note_id, |nr| nr.id)
                 };
 
-                // poll for new notes and insert them into our existing notes
+                // TODO: what is the purpose of this?
+                // // poll for new notes and insert them into our existing notes
+                // {
+                //     let mut ids = HashSet::new();
+                //     let _ = TimelineSource::Thread(root_id)
+                //         .poll_notes_into_view(self.app, &txn, &mut ids);
+                //     // TODO: do something with unknown ids
+                // }
+
+                let thread = match self
+                    .app
+                    .threads
+                    .thread_mut(&root_id, &mut self.app.note_stream_interactor)
                 {
-                    let mut ids = HashSet::new();
-                    let _ = TimelineSource::Thread(root_id)
-                        .poll_notes_into_view(self.app, &txn, &mut ids);
-                    // TODO: do something with unknown ids
+                    ThreadResult::Fresh(thread) => thread,
+                    ThreadResult::Stale(thread) => thread,
+                };
+                if let Some(notes) = self
+                    .app
+                    .note_stream_interactor
+                    .take_unseen(&thread.note_stream_id)
+                {
+                    thread.view.insert(notes.as_ref(), true);
                 }
 
                 let (len, list) = {
-                    let thread = self
-                        .app
-                        .threads
-                        .thread_mut(&self.app.ndb, &txn, root_id)
-                        .get_ptr();
-
-                    let len = thread.view.notes.len();
-                    (len, &mut thread.view.list)
+                    if let Some(thread) = self.app.threads.get_thread_mut(&root_id) {
+                        let len = thread.view.notes.len();
+                        (len, &mut thread.view.list)
+                    } else {
+                        return;
+                    }
                 };
 
                 list.clone()
@@ -98,12 +113,12 @@ impl<'a> ThreadView<'a> {
 
                         let ind = len - 1 - start_index;
                         let note_key = {
-                            let thread = self
-                                .app
-                                .threads
-                                .thread_mut(&self.app.ndb, &txn, root_id)
-                                .get_ptr();
-                            thread.view.notes[ind].key
+                            if let Some(thread) = self.app.threads.get_thread_mut(&root_id) {
+                                thread.view.notes[ind].key
+                            } else {
+                                warn!("failed to get note key");
+                                return 0;
+                            }
                         };
 
                         let note = if let Ok(note) = self.app.ndb.get_note_by_key(&txn, note_key) {

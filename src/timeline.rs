@@ -36,11 +36,10 @@ impl<'a> TimelineSource<'a> {
             TimelineSource::Thread(root_id) => {
                 // TODO: replace all this with the raw entry api eventually
 
-                let thread = if app.threads.root_id_to_thread.contains_key(root_id) {
-                    app.threads.thread_expected_mut(root_id)
-                } else {
-                    app.threads.thread_mut(&app.ndb, txn, root_id).get_ptr()
-                };
+                let thread = app
+                    .threads
+                    .thread_mut(root_id, &mut app.note_stream_interactor)
+                    .get_ptr();
 
                 &mut thread.view
             }
@@ -52,14 +51,7 @@ impl<'a> TimelineSource<'a> {
             TimelineSource::Column { ind, .. } => app.timelines[ind].subscription.as_ref(),
             TimelineSource::Thread(root_id) => {
                 // TODO: replace all this with the raw entry api eventually
-
-                let thread = if app.threads.root_id_to_thread.contains_key(root_id) {
-                    app.threads.thread_expected_mut(root_id)
-                } else {
-                    app.threads.thread_mut(&app.ndb, txn, root_id).get_ptr()
-                };
-
-                thread.subscription()
+                None
             }
         }
     }
