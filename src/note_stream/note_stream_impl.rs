@@ -7,9 +7,9 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::{
-    app::{get_unknown_ids_filter, get_unknown_note_ids, UnknownId},
     note::NoteRef,
     notecache::NoteCache,
+    unknowns::{get_unknown_note_ids, UnknownIds},
     Damus,
 };
 
@@ -56,24 +56,11 @@ fn process_new_note_queries(app: &mut Damus) {
             } else {
                 return;
             };
-        let unknown_ids_filter = process_new_note_query(app, &id, cur_sub);
-
-        if let Some(filters) = unknown_ids_filter {
-            send_unknown_ids_filter(&mut app.pool, filters);
-        }
+        process_new_note_query(app, &id, cur_sub);
     }
 }
 
-fn send_unknown_ids_filter(pool: &mut RelayPool, filters: Vec<Filter>) {
-    let msg = ClientMessage::req("unknown_ids".to_string(), filters);
-    pool.send(&msg);
-}
-
-fn process_new_note_query(
-    app: &mut Damus,
-    id: &NoteStreamInstanceId,
-    subscription: Subscription,
-) -> Option<Vec<Filter>> {
+fn process_new_note_query(app: &mut Damus, id: &NoteStreamInstanceId, subscription: Subscription) {
     let new_note_ids = app.ndb.poll_for_notes(subscription, 100);
     if !new_note_ids.is_empty() {
         info!(
@@ -85,8 +72,6 @@ fn process_new_note_query(
     }
 
     let mut notes: Vec<NoteRef> = Vec::with_capacity(new_note_ids.len());
-    let mut unknown_ids: HashSet<UnknownId> = HashSet::new();
-
     let txn = Transaction::new(&app.ndb).expect("txn");
     for key in new_note_ids {
         let note = if let Ok(note) = app.ndb.get_note_by_key(&txn, key) {
@@ -96,17 +81,11 @@ fn process_new_note_query(
             continue;
         };
 
-        let cached_note = app
-            .note_cache_mut()
-            .cached_note_or_insert(key, &note)
-            .clone();
-        let _ = get_unknown_note_ids(&app.ndb, &cached_note, &txn, &note, key, &mut unknown_ids);
+        UnknownIds::update_from_note(&txn, app, &note);
 
         let created_at = note.created_at();
         notes.push(NoteRef { key, created_at });
     }
-    let unknown_ids: Vec<UnknownId> = unknown_ids.into_iter().collect();
-    let unknown_ids_filter = get_unknown_ids_filter(&unknown_ids);
 
     if let Some(last_note) = notes.last() {
         // TODO: is this the right way to get the last note?
@@ -120,8 +99,6 @@ fn process_new_note_query(
             instance.set_status(NoteStreamInstanceState::Active);
         }
     }
-
-    unknown_ids_filter
 }
 
 fn process_interactor_commands(

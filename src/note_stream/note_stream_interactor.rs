@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use enostr::Filter;
+use nostrdb::Filter;
 
 use crate::note::NoteRef;
 
@@ -18,7 +18,7 @@ impl NoteStreamInteractor {
         let id = NoteStreamInstanceId::default();
         self.commands.push(NoteStreamCommand::NewStreamInstance(
             id.clone(),
-            HashableFilter::new(filters.into_iter().collect()),
+            HashableFilter::new(filters),
         ));
         id
     }

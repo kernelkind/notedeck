@@ -18,7 +18,7 @@ use crate::notecache::{CachedNote, NoteCache};
 use crate::relay_pool_manager::RelayPoolManager;
 use crate::route::Route;
 use crate::subscriptions::{SubKind, Subscriptions};
-use crate::thread::{DecrementResult, Threads};
+use crate::thread::Threads;
 use crate::timeline::{Timeline, TimelineSource, ViewFilter};
 use crate::ui::note::PostAction;
 use crate::ui::{self, AccountSelectionWidget, DesktopGlobalPopup};
