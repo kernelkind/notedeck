@@ -954,11 +954,12 @@ fn render_nav(routes: Vec<Route>, timeline_ind: usize, app: &mut Damus, ui: &mut
     if let Some(NavAction::Returned) = nav_response.action {
         let popped = app.timelines[timeline_ind].routes.pop();
         if let Some(Route::Thread(id)) = popped {
-            let note_stream_id = if let Some(thread) = app.threads.get_thread(id.bytes()) {
-                Some(thread.note_stream_id.clone())
-            } else {
-                None
-            };
+            let txn = Transaction::new(&app.ndb).expect("txn");
+            let root_id = crate::note::root_note_id_from_selected_id(&mut app, &txn, id.bytes());
+            let note_stream_id = app
+                .threads
+                .get_thread(root_id)
+                .map(|thread| thread.note_stream_id.clone());
 
             if let Some(note_stream_id) = note_stream_id {
                 app.note_stream_interactor.pause_searching(&note_stream_id);
@@ -966,6 +967,8 @@ fn render_nav(routes: Vec<Route>, timeline_ind: usize, app: &mut Damus, ui: &mut
                     "pausing search for thread {:?} with noteStreamInstanceId: {:?}",
                     id, note_stream_id
                 );
+            } else {
+                error!("exited from thread, but couldn't find noteStreamInstanceId");
             }
         }
         app.timelines[timeline_ind].returning = false;
