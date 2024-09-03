@@ -273,7 +273,6 @@ fn try_process_event(damus: &mut Damus, ctx: &egui::Context) -> Result<()> {
         let src = TimelineSource::column(timeline);
 
         if let Ok(true) = is_timeline_ready(damus, timeline) {
-            let txn = Transaction::new(&damus.ndb).expect("txn");
             if let Err(err) = src.poll_notes_into_view(&txn, damus) {
                 error!("poll_notes_into_view: {err}");
             }

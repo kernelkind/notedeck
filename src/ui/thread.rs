@@ -74,27 +74,9 @@ impl<'a> ThreadView<'a> {
                 // // poll for new notes and insert them into our existing notes
                 // {
                 //     let mut ids = HashSet::new();
-                //     let _ = TimelineSource::Thread(root_id)
-                //         .poll_notes_into_view(self.app, &txn, &mut ids);
+                let _ = TimelineSource::Thread(root_id).poll_notes_into_view(&txn, &mut self.app);
                 //     // TODO: do something with unknown ids
                 // }
-
-                let thread = match self
-                    .app
-                    .threads
-                    .thread_mut(&root_id, &mut self.app.note_stream_interactor)
-                {
-                    ThreadResult::Fresh(thread) => thread,
-                    ThreadResult::Stale(thread) => thread,
-                };
-                if let Some(notes) = self
-                    .app
-                    .note_stream_interactor
-                    .take_unseen(&thread.note_stream_id)
-                {
-                    // todo, remove this & bring back poll_notes_into_view
-                    thread.view.insert(notes.as_ref(), true);
-                }
 
                 let (len, list) = {
                     if let Some(thread) = self.app.threads.get_thread_mut(&root_id) {

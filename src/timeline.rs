@@ -2,6 +2,7 @@ use crate::column::{ColumnKind, PubkeySource};
 use crate::error::Error;
 use crate::note::NoteRef;
 use crate::notecache::CachedNote;
+use crate::thread::ThreadResult;
 use crate::unknowns::UnknownIds;
 use crate::{filter, filter::FilterState};
 use crate::{Damus, Result};
@@ -62,71 +63,91 @@ impl<'a> TimelineSource<'a> {
     /// Check local subscriptions for new notes and insert them into
     /// timelines (threads, columns)
     pub fn poll_notes_into_view(&self, txn: &Transaction, app: &mut Damus) -> Result<()> {
-        let sub = if let Some(sub) = self.sub(app, txn) {
-            sub
-        } else {
-            return Err(Error::no_active_sub());
-        };
+        match self {
+            TimelineSource::Column { ind: _ } => {
+                let sub = if let Some(sub) = self.sub(app, txn) {
+                    sub
+                } else {
+                    return Err(Error::no_active_sub());
+                };
 
-        let new_note_ids = app.ndb.poll_for_notes(sub, 100);
-        if new_note_ids.is_empty() {
-            return Ok(());
-        } else {
-            debug!("{} new notes! {:?}", new_note_ids.len(), new_note_ids);
-        }
-
-        let mut new_refs: Vec<(Note, NoteRef)> = Vec::with_capacity(new_note_ids.len());
-
-        for key in new_note_ids {
-            let note = if let Ok(note) = app.ndb.get_note_by_key(txn, key) {
-                note
-            } else {
-                error!("hit race condition in poll_notes_into_view: https://github.com/damus-io/nostrdb/issues/35 note {:?} was not added to timeline", key);
-                continue;
-            };
-
-            UnknownIds::update_from_note(txn, app, &note);
-
-            let created_at = note.created_at();
-            new_refs.push((note, NoteRef { key, created_at }));
-        }
-
-        // We're assuming reverse-chronological here (timelines). This
-        // flag ensures we trigger the items_inserted_at_start
-        // optimization in VirtualList. We need this flag because we can
-        // insert notes into chronological order sometimes, and this
-        // optimization doesn't make sense in those situations.
-        let reversed = false;
-
-        // ViewFilter::NotesAndReplies
-        {
-            let refs: Vec<NoteRef> = new_refs.iter().map(|(_note, nr)| *nr).collect();
-
-            let reversed = false;
-            self.view(app, txn, ViewFilter::NotesAndReplies)
-                .insert(&refs, reversed);
-        }
-
-        //
-        // handle the filtered case (ViewFilter::Notes, no replies)
-        //
-        // TODO(jb55): this is mostly just copied from above, let's just use a loop
-        //             I initially tried this but ran into borrow checker issues
-        {
-            let mut filtered_refs = Vec::with_capacity(new_refs.len());
-            for (note, nr) in &new_refs {
-                let cached_note = app.note_cache_mut().cached_note_or_insert(nr.key, note);
-
-                if ViewFilter::filter_notes(cached_note, note) {
-                    filtered_refs.push(*nr);
+                let new_note_ids = app.ndb.poll_for_notes(sub, 100);
+                if new_note_ids.is_empty() {
+                    return Ok(());
+                } else {
+                    debug!("{} new notes! {:?}", new_note_ids.len(), new_note_ids);
                 }
+
+                let mut new_refs: Vec<(Note, NoteRef)> = Vec::with_capacity(new_note_ids.len());
+
+                for key in new_note_ids {
+                    let note = if let Ok(note) = app.ndb.get_note_by_key(txn, key) {
+                        note
+                    } else {
+                        error!("hit race condition in poll_notes_into_view: https://github.com/damus-io/nostrdb/issues/35 note {:?} was not added to timeline", key);
+                        continue;
+                    };
+
+                    UnknownIds::update_from_note(txn, app, &note);
+
+                    let created_at = note.created_at();
+                    new_refs.push((note, NoteRef { key, created_at }));
+                }
+
+                // We're assuming reverse-chronological here (timelines). This
+                // flag ensures we trigger the items_inserted_at_start
+                // optimization in VirtualList. We need this flag because we can
+                // insert notes into chronological order sometimes, and this
+                // optimization doesn't make sense in those situations.
+                let reversed = false;
+
+                // ViewFilter::NotesAndReplies
+                {
+                    let refs: Vec<NoteRef> = new_refs.iter().map(|(_note, nr)| *nr).collect();
+
+                    let reversed = false;
+                    self.view(app, txn, ViewFilter::NotesAndReplies)
+                        .insert(&refs, reversed);
+                }
+
+                //
+                // handle the filtered case (ViewFilter::Notes, no replies)
+                //
+                // TODO(jb55): this is mostly just copied from above, let's just use a loop
+                //             I initially tried this but ran into borrow checker issues
+                {
+                    let mut filtered_refs = Vec::with_capacity(new_refs.len());
+                    for (note, nr) in &new_refs {
+                        let cached_note = app.note_cache_mut().cached_note_or_insert(nr.key, note);
+
+                        if ViewFilter::filter_notes(cached_note, note) {
+                            filtered_refs.push(*nr);
+                        }
+                    }
+
+                    self.view(app, txn, ViewFilter::Notes)
+                        .insert(&filtered_refs, reversed);
+                }
+                Ok(())
             }
-
-            self.view(app, txn, ViewFilter::Notes)
-                .insert(&filtered_refs, reversed);
+            TimelineSource::Thread(root_id) => {
+                let thread = match app
+                    .threads
+                    .thread_mut(&root_id, &mut app.note_stream_interactor)
+                {
+                    ThreadResult::Fresh(thread) => thread,
+                    ThreadResult::Stale(thread) => thread,
+                };
+                if let Some(notes) = app
+                    .note_stream_interactor
+                    .take_unseen(&thread.note_stream_id)
+                {
+                    // todo, remove this & bring back poll_notes_into_view
+                    thread.view.insert(notes.as_ref(), true);
+                }
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 }
 
