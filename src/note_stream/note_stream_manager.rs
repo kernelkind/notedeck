@@ -44,11 +44,9 @@ impl NoteStreamManager {
         remote_sub: String,
     ) {
         let hashable_filter = HashableFilter::new(filters);
-        let new_hashable_filter = HashableFilter::new(subscription.filters);
         let hash_value = hashable_filter.compute_hash();
-        let new_hash_value = new_hashable_filter.compute_hash();
         if let Some(stream) = self.hash_to_stream.get_mut(&hash_value) {
-            stream.add_subscription(SubscriptionId::new(subscription.id, remote_sub));
+            stream.add_subscription(SubscriptionId::new(subscription, remote_sub));
         }
     }
 
@@ -148,48 +146,19 @@ impl NoteStreamManager {
 }
 
 mod tests {
-    use std::hash::{DefaultHasher, Hash, Hasher};
-
-    use enostr::Filter;
-
     use crate::{note_stream::misc::HashableFilter, test_data, thread::Thread};
 
     #[test]
     fn test_hashable() {
-        let filter1: Vec<Filter> = Thread::filters(test_data::test_pubkey());
+        let filter1 = Thread::filters(test_data::test_pubkey());
         let filter2 = Thread::filters(test_data::test_pubkey());
 
-        println!("filter1:");
-        for filter in &filter1 {
-            let mut hasher = DefaultHasher::new();
-            filter.hash(&mut hasher);
-            let hash = hasher.finish();
-            println!("hash: {}\njson: {:?}\n\n", hash, filter.json());
-        }
-
-        println!("filter2:");
-        for filter in &filter2 {
-            let mut hasher = DefaultHasher::new();
-            filter.hash(&mut hasher);
-            let hash = hasher.finish();
-            println!("hash: {}\njson: {:?}\n\n", hash, filter.json());
-        }
+        let hashable_filter1 = HashableFilter::new(filter1);
+        let hashable_filter2 = HashableFilter::new(filter2);
 
         assert_eq!(
-            filter1[0].json().unwrap().as_bytes(),
-            filter2[0].json().unwrap().as_bytes()
+            hashable_filter1.compute_hash(),
+            hashable_filter2.compute_hash()
         );
-        assert_eq!(
-            filter1[1].json().unwrap().as_bytes(),
-            filter2[1].json().unwrap().as_bytes()
-        );
-
-        // let hashable_filter1 = HashableFilter::new(filter1);
-        // let hashable_filter2 = HashableFilter::new(filter2);
-
-        // assert_eq!(
-        //     hashable_filter1.compute_hash(),
-        //     hashable_filter2.compute_hash()
-        // );
     }
 }

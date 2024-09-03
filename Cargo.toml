@@ -28,7 +28,7 @@ serde_derive = "1"
 serde = { version = "1", features = ["derive"] } # You only need this if you want app persistence
 tracing = "0.1.40"
 #wasm-bindgen = "0.2.83"
-nostrdb = { git = "https://github.com/kernelkind/nostrdb-rs" }
+nostrdb = { git = "https://github.com/kernelkind/nostrdb-rs" , rev = "a004ce0b6c62428a7a8f7fd50d12d6a0dd88861e"}
 #nostrdb = { git = "https://github.com/damus-io/nostrdb-rs", rev = "6d22af6d5159be4c9e4579f8c9d3af836e0d470a" }
 #nostrdb = { path = "/Users/jb55/dev/github/damus-io/nostrdb-rs" }
 #nostrdb = "0.3.4"

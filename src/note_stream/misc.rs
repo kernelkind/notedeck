@@ -6,6 +6,7 @@ use std::{
 };
 
 use enostr::Filter;
+use nostrdb::Subscription;
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct NoteStreamInstanceId {
@@ -204,12 +205,12 @@ impl Default for NoteStreamInstance {
 
 #[derive(Clone)]
 pub struct SubscriptionId {
-    pub ndb_id: u64,
+    pub ndb_id: Subscription,
     pub remote_id: String,
 }
 
 impl SubscriptionId {
-    pub fn new(ndb_id: u64, remote_id: String) -> Self {
+    pub fn new(ndb_id: Subscription, remote_id: String) -> Self {
         Self { ndb_id, remote_id }
     }
 }

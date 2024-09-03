@@ -16,7 +16,7 @@ fn process_new_subscriptions(
     note_stream_manager: &mut NoteStreamManager,
 ) {
     for filters in note_stream_manager.find_new_ndb_subscriptions() {
-        let sub = ndb.subscribe(filters.clone());
+        let sub = ndb.subscribe(&filters);
         let subid = Uuid::new_v4().to_string();
         pool.subscribe(subid.clone(), filters.clone());
         if let Ok(sub) = sub {
@@ -43,7 +43,7 @@ fn process_new_note_queries(
     txn: &Transaction,
 ) {
     for (id, filters) in note_stream_manager.get_active_filters_for_ids() {
-        let results = ndb.query(txn, filters, 1000).unwrap();
+        let results = ndb.query(txn, &filters, 1000).unwrap();
         let notes: Vec<NoteRef> = results
             .into_iter()
             .map(NoteRef::from_query_result)

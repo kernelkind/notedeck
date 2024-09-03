@@ -400,9 +400,27 @@ fn setup_initial_timeline(damus: &mut Damus, timeline: usize, filters: &[Filter]
 fn setup_initial_nostrdb_subs(damus: &mut Damus) -> Result<()> {
     let timelines = damus.timelines.len();
     for i in 0..timelines {
+<<<<<<< HEAD
         let filter = damus.timelines[i].filter.clone();
         match filter {
             FilterState::Ready(filters) => setup_initial_timeline(damus, i, &filters)?,
+=======
+        let filters = damus.timelines[i].filter.clone();
+        damus.timelines[i].subscription = Some(damus.ndb.subscribe(&filters)?);
+        let txn = Transaction::new(&damus.ndb)?;
+        debug!(
+            "querying nostrdb sub {:?} {:?}",
+            damus.timelines[i].subscription.as_ref().unwrap(),
+            damus.timelines[i].filter
+        );
+        let results = damus.ndb.query(
+            &txn,
+            &filters,
+            damus.timelines[i].filter[0]
+                .limit()
+                .unwrap_or(crate::filter::default_limit()) as i32,
+        )?;
+>>>>>>> 4e4e14933e64 (upgrade to new nostrdb-rs version)
 
             FilterState::Broken(err) => {
                 error!("FetchingRemote state broken in setup_initial_nostr_subs: {err}")

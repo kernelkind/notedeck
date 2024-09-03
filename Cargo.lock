@@ -2441,7 +2441,7 @@ dependencies = [
 [[package]]
 name = "nostrdb"
 version = "0.3.4"
-source = "git+https://github.com/kernelkind/nostrdb-rs#3697155699ea95cc44c7c50d83e892bec9f9a8dc"
+source = "git+https://github.com/kernelkind/nostrdb-rs?rev=a004ce0b6c62428a7a8f7fd50d12d6a0dd88861e#a004ce0b6c62428a7a8f7fd50d12d6a0dd88861e"
 dependencies = [
  "bindgen",
  "cc",
@@ -2473,7 +2473,7 @@ dependencies = [
  "hex",
  "image",
  "log",
- "nostrdb 0.3.4 (git+https://github.com/kernelkind/nostrdb-rs)",
+ "nostrdb 0.3.4 (git+https://github.com/kernelkind/nostrdb-rs?rev=a004ce0b6c62428a7a8f7fd50d12d6a0dd88861e)",
  "poll-promise",
  "puffin",
  "puffin_egui",
