@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use nostrdb::{Filter, FilterBuilder, Subscription};
+use tracing::{debug, info};
 
 use super::misc::{
     HashableFilter, NoteStream, NoteStreamInstance, NoteStreamInstanceId, NoteStreamInstanceState,
@@ -16,8 +17,13 @@ pub struct NoteStreamManager {
 impl NoteStreamManager {
     pub(crate) fn find_new_ndb_subscriptions(&mut self) -> Vec<Vec<Filter>> {
         let mut filters = Vec::new();
-        for (_, stream) in self.hash_to_stream.iter() {
+        for (id, stream) in self.hash_to_stream.iter() {
             if !stream.has_subscription() && stream.is_active() {
+                info!(
+                    "found subscription: {:?} for hash: {:?}",
+                    stream.get_subscription(),
+                    id
+                );
                 filters.push(stream.get_filter_id().as_vec());
             }
         }
@@ -142,6 +148,21 @@ impl NoteStreamManager {
             }
         }
         None
+    }
+
+    pub(crate) fn get_subscription_for_instance(
+        &self,
+        id: &NoteStreamInstanceId,
+    ) -> Option<&Subscription> {
+        if let Some(hash) = self.id_to_filter_hash.get(id) {
+            if let Some(stream) = self.hash_to_stream.get(hash) {
+                stream.get_subscription()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 

@@ -59,22 +59,11 @@ impl<'a> TimelineSource<'a> {
         }
     }
 
-<<<<<<< HEAD
     /// Check local subscriptions for new notes and insert them into
     /// timelines (threads, columns)
     pub fn poll_notes_into_view(&self, txn: &Transaction, app: &mut Damus) -> Result<()> {
         let sub = if let Some(sub) = self.sub(app, txn) {
             sub
-=======
-    pub fn poll_notes_into_view(
-        &self,
-        app: &mut Damus,
-        txn: &'a Transaction,
-        ids: &mut HashSet<UnknownId<'a>>,
-    ) -> Result<()> {
-        let sub_id = if let Some(sub_id) = self.sub(app, txn).map(|s| s) {
-            sub_id.clone()
->>>>>>> 4e4e14933e64 (upgrade to new nostrdb-rs version)
         } else {
             return Err(Error::no_active_sub());
         };

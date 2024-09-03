@@ -85,6 +85,14 @@ impl NoteStream {
         self.sub_id.is_some()
     }
 
+    pub fn get_subscription(&self) -> Option<&Subscription> {
+        if let Some(sub_id) = &self.sub_id {
+            Some(&sub_id.ndb_id)
+        } else {
+            None
+        }
+    }
+
     pub fn unsubscribe(&mut self) -> Option<SubscriptionId> {
         self.sub_id.take()
     }
@@ -203,7 +211,7 @@ impl Default for NoteStreamInstance {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SubscriptionId {
     pub ndb_id: Subscription,
     pub remote_id: String,
