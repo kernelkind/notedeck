@@ -23,14 +23,32 @@ fn process_new_subscriptions(
     ndb: &Ndb,
     pool: &mut RelayPool,
     note_stream_manager: &mut NoteStreamManager,
+    note_stream_interactor: &mut NoteStreamInteractor,
 ) {
-    for filters in note_stream_manager.find_new_ndb_subscriptions() {
+    let txn = Transaction::new(ndb).expect("txn");
+    for hash in note_stream_manager.get_new_subscription_hashes() {
+        let filters = note_stream_manager.get_filters_for_hash(hash);
         let sub = ndb.subscribe(&filters);
         let subid = Uuid::new_v4().to_string();
         pool.subscribe(subid.clone(), filters.clone());
         if let Ok(sub) = sub {
             info!("saving subscription {:?}", sub);
-            note_stream_manager.save_subscription(filters, sub, subid);
+            note_stream_manager.save_subscription(filters.clone(), sub, subid);
+        }
+
+        let instance_ids = note_stream_manager.get_stream_instance_ids_for_hash(hash);
+        for instance_id in instance_ids {
+            let new_notes: Vec<NoteRef> = if let Ok(results) = ndb.query(&txn, &filters, 1000) {
+                results
+                    .into_iter()
+                    .map(NoteRef::from_query_result)
+                    .collect()
+            } else {
+                continue;
+            };
+            note_stream_interactor
+                .cache
+                .insert(instance_id.clone(), new_notes);
         }
     }
 }
@@ -125,7 +143,12 @@ pub fn process_note_streams(app: &mut Damus) {
         &mut app.note_stream_manager,
         &mut app.note_stream_interactor,
     );
-    process_new_subscriptions(&app.ndb, &mut app.pool, &mut app.note_stream_manager);
+    process_new_subscriptions(
+        &app.ndb,
+        &mut app.pool,
+        &mut app.note_stream_manager,
+        &mut app.note_stream_interactor,
+    );
     process_subscription_deletions(&app.ndb, &mut app.pool, &mut app.note_stream_manager);
     process_new_note_queries(app);
 }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use nostrdb::{Filter, FilterBuilder, Subscription};
+use nostrdb::{Filter, FilterBuilder, Ndb, Subscription};
+use tokio::stream;
 use tracing::{debug, info};
 
 use super::misc::{
@@ -15,19 +16,33 @@ pub struct NoteStreamManager {
 }
 
 impl NoteStreamManager {
-    pub(crate) fn find_new_ndb_subscriptions(&mut self) -> Vec<Vec<Filter>> {
-        let mut filters = Vec::new();
-        for (id, stream) in self.hash_to_stream.iter() {
-            if !stream.has_subscription() && stream.is_active() {
-                info!(
-                    "found subscription: {:?} for hash: {:?}",
-                    stream.get_subscription(),
-                    id
-                );
-                filters.push(stream.get_filter_id().as_vec());
-            }
+    pub(crate) fn get_new_subscription_hashes(&self) -> Vec<u64> {
+        self.hash_to_stream
+            .iter()
+            .filter_map(|(hash, stream)| {
+                if !stream.has_subscription() && stream.is_active() {
+                    Some(*hash)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn get_filters_for_hash(&self, hash: u64) -> Vec<Filter> {
+        if let Some(stream) = self.hash_to_stream.get(&hash) {
+            stream.get_filter_id().as_vec()
+        } else {
+            Vec::new()
         }
-        filters
+    }
+
+    pub(crate) fn get_stream_instance_ids_for_hash(&self, hash: u64) -> Vec<NoteStreamInstanceId> {
+        if let Some(stream) = self.hash_to_stream.get(&hash) {
+            stream.get_instances().keys().cloned().collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Returns a list of subscription ids that should be deleted
@@ -163,6 +178,10 @@ impl NoteStreamManager {
         } else {
             None
         }
+    }
+
+    pub(crate) fn get_stream_for_hash(&self, hash: &u64) -> Option<&NoteStream> {
+        self.hash_to_stream.get(hash)
     }
 }
 
