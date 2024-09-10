@@ -43,6 +43,10 @@ mod user_account;
 mod test_utils;
 mod linux_key_storage;
 
+mod file_key_storage;
+mod security_framework_key_storage;
+mod settings;
+
 pub use app::Damus;
 pub use error::Error;
 pub use profile::DisplayName;
