@@ -1,10 +1,11 @@
-use egui::{Button, InnerResponse, Layout, RichText, SidePanel, Vec2, Widget};
+use egui::{Button, Color32, InnerResponse, Layout, Pos2, SidePanel, Stroke, Vec2, Widget};
 
 use crate::{
     account_manager::AccountsRoute,
+    colors,
     column::Column,
     route::{Route, Router},
-    ui::profile_preview_controller,
+    ui::{anim::hover_expand, profile_preview_controller},
     Damus,
 };
 
@@ -191,8 +192,83 @@ fn add_column_button(dark_mode: bool) -> egui::Button<'static> {
     egui::Button::image(egui::Image::new(img_data).max_width(32.0)).frame(false)
 }
 
-fn compose_note_button() -> Button<'static> {
-    Button::new(RichText::new("+").size(32.0)).frame(false)
+fn compose_note_button() -> impl Widget {
+    |ui: &mut egui::Ui| -> egui::Response {
+        let id = ui.id().with("note-compose-button");
+
+        let expansion_multiple = 1.2;
+
+        let max_size = 40.0;
+        let min_size = max_size / expansion_multiple;
+        let expansion_increase = max_size - min_size;
+
+        let anim_speed = 0.05;
+        let (rect, cur_size, resp) = hover_expand(ui, id, min_size, expansion_increase, anim_speed);
+        let animation_progress = (cur_size - min_size) / expansion_increase; // 0.0 to 1.0 where 0 is min_size and 1 is max_size
+
+        let painter = ui.painter_at(rect);
+
+        let rect_center = rect.center();
+        let min_radius = (min_size - 1.0) / 2.0;
+        let cur_radius = (cur_size - 1.0) / 2.0;
+
+        let max_plus_sign_size = 14.0;
+        let min_plus_sign_size = max_plus_sign_size / expansion_multiple;
+        let cur_plus_sign_size = min_plus_sign_size + (expansion_increase * animation_progress);
+        let half_min_plus_sign_size = min_plus_sign_size / 2.0;
+        let half_cur_plus_sign_size = cur_plus_sign_size / 2.0;
+
+        let max_line_width = 2.8;
+        let min_line_width = max_line_width / expansion_multiple;
+        let cur_line_width =
+            min_line_width + ((max_line_width - min_line_width) * animation_progress);
+
+        let cur_edge_circle_radius = (cur_line_width - 1.0) / 2.0;
+        let min_edge_circle_radius = (min_line_width - 1.0) / 2.0;
+
+        let (
+            use_background_radius,
+            use_line_width,
+            use_edge_circle_radius,
+            use_half_plus_sign_size,
+        ) = if resp.is_pointer_button_down_on() {
+            (
+                min_radius,
+                min_line_width,
+                min_edge_circle_radius,
+                half_min_plus_sign_size,
+            )
+        } else {
+            (
+                cur_radius,
+                cur_line_width,
+                cur_edge_circle_radius,
+                half_cur_plus_sign_size,
+            )
+        };
+
+        let north_edge = Pos2::new(rect_center.x, rect_center.y + use_half_plus_sign_size);
+        let south_edge = Pos2::new(rect_center.x, rect_center.y - use_half_plus_sign_size);
+
+        let west_edge = Pos2::new(rect_center.x + use_half_plus_sign_size, rect_center.y);
+        let east_edge = Pos2::new(rect_center.x - use_half_plus_sign_size, rect_center.y);
+
+        painter.circle_filled(rect_center, use_background_radius, colors::PINK);
+        painter.line_segment(
+            [north_edge, south_edge],
+            Stroke::new(use_line_width, Color32::WHITE),
+        );
+        painter.line_segment(
+            [west_edge, east_edge],
+            Stroke::new(use_line_width, Color32::WHITE),
+        );
+        painter.circle_filled(north_edge, use_edge_circle_radius, Color32::WHITE);
+        painter.circle_filled(south_edge, use_edge_circle_radius, Color32::WHITE);
+        painter.circle_filled(west_edge, use_edge_circle_radius, Color32::WHITE);
+        painter.circle_filled(east_edge, use_edge_circle_radius, Color32::WHITE);
+
+        resp
+    }
 }
 
 mod preview {
