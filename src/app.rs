@@ -3,7 +3,7 @@ use crate::{
     app_creation::setup_cc,
     app_style::user_requested_visuals_change,
     args::Args,
-    column::{Column, Columns},
+    column::Columns,
     draft::Drafts,
     error::{Error, FilterError},
     filter,
@@ -14,7 +14,6 @@ use crate::{
     nav,
     note::NoteRef,
     notecache::{CachedNote, NoteCache},
-    route::Route,
     subscriptions::{SubKind, Subscriptions},
     thread::Threads,
     timeline::{Timeline, TimelineKind, ViewFilter},
@@ -248,7 +247,7 @@ fn try_process_event(damus: &mut Damus, ctx: &egui::Context) -> Result<()> {
 
             if let Err(err) = Timeline::poll_notes_into_view(
                 timeline_ind,
-                &mut damus.columns.timelines,
+                damus.columns.timelines_mut(),
                 &damus.ndb,
                 &txn,
                 &mut damus.unknown_ids,
@@ -933,19 +932,7 @@ fn timelines_view(ui: &mut egui::Ui, sizes: Size, app: &mut Damus, columns: usiz
                 )
                 .show(ui);
 
-                let router = if let Some(router) = app
-                    .columns
-                    .columns_mut()
-                    .get_mut(0)
-                    .map(|c: &mut Column| c.router_mut())
-                {
-                    router
-                } else {
-                    // TODO(jb55): Maybe we should have an empty column route?
-                    let columns = app.columns.columns_mut();
-                    columns.push(Column::new(vec![Route::accounts()]));
-                    columns[0].router_mut()
-                };
+                let router = app.columns.get_first_router();
 
                 if side_panel.response.clicked() {
                     DesktopSidePanel::perform_action(router, side_panel.action);

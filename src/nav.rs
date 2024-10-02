@@ -8,6 +8,7 @@ use crate::{
     Damus,
 };
 
+use egui::{Button, Layout};
 use egui_nav::{Nav, NavAction};
 
 pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
@@ -15,7 +16,7 @@ pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
     let nav_response = Nav::new(app.columns().column(col).router().routes().clone())
         .navigating(app.columns_mut().column_mut(col).router_mut().navigating)
         .returning(app.columns_mut().column_mut(col).router_mut().returning)
-        .title(false)
+        .title(title_bar)
         .show_mut(ui, |ui, nav| match nav.top() {
             Route::Timeline(tlr) => render_timeline_route(
                 &app.ndb,
@@ -103,5 +104,21 @@ pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
         }
     } else if let Some(NavAction::Navigated) = nav_response.action {
         app.columns_mut().column_mut(col).router_mut().navigating = false;
+    } else if let Some(NavAction::Delete) = nav_response.action {
+        app.columns_mut().delete_at_index(col);
     }
+}
+
+fn title_bar(ui: &mut egui::Ui, title_name: String) -> egui::Response {
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.add(egui::Label::new(title_name).selectable(false))
+        });
+
+        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add(Button::new("Close"))
+        })
+        .inner
+    })
+    .inner
 }
