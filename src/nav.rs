@@ -121,7 +121,11 @@ pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
     }
 }
 
-fn title_bar(ui: &mut egui::Ui, title_name: String, title_height: f32) -> egui::Response {
+fn title_bar(
+    painter: &egui::Painter,
+    allocated_response: egui::Response,
+    title_name: String,
+) -> egui::Response {
     ui.horizontal(|ui| {
         ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
             ui.vertical(|ui| {
@@ -130,7 +134,7 @@ fn title_bar(ui: &mut egui::Ui, title_name: String, title_height: f32) -> egui::
         });
 
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add(delete_column_button())
+            ui.add(delete_column_button(allocated_response))
         })
         .inner
     })
@@ -138,8 +142,8 @@ fn title_bar(ui: &mut egui::Ui, title_name: String, title_height: f32) -> egui::
 }
 
 static ICON_WIDTH: f32 = 32.0;
-fn delete_column_button() -> impl egui::Widget {
-    |ui: &mut egui::Ui| -> egui::Response {
+fn delete_column_button(resp: egui::Response) -> impl egui::Widget {
+    move |ui: &mut egui::Ui| -> egui::Response {
         let img_size = 16.0;
         let max_size = ICON_WIDTH * ICON_EXPANSION_MULTIPLE;
 
@@ -150,13 +154,15 @@ fn delete_column_button() -> impl egui::Widget {
             AnimationHelper::new(ui, "delete-column-button", egui::vec2(max_size, max_size));
 
         let cur_img_size = helper.scale_1d_pos(img_size);
-        img.paint_at(
-            ui,
-            helper
-                .get_animation_rect()
-                .shrink((max_size - cur_img_size) / 2.0),
-        );
 
+        if resp.hovered() {
+            img.paint_at(
+                ui,
+                helper
+                    .get_animation_rect()
+                    .shrink((max_size - cur_img_size) / 2.0),
+            );
+        }
         helper.take_animation_response()
     }
 }
