@@ -104,6 +104,14 @@ impl Columns {
         self.columns.values().collect()
     }
 
+    pub fn get_column_id_at_index(&self, ind: usize) -> u32 {
+        *self
+            .columns
+            .get_index(ind)
+            .expect("expected index to be within bounds")
+            .0
+    }
+
     pub fn selected(&mut self) -> &mut Column {
         self.columns
             .get_index_mut(self.selected as usize)
@@ -169,6 +177,10 @@ impl Columns {
 
             self.columns.shift_remove_index(index);
             self.should_delete_column_at_index = None;
+
+            if self.columns.is_empty() {
+                self.new_default_column();
+            }
         }
     }
 }

@@ -12,67 +12,71 @@ use egui::{Button, Layout};
 use egui_nav::{Nav, NavAction};
 
 pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
+    let col_id = app.columns.get_column_id_at_index(col);
     // TODO(jb55): clean up this router_mut mess by using Router<R> in egui-nav directly
     let nav_response = Nav::new(app.columns().column(col).router().routes().clone())
         .navigating(app.columns_mut().column_mut(col).router_mut().navigating)
         .returning(app.columns_mut().column_mut(col).router_mut().returning)
         .title(title_bar)
-        .show_mut(ui, |ui, nav| match nav.top() {
-            Route::Timeline(tlr) => render_timeline_route(
-                &app.ndb,
-                &mut app.columns,
-                &mut app.pool,
-                &mut app.drafts,
-                &mut app.img_cache,
-                &mut app.note_cache,
-                &mut app.threads,
-                &mut app.accounts,
-                *tlr,
-                col,
-                app.textmode,
-                ui,
-            ),
-            Route::Accounts(amr) => {
-                render_accounts_route(
-                    ui,
+        .show_mut(col_id, ui, |ui, nav| {
+            let column = app.columns.column_mut(col);
+            match nav.top() {
+                Route::Timeline(tlr) => render_timeline_route(
                     &app.ndb,
-                    col,
                     &mut app.columns,
-                    &mut app.img_cache,
-                    &mut app.accounts,
-                    &mut app.view_state.login,
-                    *amr,
-                );
-                None
-            }
-            Route::Relays => {
-                let manager = RelayPoolManager::new(app.pool_mut());
-                RelayView::new(manager).ui(ui);
-                None
-            }
-            Route::ComposeNote => {
-                let kp = app.accounts.selected_or_first_nsec()?;
-                let draft = app.drafts.compose_mut();
-
-                let txn = nostrdb::Transaction::new(&app.ndb).expect("txn");
-                let post_response = ui::PostView::new(
-                    &app.ndb,
-                    draft,
-                    crate::draft::DraftSource::Compose,
+                    &mut app.pool,
+                    &mut app.drafts,
                     &mut app.img_cache,
                     &mut app.note_cache,
-                    kp,
-                )
-                .ui(&txn, ui);
-
-                if let Some(action) = post_response.action {
-                    PostAction::execute(kp, &action, &mut app.pool, draft, |np, seckey| {
-                        np.to_note(seckey)
-                    });
-                    app.columns_mut().column_mut(col).router_mut().go_back();
+                    &mut app.threads,
+                    &mut app.accounts,
+                    *tlr,
+                    col,
+                    app.textmode,
+                    ui,
+                ),
+                Route::Accounts(amr) => {
+                    render_accounts_route(
+                        ui,
+                        &app.ndb,
+                        col,
+                        &mut app.columns,
+                        &mut app.img_cache,
+                        &mut app.accounts,
+                        &mut app.view_state.login,
+                        *amr,
+                    );
+                    None
                 }
+                Route::Relays => {
+                    let manager = RelayPoolManager::new(app.pool_mut());
+                    RelayView::new(manager).ui(ui);
+                    None
+                }
+                Route::ComposeNote => {
+                    let kp = app.accounts.selected_or_first_nsec()?;
+                    let draft = app.drafts.compose_mut();
 
-                None
+                    let txn = nostrdb::Transaction::new(&app.ndb).expect("txn");
+                    let post_response = ui::PostView::new(
+                        &app.ndb,
+                        draft,
+                        crate::draft::DraftSource::Compose,
+                        &mut app.img_cache,
+                        &mut app.note_cache,
+                        kp,
+                    )
+                    .ui(&txn, ui);
+
+                    if let Some(action) = post_response.action {
+                        PostAction::execute(kp, &action, &mut app.pool, draft, |np, seckey| {
+                            np.to_note(seckey)
+                        });
+                        column.router_mut().go_back();
+                    }
+
+                    None
+                }
             }
         });
 
@@ -104,7 +108,7 @@ pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
         }
     } else if let Some(NavAction::Navigated) = nav_response.action {
         app.columns_mut().column_mut(col).router_mut().navigating = false;
-    } else if let Some(NavAction::Delete) = nav_response.action {
+    } else if let Some(NavAction::Deleting) = nav_response.action {
         app.columns_mut().request_deletion_at_index(col);
     }
 }
@@ -112,7 +116,7 @@ pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
 fn title_bar(ui: &mut egui::Ui, title_name: String) -> egui::Response {
     ui.horizontal(|ui| {
         ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.add(egui::Label::new(title_name).selectable(false))
+            ui.add(egui::Label::new(title_name.clone()).selectable(false))
         });
 
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
