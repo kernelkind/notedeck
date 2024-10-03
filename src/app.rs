@@ -434,6 +434,8 @@ fn update_damus(damus: &mut Damus, ctx: &egui::Context) {
     if let Err(err) = try_process_event(damus, ctx) {
         error!("error processing event: {}", err);
     }
+
+    damus.columns.attempt_perform_deletion_request();
 }
 
 fn process_event(damus: &mut Damus, _subid: &str, event: &str) {
@@ -909,10 +911,10 @@ fn render_damus_desktop(ctx: &egui::Context, app: &mut Damus) {
         ui.spacing_mut().item_spacing.x = 0.0;
         if need_scroll {
             egui::ScrollArea::horizontal().show(ui, |ui| {
-                timelines_view(ui, panel_sizes, app, app.columns.columns().len());
+                timelines_view(ui, panel_sizes, app, app.columns.num_columns());
             });
         } else {
-            timelines_view(ui, panel_sizes, app, app.columns.columns().len());
+            timelines_view(ui, panel_sizes, app, app.columns.num_columns());
         }
     });
 }
@@ -946,8 +948,7 @@ fn timelines_view(ui: &mut egui::Ui, sizes: Size, app: &mut Damus, columns: usiz
                 );
             });
 
-            let n_cols = app.columns.columns().len();
-            for column_ind in 0..n_cols {
+            for column_ind in 0..columns {
                 strip.cell(|ui| {
                     let rect = ui.available_rect_before_wrap();
                     nav::render_nav(column_ind, app, ui);

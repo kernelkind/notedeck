@@ -105,7 +105,7 @@ pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
     } else if let Some(NavAction::Navigated) = nav_response.action {
         app.columns_mut().column_mut(col).router_mut().navigating = false;
     } else if let Some(NavAction::Delete) = nav_response.action {
-        app.columns_mut().delete_at_index(col);
+        app.columns_mut().request_deletion_at_index(col);
     }
 }
 

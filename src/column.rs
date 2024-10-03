@@ -3,7 +3,7 @@ use crate::timeline::{Timeline, TimelineId};
 use indexmap::IndexMap;
 use std::iter::Iterator;
 use std::sync::atomic::{AtomicU32, Ordering};
-use tracing::warn;
+use tracing::{info, warn};
 
 pub struct Column {
     router: Router<Route>,
@@ -36,6 +36,7 @@ pub struct Columns {
 
     /// The selected column for key navigation
     selected: i32,
+    should_delete_column_at_index: Option<usize>,
 }
 static UIDS: AtomicU32 = AtomicU32::new(0);
 
@@ -63,6 +64,10 @@ impl Columns {
         self.columns.values_mut().collect()
     }
 
+    pub fn num_columns(&self) -> usize {
+        self.columns.len()
+    }
+
     // TODO: this will get removed with merge with kernelkind/add_columns
     fn new_default_column(&mut self) {
         self.add_column(Column::new(vec![Route::accounts()]));
@@ -82,11 +87,17 @@ impl Columns {
     }
 
     pub fn timeline_mut(&mut self, timeline_ind: usize) -> &mut Timeline {
-        &mut self.timelines[timeline_ind]
+        self.timelines
+            .get_index_mut(timeline_ind)
+            .expect("expected index to be in bounds")
+            .1
     }
 
     pub fn column(&self, ind: usize) -> &Column {
-        self.columns()[ind]
+        self.columns
+            .get_index(ind)
+            .expect("Expected index to be in bounds")
+            .1
     }
 
     pub fn columns(&self) -> Vec<&Column> {
@@ -94,7 +105,10 @@ impl Columns {
     }
 
     pub fn selected(&mut self) -> &mut Column {
-        &mut self.columns[self.selected as usize]
+        self.columns
+            .get_index_mut(self.selected as usize)
+            .expect("Expected selected index to be in bounds")
+            .1
     }
 
     pub fn timelines_mut(&mut self) -> Vec<&mut Timeline> {
@@ -114,7 +128,10 @@ impl Columns {
     }
 
     pub fn column_mut(&mut self, ind: usize) -> &mut Column {
-        &mut self.columns[ind]
+        self.columns
+            .get_index_mut(ind)
+            .expect("Expected index to be in bounds")
+            .1
     }
 
     pub fn select_down(&mut self) {
@@ -139,11 +156,19 @@ impl Columns {
         self.selected += 1;
     }
 
-    pub fn delete_at_index(&mut self, index: usize) {
-        if let Some((key, _)) = self.columns.get_index_mut(index) {
-            self.timelines.shift_remove(key);
-        }
+    pub fn request_deletion_at_index(&mut self, index: usize) {
+        info!("sent deletion request");
+        self.should_delete_column_at_index = Some(index);
+    }
 
-        self.columns.shift_remove_index(index);
+    pub fn attempt_perform_deletion_request(&mut self) {
+        if let Some(index) = self.should_delete_column_at_index {
+            if let Some((key, _)) = self.columns.get_index_mut(index) {
+                self.timelines.shift_remove(key);
+            }
+
+            self.columns.shift_remove_index(index);
+            self.should_delete_column_at_index = None;
+        }
     }
 }
