@@ -1,14 +1,21 @@
 use crate::{
     account_manager::render_accounts_route,
+    app_style::{desktop_font_size, NotedeckTextStyle},
+    fonts::NamedFontFamily,
     relay_pool_manager::RelayPoolManager,
     route::Route,
     thread::thread_unsubscribe,
     timeline::route::{render_timeline_route, TimelineRoute, TimelineRouteResponse},
-    ui::{self, note::PostAction, RelayView, View},
+    ui::{
+        self,
+        anim::{AnimationHelper, ICON_EXPANSION_MULTIPLE},
+        note::PostAction,
+        RelayView, View,
+    },
     Damus,
 };
 
-use egui::{Button, Layout};
+use egui::{Layout, RichText};
 use egui_nav::{Nav, NavAction};
 
 pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
@@ -18,6 +25,7 @@ pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
         .navigating(app.columns_mut().column_mut(col).router_mut().navigating)
         .returning(app.columns_mut().column_mut(col).router_mut().returning)
         .title(title_bar)
+        .title_height(48.0)
         .show_mut(col_id, ui, |ui, nav| {
             let column = app.columns.column_mut(col);
             match nav.top() {
@@ -113,16 +121,71 @@ pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
     }
 }
 
-fn title_bar(ui: &mut egui::Ui, title_name: String) -> egui::Response {
+fn title_bar(ui: &mut egui::Ui, title_name: String, title_height: f32) -> egui::Response {
     ui.horizontal(|ui| {
         ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.add(egui::Label::new(title_name.clone()).selectable(false))
+            ui.vertical(|ui| {
+                ui.add(title(title_name, title_height));
+            })
         });
 
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add(Button::new("Close"))
+            ui.add(delete_column_button())
         })
         .inner
     })
     .inner
+}
+
+static ICON_WIDTH: f32 = 32.0;
+fn delete_column_button() -> impl egui::Widget {
+    |ui: &mut egui::Ui| -> egui::Response {
+        let img_size = 16.0;
+        let max_size = ICON_WIDTH * ICON_EXPANSION_MULTIPLE;
+
+        let img_data = egui::include_image!("../assets/icons/column_delete_icon_4x.png");
+        let img = egui::Image::new(img_data).max_width(img_size);
+
+        let helper =
+            AnimationHelper::new(ui, "delete-column-button", egui::vec2(max_size, max_size));
+
+        let cur_img_size = helper.scale_1d_pos(img_size);
+        img.paint_at(
+            ui,
+            helper
+                .get_animation_rect()
+                .shrink((max_size - cur_img_size) / 2.0),
+        );
+
+        helper.take_animation_response()
+    }
+}
+
+fn title(title_name: String, max_size: f32) -> impl egui::Widget {
+    move |ui: &mut egui::Ui| -> egui::Response {
+        let title = RichText::new(title_name)
+            .family(egui::FontFamily::Name(
+                NamedFontFamily::Bold.as_str().into(),
+            ))
+            .size(desktop_font_size(&NotedeckTextStyle::Body)); // TODO: replace with generic function after merge of add_columns
+
+        let title_height: f32 = {
+            let mut height = 0.0;
+            ui.fonts(|f| height = title.font_height(f, ui.style()));
+            height
+        };
+
+        let padding = (max_size - title_height) / 2.0;
+
+        ui.add_space(padding);
+        let resp = ui
+            .horizontal(|ui| {
+                ui.add_space(16.0);
+                ui.add(egui::Label::new(title).selectable(false))
+            })
+            .inner;
+        ui.add_space(padding);
+
+        resp
+    }
 }
