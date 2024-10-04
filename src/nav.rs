@@ -33,7 +33,7 @@ pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
         .navigating(app.columns_mut().column_mut(col).router_mut().navigating)
         .returning(app.columns_mut().column_mut(col).router_mut().returning)
         .title(title_bar)
-        .title_height(48.0)
+        .title_height(64.0)
         .show_mut(col_id, ui, |ui, nav| {
             let column = app.columns.column_mut(col);
             match &nav.top().route {
@@ -134,17 +134,18 @@ fn title_bar(
     title_name: String,
     allocated_response: egui::Response,
 ) -> egui::Response {
+    let icon_width = 32.0;
     let padding = 16.0;
-    title(ui, title_name, allocated_response.rect, padding);
-    delete_column_button(ui, allocated_response, padding)
+    title(ui, title_name, allocated_response.rect, icon_width, padding);
+    delete_column_button(ui, allocated_response, icon_width, padding)
 }
 
 fn delete_column_button(
     ui: &mut egui::Ui,
     title_bar_resp: egui::Response,
+    icon_width: f32,
     padding: f32,
 ) -> egui::Response {
-    let icon_width = 32.0;
     let img_size = 16.0;
     let max_size = icon_width * ICON_EXPANSION_MULTIPLE;
 
@@ -177,7 +178,13 @@ fn delete_column_button(
     animation_resp
 }
 
-fn title(ui: &mut egui::Ui, title_name: String, titlebar_rect: egui::Rect, padding: f32) {
+fn title(
+    ui: &mut egui::Ui,
+    title_name: String,
+    titlebar_rect: egui::Rect,
+    icon_width: f32,
+    padding: f32,
+) {
     let painter = ui.painter_at(titlebar_rect);
 
     let font = egui::FontId::new(
@@ -185,7 +192,9 @@ fn title(ui: &mut egui::Ui, title_name: String, titlebar_rect: egui::Rect, paddi
         egui::FontFamily::Name(NamedFontFamily::Bold.as_str().into()),
     );
 
-    let title_galley = ui.fonts(|f| f.layout_no_wrap(title_name, font, ui.visuals().text_color()));
+    let max_title_width = titlebar_rect.width() - icon_width - padding * 2.;
+    let title_galley =
+        ui.fonts(|f| f.layout(title_name, font, ui.visuals().text_color(), max_title_width));
 
     let pos = {
         let titlebar_center = titlebar_rect.center();
