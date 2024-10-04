@@ -1148,7 +1148,7 @@ dependencies = [
 [[package]]
 name = "egui_nav"
 version = "0.1.0"
-source = "git+https://github.com/kernelkind/egui-nav?rev=4075296312803768365a5e8dd554419a3540fcbd#4075296312803768365a5e8dd554419a3540fcbd"
+source = "git+https://github.com/kernelkind/egui-nav?rev=fb6e1f5293a01007842aadf92e05fa03d3fdae69#fb6e1f5293a01007842aadf92e05fa03d3fdae69"
 dependencies = [
  "egui",
  "egui_extras",
