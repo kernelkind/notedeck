@@ -15,7 +15,7 @@ use crate::{
     Damus,
 };
 
-use egui::{Layout, RichText};
+use egui::{pos2, Color32};
 use egui_nav::{Nav, NavAction};
 
 pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
@@ -122,76 +122,72 @@ pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
 }
 
 fn title_bar(
-    painter: &egui::Painter,
-    allocated_response: egui::Response,
+    ui: &mut egui::Ui,
     title_name: String,
+    allocated_response: egui::Response,
 ) -> egui::Response {
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.vertical(|ui| {
-                ui.add(title(title_name, title_height));
-            })
-        });
-
-        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add(delete_column_button(allocated_response))
-        })
-        .inner
-    })
-    .inner
+    let padding = 16.0;
+    title(ui, title_name, allocated_response.rect, padding);
+    delete_column_button(ui, allocated_response, padding)
 }
 
-static ICON_WIDTH: f32 = 32.0;
-fn delete_column_button(resp: egui::Response) -> impl egui::Widget {
-    move |ui: &mut egui::Ui| -> egui::Response {
-        let img_size = 16.0;
-        let max_size = ICON_WIDTH * ICON_EXPANSION_MULTIPLE;
+fn delete_column_button(
+    ui: &mut egui::Ui,
+    title_bar_resp: egui::Response,
+    padding: f32,
+) -> egui::Response {
+    let icon_width = 32.0;
+    let img_size = 16.0;
+    let max_size = icon_width * ICON_EXPANSION_MULTIPLE;
 
-        let img_data = egui::include_image!("../assets/icons/column_delete_icon_4x.png");
-        let img = egui::Image::new(img_data).max_width(img_size);
+    let img_data = egui::include_image!("../assets/icons/column_delete_icon_4x.png");
+    let img = egui::Image::new(img_data).max_width(img_size);
 
-        let helper =
-            AnimationHelper::new(ui, "delete-column-button", egui::vec2(max_size, max_size));
+    let button_rect = {
+        let titlebar_rect = title_bar_resp.rect;
+        let titlebar_width = titlebar_rect.width();
+        let titlebar_center = titlebar_rect.center();
+        let button_center_y = titlebar_center.y;
+        let button_center_x =
+            titlebar_center.x + (titlebar_width / 2.0) - (max_size / 2.0) - padding;
+        egui::Rect::from_center_size(
+            pos2(button_center_x, button_center_y),
+            egui::vec2(max_size, max_size),
+        )
+    };
 
-        let cur_img_size = helper.scale_1d_pos(img_size);
+    let helper = AnimationHelper::new_from_rect(ui, "delete-column-button", button_rect);
 
-        if resp.hovered() {
-            img.paint_at(
-                ui,
-                helper
-                    .get_animation_rect()
-                    .shrink((max_size - cur_img_size) / 2.0),
-            );
-        }
-        helper.take_animation_response()
+    let cur_img_size = helper.scale_1d_pos(img_size);
+
+    let animation_rect = helper.get_animation_rect();
+    let animation_resp = helper.take_animation_response();
+    if title_bar_resp.union(animation_resp.clone()).hovered() {
+        img.paint_at(ui, animation_rect.shrink((max_size - cur_img_size) / 2.0));
     }
+
+    animation_resp
 }
 
-fn title(title_name: String, max_size: f32) -> impl egui::Widget {
-    move |ui: &mut egui::Ui| -> egui::Response {
-        let title = RichText::new(title_name)
-            .family(egui::FontFamily::Name(
-                NamedFontFamily::Bold.as_str().into(),
-            ))
-            .size(desktop_font_size(&NotedeckTextStyle::Body)); // TODO: replace with generic function after merge of add_columns
+fn title(ui: &mut egui::Ui, title_name: String, titlebar_rect: egui::Rect, padding: f32) {
+    let painter = ui.painter_at(titlebar_rect);
 
-        let title_height: f32 = {
-            let mut height = 0.0;
-            ui.fonts(|f| height = title.font_height(f, ui.style()));
-            height
-        };
+    let font = egui::FontId::new(
+        desktop_font_size(&NotedeckTextStyle::Body),
+        egui::FontFamily::Name(NamedFontFamily::Bold.as_str().into()),
+    );
 
-        let padding = (max_size - title_height) / 2.0;
+    let title_galley = ui.fonts(|f| f.layout_no_wrap(title_name, font, ui.visuals().text_color()));
 
-        ui.add_space(padding);
-        let resp = ui
-            .horizontal(|ui| {
-                ui.add_space(16.0);
-                ui.add(egui::Label::new(title).selectable(false))
-            })
-            .inner;
-        ui.add_space(padding);
+    let pos = {
+        let titlebar_center = titlebar_rect.center();
+        let titlebar_width = titlebar_rect.width();
+        let text_height = title_galley.rect.height();
 
-        resp
-    }
+        let galley_pos_x = titlebar_center.x - (titlebar_width / 2.) + padding;
+        let galley_pos_y = titlebar_center.y - (text_height / 2.);
+        pos2(galley_pos_x, galley_pos_y)
+    };
+
+    painter.galley(pos, title_galley, Color32::WHITE);
 }
