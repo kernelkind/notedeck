@@ -21,14 +21,22 @@ use egui_nav::{Nav, NavAction};
 pub fn render_nav(col: usize, app: &mut Damus, ui: &mut egui::Ui) {
     let col_id = app.columns.get_column_id_at_index(col);
     // TODO(jb55): clean up this router_mut mess by using Router<R> in egui-nav directly
-    let nav_response = Nav::new(app.columns().column(col).router().routes().clone())
+    let routes = app
+        .columns()
+        .column(col)
+        .router()
+        .routes()
+        .iter()
+        .map(|r| r.get_titled_route(&app.columns, &app.ndb))
+        .collect();
+    let nav_response = Nav::new(routes)
         .navigating(app.columns_mut().column_mut(col).router_mut().navigating)
         .returning(app.columns_mut().column_mut(col).router_mut().returning)
         .title(title_bar)
         .title_height(48.0)
         .show_mut(col_id, ui, |ui, nav| {
             let column = app.columns.column_mut(col);
-            match nav.top() {
+            match &nav.top().route {
                 Route::Timeline(tlr) => render_timeline_route(
                     &app.ndb,
                     &mut app.columns,
