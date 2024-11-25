@@ -1,0 +1,122 @@
+name: Build macOS App
+
+on:
+  push:
+    branches:
+      - master  # Trigger on push to the master branch
+  workflow_dispatch:  # Enable manual triggering
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Create Temporary Keychain
+        run: |
+          security create-keychain -p temp_password temp.keychain
+          security default-keychain -s temp.keychain
+          security unlock-keychain -p temp_password temp.keychain
+          security set-keychain-settings -lut 3600 temp.keychain
+
+      # Install the cert
+      - name: Download release cert
+        run: |
+          echo "${{ secrets.APPLE_RELEASE_CERT }}" | base64 --decode > cert.p12
+
+      - name: Install cert to temporary keychain
+        run: security import cert.p12 -k temp.keychain -P ${{ secrets.APPLE_RELEASE_CERT_PW }} -T /usr/bin/codesign
+
+      # 1. Checkout the Code
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2. Install Rust
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      # 3. Build the `.app` Bundle
+      - name: Cache Cargo Bundle
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/bin/cargo-bundle/
+          key: ${{ runner.os }}-cargo-bundle
+          restore-keys: |
+            macOS-cargo-bundle
+
+      - name: Check Cache Before Install
+        run: |
+          echo "Checking cache before installing cargo-bundle..."
+          ls -la ~/.cargo/bin || echo "No cache restored."
+
+      - name: Install cargo-bundle (if not cached)
+        run: cargo install cargo-bundle || echo "cargo-bundle already installed"
+
+      - name: Save Cargo Cache
+        if: always()  # Ensures this runs even if previous steps fail
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-bin
+
+      - name: Check Cache After Install
+        run: |
+          echo "Checking cache after installing cargo-bundle..."
+          ls -la ~/.cargo/bin
+
+      - name: Build macOS .app bundle
+        run: cargo bundle --release
+
+        #      - name: Verify entitlements.plist exists
+        #        run: |
+        #          cd $GITHUB_WORKSPACE
+        #          ls -la
+        #          test -f entitlements.plist || echo "entitlements.plist not found!" && exit 1
+
+      - name: Codesign
+        run: |
+          codesign \
+          --deep \
+          --force \
+          --verify \
+          --options runtime \
+          --entitlements "$GITHUB_WORKSPACE/entitlements.plist" \
+          --sign "${{ secrets.APPLE_RELEASE_CERT_ID }}" \
+          "$GITHUB_WORKSPACE/target/release/bundle/osx/notedeck.app"
+
+      - name: submit for notarization
+        run: |
+          set -e
+          zip -r notedeck.zip "$GITHUB_WORKSPACE/target/release/bundle/osx/notedeck.app"
+          xcrun notarytool submit \
+            --apple-id ${{ secrets.RELEASE_APPLE_ID }} \
+            --password ${{ secrets.APPLE_APP_SPECIFIC_PW }} --team-id ${{ secrets.APPLE_TEAM_ID }} --wait notedeck.zip
+
+      - name: staple notarization
+        run: xcrun stapler staple "$GITHUB_WORKSPACE/target/release/bundle/osx/notedeck.app"
+
+      - name: Install create-dmg
+        run: npm install -g create-dmg
+
+      - name: Create .dmg package
+        run: |
+          mkdir dist
+          create-dmg \
+            --window-size 600 400 \
+            --app-drop-link 400 100 \
+            dist/notedeck.dmg \
+            "$GITHUB_WORKSPACE/target/release/bundle/osx/notedeck.app"
+
+      - name: Upload Private Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: notedeck
+          path: dist/notedeck.dmg
+
+      - name: Cleanup Keychain
+        if: always()
+        run: security delete-keychain temp.keychain
+
