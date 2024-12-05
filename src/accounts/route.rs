@@ -12,6 +12,17 @@ pub enum AccountsRoute {
     AddAccount,
 }
 
+impl ToString for AccountsRoute {
+    fn to_string(&self) -> String {
+        let self_str = "accounts";
+        let sub_str = match &self {
+            AccountsRoute::Accounts => "show".to_owned(),
+            AccountsRoute::AddAccount => "add".to_owned(),
+        };
+        format!("{}:{}", self_str, sub_str)
+    }
+}
+
 #[derive(Debug)]
 pub enum AccountsAction {
     Switch(usize),

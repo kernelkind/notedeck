@@ -2,12 +2,11 @@ use std::collections::HashMap;
 
 use enostr::Pubkey;
 use nostrdb::Ndb;
-use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
 use crate::{
     accounts::AccountsRoute,
-    column::{Column, Columns, SerializableColumns},
+    column::{Column, Columns},
     route::Route,
     timeline::{self, Timeline, TimelineKind},
     ui::{add_column::AddColumnRoute, configure_deck::ConfigureDeckResponse},
@@ -20,7 +19,6 @@ pub enum DecksAction {
     Removing(usize),
 }
 
-#[derive(Serialize)]
 pub struct DecksCache {
     pub account_to_decks: HashMap<Pubkey, Decks>,
     pub fallback_pubkey: Pubkey,
@@ -111,63 +109,6 @@ impl DecksCache {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct SerializableDecksCache {
-    #[serde(serialize_with = "serialize_map", deserialize_with = "deserialize_map")]
-    pub account_to_decks: HashMap<Pubkey, SerializableDecks>,
-}
-
-impl From<&DecksCache> for SerializableDecksCache {
-    fn from(value: &DecksCache) -> Self {
-        SerializableDecksCache {
-            account_to_decks: value
-                .account_to_decks
-                .iter()
-                .map(|(id, d)| (*id, d.into()))
-                .collect(),
-        }
-    }
-}
-
-impl SerializableDecksCache {
-    pub fn into_decks_cache(self, ndb: &nostrdb::Ndb) -> DecksCache {
-        let account_to_decks = self
-            .account_to_decks
-            .into_iter()
-            .map(|(id, s)| (id, s.into_decks(ndb, Some(id.bytes()))))
-            .collect();
-        DecksCache::new(account_to_decks)
-    }
-}
-
-fn serialize_map<S>(
-    map: &HashMap<Pubkey, SerializableDecks>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    let stringified_map: HashMap<String, &SerializableDecks> =
-        map.iter().map(|(k, v)| (k.hex(), v)).collect();
-    stringified_map.serialize(serializer)
-}
-
-fn deserialize_map<'de, D>(deserializer: D) -> Result<HashMap<Pubkey, SerializableDecks>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let stringified_map: HashMap<String, SerializableDecks> = HashMap::deserialize(deserializer)?;
-
-    stringified_map
-        .into_iter()
-        .map(|(k, v)| {
-            let key = Pubkey::from_hex(&k).map_err(serde::de::Error::custom)?;
-            Ok((key, v))
-        })
-        .collect()
-}
-
-#[derive(Serialize)]
 pub struct Decks {
     active_deck: usize,
     removal_request: Option<usize>,
@@ -186,6 +127,14 @@ impl Decks {
 
         Decks {
             active_deck: 0,
+            removal_request: None,
+            decks,
+        }
+    }
+
+    pub fn new2(active_deck: usize, decks: Vec<Deck>) -> Self {
+        Self {
+            active_deck,
             removal_request: None,
             decks,
         }
@@ -280,37 +229,6 @@ impl Decks {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct SerializableDecks {
-    active_deck: usize,
-    removal_request: Option<usize>,
-    decks: Vec<SerializableDeck>,
-}
-
-impl SerializableDecks {
-    pub fn into_decks(self, ndb: &nostrdb::Ndb, deck_pubkey: Option<&[u8; 32]>) -> Decks {
-        Decks {
-            active_deck: self.active_deck,
-            removal_request: self.removal_request,
-            decks: self
-                .decks
-                .into_iter()
-                .map(|d| d.into_deck(ndb, deck_pubkey))
-                .collect(),
-        }
-    }
-}
-
-impl From<&Decks> for SerializableDecks {
-    fn from(value: &Decks) -> Self {
-        SerializableDecks {
-            active_deck: value.active_deck,
-            removal_request: value.removal_request,
-            decks: value.decks.iter().map(|d| d.into()).collect(),
-        }
-    }
-}
-
 pub struct Deck {
     pub icon: char,
     pub name: String,
@@ -340,6 +258,14 @@ impl Deck {
         }
     }
 
+    pub fn new_with_columns(icon: char, name: String, columns: Columns) -> Self {
+        Self {
+            icon,
+            name,
+            columns,
+        }
+    }
+
     pub fn columns(&self) -> &Columns {
         &self.columns
     }
@@ -351,48 +277,6 @@ impl Deck {
     pub fn edit(&mut self, changes: ConfigureDeckResponse) {
         self.name = changes.name;
         self.icon = changes.icon;
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct SerializableDeck {
-    pub icon: char,
-    pub name: String,
-    columns: SerializableColumns,
-}
-
-impl Serialize for Deck {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let helper = SerializableDeck {
-            icon: self.icon,
-            name: self.name.to_owned(),
-            columns: (&self.columns).into(),
-        };
-
-        helper.serialize(serializer)
-    }
-}
-
-impl From<&Deck> for SerializableDeck {
-    fn from(value: &Deck) -> Self {
-        SerializableDeck {
-            icon: value.icon,
-            name: value.name.to_owned(),
-            columns: (&value.columns).into(),
-        }
-    }
-}
-
-impl SerializableDeck {
-    pub fn into_deck(self, ndb: &nostrdb::Ndb, deck_pubkey: Option<&[u8; 32]>) -> Deck {
-        Deck {
-            icon: self.icon,
-            name: self.name,
-            columns: self.columns.into_columns(ndb, deck_pubkey),
-        }
     }
 }
 

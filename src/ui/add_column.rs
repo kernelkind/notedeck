@@ -1,6 +1,6 @@
 use core::f32;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::{collections::HashMap, str::FromStr};
 
 use egui::{
     pos2, vec2, Align, Button, Color32, FontId, Id, ImageSource, Margin, Pos2, Rect, RichText,
@@ -43,12 +43,68 @@ enum AddColumnOption {
     Hashtag(String),
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum AddColumnRoute {
     Base,
     UndecidedNotification,
     ExternalNotification,
     Hashtag,
+}
+
+impl ToString for AddColumnRoute {
+    fn to_string(&self) -> String {
+        let route_type = "add_column";
+        let column_type = match self {
+            AddColumnRoute::Base => "base",
+            AddColumnRoute::UndecidedNotification => "undecided_notification",
+            AddColumnRoute::ExternalNotification => "external_notification",
+            AddColumnRoute::Hashtag => "hashtag",
+        };
+
+        format!("{}:{}", route_type, column_type)
+    }
+}
+
+impl Serialize for AddColumnRoute {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl FromStr for AddColumnRoute {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.splitn(2, ':'); // Split into two parts: route_type and column_type
+        let route_type = parts.next().ok_or("Missing route_type")?;
+        let column_type = parts.next().ok_or("Missing column_type")?;
+
+        if route_type != "add_column" {
+            return Err(format!("Invalid route_type: {}", route_type));
+        }
+
+        match column_type {
+            "base" => Ok(AddColumnRoute::Base),
+            "undecided_notification" => Ok(AddColumnRoute::UndecidedNotification),
+            "external_notification" => Ok(AddColumnRoute::ExternalNotification),
+            "hashtag" => Ok(AddColumnRoute::Hashtag),
+            _ => Err(format!("Invalid column_type: {}", column_type)),
+        }
+    }
+}
+
+// Implement `Deserialize` using `FromStr`
+impl<'de> Deserialize<'de> for AddColumnRoute {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: &str = Deserialize::deserialize(deserializer)?;
+        AddColumnRoute::from_str(s).map_err(serde::de::Error::custom)
+    }
 }
 
 impl AddColumnOption {

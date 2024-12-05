@@ -6,7 +6,6 @@ use crate::ui::profile::preview::get_profile_displayname_string;
 use enostr::{Filter, Pubkey};
 use nostrdb::{Ndb, Transaction};
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
 use tracing::{error, warn};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,9 +14,31 @@ pub enum PubkeySource {
     DeckAuthor,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+impl ToString for PubkeySource {
+    fn to_string(&self) -> String {
+        let self_name = "pubkey_source";
+        let sub_name = match &self {
+            PubkeySource::Explicit(pubkey) => format!("explicit:{}", pubkey.hex()),
+            PubkeySource::DeckAuthor => "deck_author".to_owned(),
+        };
+
+        format!("{}:{}", self_name, sub_name)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListKind {
     Contact(PubkeySource),
+}
+
+impl ToString for ListKind {
+    fn to_string(&self) -> String {
+        let self_name = "list";
+        let kind_type = match &self {
+            ListKind::Contact(pubkey_source) => format!("contact:{}", pubkey_source.to_string()),
+        };
+        format!("{}:{}", self_name, kind_type)
+    }
 }
 
 ///
@@ -28,7 +49,7 @@ pub enum ListKind {
 ///   - filter
 ///   - ... etc
 ///
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TimelineKind {
     List(ListKind),
 
@@ -42,19 +63,6 @@ pub enum TimelineKind {
     Generic,
 
     Hashtag(String),
-}
-
-impl Display for TimelineKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TimelineKind::List(ListKind::Contact(_src)) => f.write_str("Contacts"),
-            TimelineKind::Generic => f.write_str("Timeline"),
-            TimelineKind::Notifications(_) => f.write_str("Notifications"),
-            TimelineKind::Profile(_) => f.write_str("Profile"),
-            TimelineKind::Universe => f.write_str("Universe"),
-            TimelineKind::Hashtag(_) => f.write_str("Hashtag"),
-        }
-    }
 }
 
 impl TimelineKind {

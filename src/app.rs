@@ -442,9 +442,9 @@ impl Damus {
             .map(|a| a.pubkey.bytes());
 
         let decks_cache = if parsed_args.columns.is_empty() {
-            if let Some(serializable_decks_cache) = storage::load_decks_cache(&path) {
+            if let Some(decks_cache) = storage::load_decks_cache(&path, &ndb) {
                 info!("Using decks cache from disk");
-                serializable_decks_cache.into_decks_cache(&ndb)
+                decks_cache
             } else {
                 info!("Could read not decks cache from disk");
                 let mut cache = DecksCache::new_with_demo_config(&ndb);
@@ -633,7 +633,7 @@ fn render_damus_mobile(ctx: &egui::Context, app: &mut Damus) {
         if !app.columns().columns().is_empty()
             && nav::render_nav(0, app, ui).process_render_nav_response(app)
         {
-            storage::save_decks_cache(&app.path, &(&app.decks_cache).into());
+            storage::save_decks_cache(&app.path, &app.decks_cache);
         }
     });
 }
@@ -748,7 +748,7 @@ fn timelines_view(ui: &mut egui::Ui, sizes: Size, app: &mut Damus) {
             }
 
             if save_cols {
-                storage::save_decks_cache(&app.path, &(&app.decks_cache).into());
+                storage::save_decks_cache(&app.path, &app.decks_cache);
             }
         });
 }
