@@ -3,8 +3,13 @@ use image::imageops::FilterType;
 use notedeck::ImageCache;
 use notedeck::Result;
 use poll_promise::Promise;
+use std::io;
 use std::path;
+use std::path::PathBuf;
 use tokio::fs;
+use tracing::info;
+
+use crate::Error;
 
 //pub type ImageCacheKey = String;
 //pub type ImageCacheValue = Promise<Result<TextureHandle>>;
@@ -196,6 +201,17 @@ fn fetch_img_from_disk(
 
         Ok(ctx.load_texture(&url, img, Default::default()))
     })
+}
+
+// pub fn fetch_binary_from_disk(path: PathBuf) -> Promise<Result<Vec<u8>>> {
+//     Promise::spawn_async(async move {
+//         let data = fs::read(path).await?;
+//         Ok(data)
+//     })
+// }
+
+pub fn fetch_binary_from_disk(path: PathBuf) -> Result<Vec<u8>> {
+    std::fs::read(path).map_err(|e| notedeck::Error::Generic(e.to_string()))
 }
 
 /// Controls type-specific handling

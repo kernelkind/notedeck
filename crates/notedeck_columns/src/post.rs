@@ -2,9 +2,12 @@ use enostr::FullKeypair;
 use nostrdb::{Note, NoteBuilder, NoteReply};
 use std::collections::HashSet;
 
+use crate::media_upload::Nip94Event;
+
 pub struct NewPost {
     pub content: String,
     pub account: FullKeypair,
+    pub media: Vec<Nip94Event>,
 }
 
 fn add_client_tag(builder: NoteBuilder<'_>) -> NoteBuilder<'_> {
@@ -15,26 +18,34 @@ fn add_client_tag(builder: NoteBuilder<'_>) -> NoteBuilder<'_> {
 }
 
 impl NewPost {
-    pub fn new(content: String, account: FullKeypair) -> Self {
-        NewPost { content, account }
+    pub fn new(content: String, account: FullKeypair, media: Vec<Nip94Event>) -> Self {
+        NewPost {
+            content,
+            account,
+            media,
+        }
     }
 
     pub fn to_note(&self, seckey: &[u8; 32]) -> Note {
-        let mut builder = add_client_tag(NoteBuilder::new())
-            .kind(1)
-            .content(&self.content);
+        let mut content = self.content.clone();
+        append_urls(&mut content, &self.media);
+
+        let mut builder = add_client_tag(NoteBuilder::new()).kind(1).content(&content);
 
         for hashtag in Self::extract_hashtags(&self.content) {
             builder = builder.start_tag().tag_str("t").tag_str(&hashtag);
         }
 
+        builder = add_imeta_tags(builder, &self.media);
+
         builder.sign(seckey).build().expect("note should be ok")
     }
 
     pub fn to_reply(&self, seckey: &[u8; 32], replying_to: &Note) -> Note {
-        let builder = add_client_tag(NoteBuilder::new())
-            .kind(1)
-            .content(&self.content);
+        let mut content = self.content.clone();
+        append_urls(&mut content, &self.media);
+
+        let builder = add_client_tag(NoteBuilder::new()).kind(1).content(&content);
 
         let nip10 = NoteReply::new(replying_to.tags());
 
@@ -96,6 +107,8 @@ impl NewPost {
             builder = builder.start_tag().tag_str("p").tag_str(&hex::encode(id));
         }
 
+        let builder = add_imeta_tags(builder, &self.media);
+
         builder
             .sign(seckey)
             .build()
@@ -103,17 +116,21 @@ impl NewPost {
     }
 
     pub fn to_quote(&self, seckey: &[u8; 32], quoting: &Note) -> Note {
-        let new_content = format!(
+        let mut new_content = format!(
             "{}\nnostr:{}",
             self.content,
             enostr::NoteId::new(*quoting.id()).to_bech().unwrap()
         );
+
+        append_urls(&mut new_content, &self.media);
 
         let mut builder = NoteBuilder::new().kind(1).content(&new_content);
 
         for hashtag in Self::extract_hashtags(&self.content) {
             builder = builder.start_tag().tag_str("t").tag_str(&hashtag);
         }
+
+        let builder = add_imeta_tags(builder, &self.media);
 
         builder
             .start_tag()
@@ -141,6 +158,40 @@ impl NewPost {
         }
         hashtags
     }
+}
+
+fn append_urls(content: &mut String, media: &Vec<Nip94Event>) {
+    for ev in media {
+        content.push(' ');
+        content.push_str(&ev.url);
+    }
+}
+
+fn add_imeta_tags<'a>(builder: NoteBuilder<'a>, media: &Vec<Nip94Event>) -> NoteBuilder<'a> {
+    let mut builder = builder;
+    for item in media {
+        builder = builder
+            .start_tag()
+            .tag_str("imeta")
+            .tag_str(&format!("url {}", item.url))
+            .tag_str(&format!("ox {}", item.ox));
+        if let Some(x) = &item.x {
+            builder = builder.tag_str(&format!("x {x}"));
+        }
+        if let Some(media_type) = &item.media_type {
+            builder = builder.tag_str(&format!("m {media_type}"));
+        }
+        if let Some(dims) = &item.dimensions {
+            builder = builder.tag_str(&format!("{}x{}", dims.0, dims.1));
+        }
+        if let Some(bh) = &item.blurhash {
+            builder = builder.tag_str(&format!("blurhash {bh}"));
+        }
+        if let Some(thumb) = &item.thumb {
+            builder = builder.tag_str(&format!("fallback {thumb}"));
+        }
+    }
+    builder
 }
 
 #[cfg(test)]

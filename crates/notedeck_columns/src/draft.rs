@@ -1,9 +1,14 @@
-use crate::ui::note::PostType;
+use poll_promise::Promise;
+
+use crate::{media_upload::Nip94Event, ui::note::PostType, Error};
 use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct Draft {
     pub buffer: String,
+    pub uploaded_media: Vec<Nip94Event>, // media uploads to include
+    pub uploading_media: Vec<Promise<Result<Nip94Event, Error>>>, // promises that aren't ready yet
+    pub upload_errors: Vec<String>,      // media upload errors to show the user
 }
 
 #[derive(Default)]
