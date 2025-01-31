@@ -1,16 +1,19 @@
-use crate::draft::{Draft, Drafts};
+use crate::draft::{Draft, Drafts, MentionResults};
 use crate::images::fetch_img;
 use crate::media_upload::{nostrbuild_nip96_upload, MediaPath};
 use crate::post::NewPost;
+use crate::ui::search_results::SearchResultsView;
 use crate::ui::{self, Preview, PreviewConfig};
 use crate::Result;
+use egui::text::CCursorRange;
 use egui::widgets::text_edit::TextEdit;
-use egui::{vec2, Frame, Layout, Margin, Pos2, ScrollArea, Sense};
+use egui::{vec2, Frame, Layout, Margin, Pos2, Rect, ScrollArea, Sense, UiBuilder};
 use enostr::{FilledKeypair, FullKeypair, NoteId, RelayPool};
 use nostrdb::{Ndb, Transaction};
 
 use notedeck::{ImageCache, NoteCache};
-use tracing::error;
+use security_framework::item::SearchResult;
+use tracing::{error, info};
 
 use super::contents::render_note_preview;
 
@@ -123,18 +126,80 @@ impl<'a> PostView<'a> {
             );
         }
 
-        let response = ui.add_sized(
-            ui.available_size(),
-            TextEdit::multiline(&mut self.draft.buffer)
-                .hint_text(egui::RichText::new("Write a banger note here...").weak())
-                .frame(false),
-        );
+        let out = TextEdit::multiline(&mut self.draft.buffer)
+            .hint_text(egui::RichText::new("Write a banger note here...").weak())
+            .frame(false)
+            .desired_width(ui.available_width())
+            .show(ui);
 
-        let focused = response.has_focus();
+        let cursor = get_cursor_index(&out.state.cursor.char_range());
+        if let Some(cursor_index) = cursor {
+            if let Some(mention) = self.draft.buffer.get_mention(cursor_index) {
+                let mention_str = self.draft.buffer.get_mention_string(mention);
+
+                // Only fetch new results if the cached mention is different
+                if !matches!(
+                    self.draft.cur_mention_results.as_ref(),
+                    Some(res) if res.text == mention_str
+                ) {
+                    if let Ok(res) = self.ndb.search_profile(txn, mention_str, 10) {
+                        self.draft.cur_mention_results = Some(MentionResults {
+                            text: mention_str.to_owned(),
+                            results: res,
+                        });
+                    }
+                }
+
+                if let Some(res) = self
+                    .draft
+                    .cur_mention_results
+                    .as_ref()
+                    .map(|res| &res.results)
+                {
+                    info!("HAVE RES");
+                    let maybe_row_bottom = if let Some(cur) = out.cursor_range {
+                        let row_index = cur.primary.rcursor.row;
+                        if let Some(r) = out.galley.rows.get(row_index) {
+                            Some(r.rect.bottom())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    let top_search_y = if let Some(row_bottom) = maybe_row_bottom {
+                        row_bottom
+                    } else {
+                        out.galley.rect.bottom()
+                    };
+
+                    ui.allocate_new_ui(
+                        UiBuilder::new().max_rect(ui.max_rect().shrink2(vec2(0.0, top_search_y))),
+                        |ui| {
+                            SearchResultsView::new(&mut self.img_cache, &self.ndb, txn, res)
+                                .show(ui);
+                        },
+                    );
+                    // egui::Area::new(ui.id().with("foreground_area"))
+                    //     .order(egui::Order::Foreground)
+                    //     // .constrain_to(Rect::from_min_max(
+                    //     //     Pos2::new(0.0, top_search_y),
+                    //     //     Pos2::new(ui.available_width(), ui.available_height()),
+                    //     // ))
+                    //     .show(ui.ctx(), |ui| {
+                    //         SearchResultsView::new(&mut self.img_cache, &self.ndb, txn, res)
+                    //             .show(ui);
+                    //     });
+                }
+            }
+        }
+
+        let focused = out.response.has_focus();
 
         ui.ctx().data_mut(|d| d.insert_temp(self.id(), focused));
 
-        response
+        out.response
     }
 
     fn focused(&self, ui: &egui::Ui) -> bool {
@@ -234,10 +299,12 @@ impl<'a> PostView<'a> {
                                     )
                                     .clicked()
                                 {
+                                    let output = self.draft.buffer.output();
                                     let new_post = NewPost::new(
-                                        self.draft.buffer.clone(),
+                                        output.text,
                                         self.poster.to_full(),
                                         self.draft.uploaded_media.clone(),
+                                        output.mentions,
                                     );
                                     Some(PostAction::new(self.post_type.clone(), new_post))
                                 } else {
@@ -478,6 +545,33 @@ fn show_remove_upload_button(ui: &mut egui::Ui, desired_rect: egui::Rect) -> egu
         egui::Stroke::new(1.33, ui.visuals().text_color()),
     );
     resp
+}
+
+/// returns index on `text` if the char before the cursor is `desired`
+fn char_before_cursor(text: &str, cursor: &Option<CCursorRange>, desired: char) -> Option<usize> {
+    let range = cursor.as_ref()?;
+
+    if range.primary.index == range.secondary.index {
+        let index = range.primary.index - 1;
+        let char_before_cursor = text.chars().nth(index)?;
+        if char_before_cursor == desired {
+            Some(index)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+fn get_cursor_index(cursor: &Option<CCursorRange>) -> Option<usize> {
+    let range = cursor.as_ref()?;
+
+    if range.primary.index == range.secondary.index {
+        Some(range.primary.index)
+    } else {
+        None
+    }
 }
 
 mod preview {

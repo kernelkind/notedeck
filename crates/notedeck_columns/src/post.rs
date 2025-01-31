@@ -13,6 +13,7 @@ pub struct NewPost {
     pub content: String,
     pub account: FullKeypair,
     pub media: Vec<Nip94Event>,
+    pub mentions: Vec<Pubkey>,
 }
 
 fn add_client_tag(builder: NoteBuilder<'_>) -> NoteBuilder<'_> {
@@ -23,11 +24,17 @@ fn add_client_tag(builder: NoteBuilder<'_>) -> NoteBuilder<'_> {
 }
 
 impl NewPost {
-    pub fn new(content: String, account: FullKeypair, media: Vec<Nip94Event>) -> Self {
+    pub fn new(
+        content: String,
+        account: FullKeypair,
+        media: Vec<Nip94Event>,
+        mentions: Vec<Pubkey>,
+    ) -> Self {
         NewPost {
             content,
             account,
             media,
+            mentions,
         }
     }
 
@@ -43,6 +50,10 @@ impl NewPost {
 
         if !self.media.is_empty() {
             builder = add_imeta_tags(builder, &self.media);
+        }
+
+        if !self.mentions.is_empty() {
+            builder = add_mention_tags(builder, &self.mentions);
         }
 
         builder.sign(seckey).build().expect("note should be ok")
@@ -118,6 +129,10 @@ impl NewPost {
             builder = add_imeta_tags(builder, &self.media);
         }
 
+        if !self.mentions.is_empty() {
+            builder = add_mention_tags(builder, &self.mentions);
+        }
+
         builder
             .sign(seckey)
             .build()
@@ -141,6 +156,10 @@ impl NewPost {
 
         if !self.media.is_empty() {
             builder = add_imeta_tags(builder, &self.media);
+        }
+
+        if !self.mentions.is_empty() {
+            builder = add_mention_tags(builder, &self.mentions);
         }
 
         builder
@@ -208,7 +227,17 @@ fn add_imeta_tags<'a>(builder: NoteBuilder<'a>, media: &Vec<Nip94Event>) -> Note
     builder
 }
 
-#[derive(Debug)]
+fn add_mention_tags<'a>(builder: NoteBuilder<'a>, mentions: &Vec<Pubkey>) -> NoteBuilder<'a> {
+    let mut builder = builder;
+
+    for mention in mentions {
+        builder = builder.start_tag().tag_str("p").tag_str(&mention.hex());
+    }
+
+    builder
+}
+
+#[derive(Debug, Clone)]
 pub struct PostBuffer {
     text_buffer: String,
     mention_indicator: char,
@@ -253,6 +282,12 @@ impl PostBuffer {
         }
     }
 
+    pub fn get_mention_string<'a>(&'a self, mention_index: MentionIndex<'a>) -> &'a str {
+        &self
+            .text_buffer
+            .char_range(mention_index.info.start_index..mention_index.info.end_index)
+    }
+
     pub fn select_full_mention(&mut self, mention_index: usize, pk: Pubkey) {
         // TODO: add name as well
         if let Some(info) = self.mentions.get_mut(mention_index) {
@@ -277,11 +312,38 @@ impl PostBuffer {
             error!("Error selecting mention for index: {mention_index}. Have the following mentions: {:?}", self.mentions);
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.text_buffer.is_empty()
+    }
+
+    pub fn output(&self) -> PostOutput {
+        let mut out = self.text_buffer.clone();
+        let mut mentions = Vec::new();
+        for info in &self.mentions {
+            if let MentionType::Finalized(pk) = info.mention_type {
+                if let Some(bech) = pk.to_bech() {
+                    out.replace_range(info.start_index..info.end_index, &format!("nostr:{bech}"));
+                    mentions.push(pk);
+                }
+            }
+        }
+
+        PostOutput {
+            text: out,
+            mentions,
+        }
+    }
+}
+
+pub struct PostOutput {
+    pub text: String,
+    pub mentions: Vec<Pubkey>,
 }
 
 pub struct MentionIndex<'a> {
-    index: usize,
-    info: &'a MentionInfo,
+    pub index: usize,
+    pub info: &'a MentionInfo,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -439,7 +501,7 @@ impl TextBuffer for PostBuffer {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct MentionInfo {
     pub start_index: usize,
     pub end_index: usize,
