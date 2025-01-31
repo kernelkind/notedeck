@@ -1,4 +1,4 @@
-use egui::Layout;
+use egui::{Frame, Layout, Pos2, ScrollArea, UiBuilder};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
 use notedeck::ImageCache;
 use tracing::{error, info};
@@ -35,7 +35,6 @@ impl<'a> SearchResultsView<'a> {
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<usize> {
         let mut selection = None;
         ui.vertical(|ui| {
-            info!("Showing {} results", self.results.len());
             for (i, res) in self.results.iter().enumerate() {
                 let profile = match self.ndb.get_profile_by_pubkey(&self.txn, res) {
                     Ok(rec) => rec,
@@ -46,12 +45,27 @@ impl<'a> SearchResultsView<'a> {
                 };
 
                 if ui.add(user_result(&profile, &mut self.img_cache)).clicked() {
+                    info!("CLICKED {i}");
                     selection = Some(i)
                 }
             }
         });
 
         selection
+    }
+
+    pub fn show_windowed(&mut self, rect: egui::Rect, ui: &mut egui::Ui) -> Option<usize> {
+        ui.allocate_new_ui(
+            UiBuilder::new().max_rect(rect).sense(egui::Sense::click()),
+            |ui| {
+                Frame::window(ui.style())
+                    .show(ui, |ui| {
+                        ScrollArea::vertical().show(ui, |ui| self.show(ui)).inner
+                    })
+                    .inner
+            },
+        )
+        .inner
     }
 }
 
@@ -61,12 +75,20 @@ fn user_result<'a>(
 ) -> impl egui::Widget + use<'a> {
     |ui: &mut egui::Ui| -> egui::Response {
         ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.add(ProfilePic::new(cache, get_profile_url(Some(profile))).size(48.0));
-            ui.add(one_line_display_name_widget(
-                ui.visuals(),
-                get_display_name(Some(profile)),
-                notedeck::NotedeckTextStyle::Body,
-            ))
+            let frame = Frame::none();
+
+            let frame_resp = frame.show(ui, |ui| {
+                let pfp_resp =
+                    ui.add(ProfilePic::new(cache, get_profile_url(Some(profile))).size(48.0));
+                let name_resp = ui.add(one_line_display_name_widget(
+                    ui.visuals(),
+                    get_display_name(Some(profile)),
+                    notedeck::NotedeckTextStyle::Body,
+                ));
+                pfp_resp.union(name_resp)
+            });
+
+            frame_resp.inner
         })
         .inner
     }

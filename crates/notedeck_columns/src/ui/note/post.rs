@@ -1,18 +1,19 @@
-use crate::draft::{Draft, Drafts, MentionResults};
+use crate::draft::{Draft, Drafts, MentionHint};
 use crate::images::fetch_img;
 use crate::media_upload::{nostrbuild_nip96_upload, MediaPath};
-use crate::post::NewPost;
+use crate::post::{MentionType, NewPost};
+use crate::profile::get_display_name;
 use crate::ui::search_results::SearchResultsView;
 use crate::ui::{self, Preview, PreviewConfig};
 use crate::Result;
 use egui::text::CCursorRange;
+use egui::text_edit::TextEditOutput;
 use egui::widgets::text_edit::TextEdit;
-use egui::{vec2, Frame, Layout, Margin, Pos2, Rect, ScrollArea, Sense, UiBuilder};
-use enostr::{FilledKeypair, FullKeypair, NoteId, RelayPool};
+use egui::{vec2, Frame, Layout, Margin, Pos2, Rect, ScrollArea, Sense};
+use enostr::{FilledKeypair, FullKeypair, NoteId, Pubkey, RelayPool};
 use nostrdb::{Ndb, Transaction};
 
 use notedeck::{ImageCache, NoteCache};
-use security_framework::item::SearchResult;
 use tracing::{error, info};
 
 use super::contents::render_note_preview;
@@ -126,73 +127,15 @@ impl<'a> PostView<'a> {
             );
         }
 
-        let out = TextEdit::multiline(&mut self.draft.buffer)
+        let textedit = TextEdit::multiline(&mut self.draft.buffer)
             .hint_text(egui::RichText::new("Write a banger note here...").weak())
             .frame(false)
-            .desired_width(ui.available_width())
-            .show(ui);
+            .desired_width(ui.available_width());
 
-        let cursor = get_cursor_index(&out.state.cursor.char_range());
-        if let Some(cursor_index) = cursor {
-            if let Some(mention) = self.draft.buffer.get_mention(cursor_index) {
-                let mention_str = self.draft.buffer.get_mention_string(mention);
+        let out = textedit.show(ui);
 
-                // Only fetch new results if the cached mention is different
-                if !matches!(
-                    self.draft.cur_mention_results.as_ref(),
-                    Some(res) if res.text == mention_str
-                ) {
-                    if let Ok(res) = self.ndb.search_profile(txn, mention_str, 10) {
-                        self.draft.cur_mention_results = Some(MentionResults {
-                            text: mention_str.to_owned(),
-                            results: res,
-                        });
-                    }
-                }
-
-                if let Some(res) = self
-                    .draft
-                    .cur_mention_results
-                    .as_ref()
-                    .map(|res| &res.results)
-                {
-                    info!("HAVE RES");
-                    let maybe_row_bottom = if let Some(cur) = out.cursor_range {
-                        let row_index = cur.primary.rcursor.row;
-                        if let Some(r) = out.galley.rows.get(row_index) {
-                            Some(r.rect.bottom())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    let top_search_y = if let Some(row_bottom) = maybe_row_bottom {
-                        row_bottom
-                    } else {
-                        out.galley.rect.bottom()
-                    };
-
-                    ui.allocate_new_ui(
-                        UiBuilder::new().max_rect(ui.max_rect().shrink2(vec2(0.0, top_search_y))),
-                        |ui| {
-                            SearchResultsView::new(&mut self.img_cache, &self.ndb, txn, res)
-                                .show(ui);
-                        },
-                    );
-                    // egui::Area::new(ui.id().with("foreground_area"))
-                    //     .order(egui::Order::Foreground)
-                    //     // .constrain_to(Rect::from_min_max(
-                    //     //     Pos2::new(0.0, top_search_y),
-                    //     //     Pos2::new(ui.available_width(), ui.available_height()),
-                    //     // ))
-                    //     .show(ui.ctx(), |ui| {
-                    //         SearchResultsView::new(&mut self.img_cache, &self.ndb, txn, res)
-                    //             .show(ui);
-                    //     });
-                }
-            }
+        if let Some(cursor_index) = get_cursor_index(&out.state.cursor.char_range()) {
+            self.show_mention_hints(txn, ui, cursor_index, &out);
         }
 
         let focused = out.response.has_focus();
@@ -200,6 +143,75 @@ impl<'a> PostView<'a> {
         ui.ctx().data_mut(|d| d.insert_temp(self.id(), focused));
 
         out.response
+    }
+
+    fn show_mention_hints(
+        &mut self,
+        txn: &nostrdb::Transaction,
+        ui: &mut egui::Ui,
+        cursor_index: usize,
+        textedit_output: &TextEditOutput,
+    ) {
+        if let Some(mention) = &self.draft.buffer.get_mention(cursor_index) {
+            if mention.info.mention_type == MentionType::Pending {
+                let mention_str = self.draft.buffer.get_mention_string(mention);
+
+                if !mention_str.is_empty() {
+                    if let Some(mention_hint) = &mut self.draft.cur_mention_hint {
+                        if mention_hint.index != mention.index {
+                            mention_hint.index = mention.index;
+                            mention_hint.pos = calculate_mention_hints_pos(
+                                &textedit_output,
+                                mention.info.start_index,
+                            );
+                        }
+                        if mention_hint.text != mention_str {
+                            if let Ok(res) = self.ndb.search_profile(txn, mention_str, 10) {
+                                mention_hint.text = mention_str.to_owned();
+                                mention_hint.results = res;
+                            }
+                        }
+                    } else {
+                        if let Ok(res) = self.ndb.search_profile(txn, mention_str, 10) {
+                            self.draft.cur_mention_hint = Some(MentionHint {
+                                index: mention.index,
+                                text: mention_str.to_owned(),
+                                results: res,
+                                pos: calculate_mention_hints_pos(
+                                    &textedit_output,
+                                    mention.info.start_index,
+                                ),
+                            });
+                        }
+                    }
+                }
+
+                if let Some(hint) = &self.draft.cur_mention_hint {
+                    let hint_selection =
+                        SearchResultsView::new(&mut self.img_cache, &self.ndb, txn, &hint.results)
+                            .show_windowed(
+                                Rect::from_min_max(
+                                    hint.pos,
+                                    Pos2::new(ui.available_width(), ui.available_height()),
+                                ),
+                                ui,
+                            );
+
+                    if let Some(hint_index) = hint_selection {
+                        if let Some(pk) = hint.results.get(hint_index) {
+                            let record = self.ndb.get_profile_by_pubkey(txn, pk);
+
+                            self.draft.buffer.select_mention_and_replace_name(
+                                mention.index,
+                                &get_display_name(record.ok().as_ref()).name(),
+                                Pubkey::new(pk.clone()),
+                            );
+                            self.draft.cur_mention_hint = None;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn focused(&self, ui: &egui::Ui) -> bool {
@@ -547,23 +559,6 @@ fn show_remove_upload_button(ui: &mut egui::Ui, desired_rect: egui::Rect) -> egu
     resp
 }
 
-/// returns index on `text` if the char before the cursor is `desired`
-fn char_before_cursor(text: &str, cursor: &Option<CCursorRange>, desired: char) -> Option<usize> {
-    let range = cursor.as_ref()?;
-
-    if range.primary.index == range.secondary.index {
-        let index = range.primary.index - 1;
-        let char_before_cursor = text.chars().nth(index)?;
-        if char_before_cursor == desired {
-            Some(index)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
 fn get_cursor_index(cursor: &Option<CCursorRange>) -> Option<usize> {
     let range = cursor.as_ref()?;
 
@@ -572,6 +567,22 @@ fn get_cursor_index(cursor: &Option<CCursorRange>) -> Option<usize> {
     } else {
         None
     }
+}
+
+fn calculate_mention_hints_pos(out: &TextEditOutput, char_pos: usize) -> egui::Pos2 {
+    let mut cur_pos = 0;
+
+    for row in &out.galley.rows {
+        if cur_pos + row.glyphs.len() <= char_pos {
+            cur_pos += row.glyphs.len();
+        } else if let Some(glyph) = row.glyphs.get(char_pos - cur_pos) {
+            let mut pos = glyph.pos + out.galley_pos.to_vec2();
+            pos.y += 2.0 * row.rect.height();
+            return pos;
+        }
+    }
+
+    out.text_clip_rect.left_bottom()
 }
 
 mod preview {

@@ -5,7 +5,7 @@ use std::{
     collections::{BTreeMap, HashSet},
     ops::Range,
 };
-use tracing::{error, info};
+use tracing::error;
 
 use crate::media_upload::Nip94Event;
 
@@ -264,32 +264,34 @@ impl Default for PostBuffer {
 
 impl PostBuffer {
     pub fn get_mention<'a>(&'a self, cursor_index: usize) -> Option<MentionIndex<'a>> {
-        if let Some((_, mention_index)) = self.mention_ends.range(cursor_index..).next() {
-            if let Some(info) = self.mentions.get(*mention_index) {
-                if info.start_index <= cursor_index && cursor_index <= info.end_index {
-                    Some(MentionIndex {
+        self.mention_ends
+            .range(cursor_index..)
+            .next()
+            .and_then(|(_, mention_index)| {
+                self.mentions
+                    .get(*mention_index)
+                    .filter(|info| {
+                        if let MentionType::Finalized(_) = info.mention_type {
+                            // should exclude the last character if we're finalized
+                            info.start_index <= cursor_index && cursor_index < info.end_index
+                        } else {
+                            info.start_index <= cursor_index && cursor_index <= info.end_index
+                        }
+                    })
+                    .map(|info| MentionIndex {
                         index: *mention_index,
                         info,
                     })
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        }
+            })
     }
 
-    pub fn get_mention_string<'a>(&'a self, mention_index: MentionIndex<'a>) -> &'a str {
+    pub fn get_mention_string<'a>(&'a self, mention_index: &MentionIndex<'a>) -> &'a str {
         &self
             .text_buffer
-            .char_range(mention_index.info.start_index..mention_index.info.end_index)
+            .char_range(mention_index.info.start_index + 1..mention_index.info.end_index) // don't include the delim
     }
 
     pub fn select_full_mention(&mut self, mention_index: usize, pk: Pubkey) {
-        // TODO: add name as well
         if let Some(info) = self.mentions.get_mut(mention_index) {
             info.mention_type = MentionType::Finalized(pk);
         } else {
@@ -805,5 +807,38 @@ mod tests {
         assert_eq!(jb_mention.mention_type, MentionType::Finalized(JB55()));
         assert_eq!(kk_mention.bounds(), (11, 22));
         assert_eq!(kk_mention.mention_type, MentionType::Finalized(KK()));
+    }
+
+    #[test]
+    fn test_two_then_one_between() {
+        let mut buf = PostBuffer::default();
+
+        buf.insert_text("@jb", 0);
+        buf.select_mention_and_replace_name(0, "jb55", JB55());
+        buf.insert_text(" test ", 5);
+        buf.insert_text("@kernel", 11);
+        buf.select_mention_and_replace_name(1, "KernelKind", KK());
+        buf.insert_text(" test", 22);
+
+        assert_eq!(buf.as_str(), "@jb55 test @KernelKind test");
+        assert_eq!(buf.mentions.len(), 2);
+
+        buf.insert_text(" ", 5);
+        buf.insert_text("@els", 6);
+        assert_eq!(buf.mentions.len(), 3);
+        assert_eq!(buf.mentions.get(2).unwrap().bounds(), (6, 10));
+        buf.select_mention_and_replace_name(2, "elsat", JB55());
+        assert_eq!(buf.as_str(), "@jb55 @elsat test @KernelKind test");
+
+        let mut mentions = buf.mentions.iter();
+        let jb_mention = mentions.next().unwrap();
+        let kk_mention = mentions.next().unwrap();
+        let el_mention = mentions.next().unwrap();
+        assert_eq!(jb_mention.bounds(), (0, 5));
+        assert_eq!(jb_mention.mention_type, MentionType::Finalized(JB55()));
+        assert_eq!(kk_mention.bounds(), (18, 29));
+        assert_eq!(kk_mention.mention_type, MentionType::Finalized(KK()));
+        assert_eq!(el_mention.bounds(), (6, 12));
+        assert_eq!(el_mention.mention_type, MentionType::Finalized(JB55()));
     }
 }

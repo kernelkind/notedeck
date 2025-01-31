@@ -183,10 +183,13 @@ pub fn one_line_display_name_widget<'a>(
     let color = visuals.noninteractive().fg_stroke.color;
 
     move |ui: &mut egui::Ui| -> egui::Response {
-        ui.label(
-            RichText::new(display_name.name())
-                .text_style(text_style)
-                .color(color),
+        ui.add(
+            Label::new(
+                RichText::new(display_name.name())
+                    .text_style(text_style)
+                    .color(color),
+            )
+            .selectable(false),
         )
     }
 }

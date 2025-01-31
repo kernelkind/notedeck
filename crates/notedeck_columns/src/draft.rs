@@ -6,13 +6,15 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub struct Draft {
     pub buffer: PostBuffer,
-    pub cur_mention_results: Option<MentionResults>,
+    pub cur_mention_hint: Option<MentionHint>,
     pub uploaded_media: Vec<Nip94Event>, // media uploads to include
     pub uploading_media: Vec<Promise<Result<Nip94Event, Error>>>, // promises that aren't ready yet
     pub upload_errors: Vec<String>,      // media upload errors to show the user
 }
 
-pub struct MentionResults {
+pub struct MentionHint {
+    pub index: usize,
+    pub pos: egui::Pos2,
     pub text: String,
     pub results: Vec<[u8; 32]>,
 }
