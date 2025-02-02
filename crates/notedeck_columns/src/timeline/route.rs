@@ -37,6 +37,7 @@ pub fn render_timeline_route(
     route: TimelineRoute,
     col: usize,
     textmode: bool,
+    inner_rect: egui::Rect,
     ui: &mut egui::Ui,
 ) -> Option<RenderNavAction> {
     match route {
@@ -103,9 +104,11 @@ pub fn render_timeline_route(
                 let draft = drafts.reply_mut(note.id());
 
                 let response = egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui::PostReplyView::new(ndb, poster, draft, note_cache, img_cache, &note)
-                        .id_source(id)
-                        .show(ui)
+                    ui::PostReplyView::new(
+                        ndb, poster, draft, note_cache, img_cache, &note, inner_rect,
+                    )
+                    .id_source(id)
+                    .show(ui)
                 });
 
                 response.inner.action
@@ -143,7 +146,7 @@ pub fn render_timeline_route(
             let draft = drafts.quote_mut(note.id());
 
             let response = egui::ScrollArea::vertical().show(ui, |ui| {
-                QuoteRepostView::new(ndb, poster, note_cache, img_cache, draft, &note)
+                QuoteRepostView::new(ndb, poster, note_cache, img_cache, draft, &note, inner_rect)
                     .id_source(id)
                     .show(ui)
             });

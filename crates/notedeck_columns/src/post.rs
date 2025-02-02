@@ -5,7 +5,7 @@ use std::{
     collections::{BTreeMap, HashSet},
     ops::Range,
 };
-use tracing::error;
+use tracing::{error, info};
 
 use crate::media_upload::Nip94Event;
 
@@ -239,15 +239,15 @@ fn add_mention_tags<'a>(builder: NoteBuilder<'a>, mentions: &Vec<Pubkey>) -> Not
 
 #[derive(Debug, Clone)]
 pub struct PostBuffer {
-    text_buffer: String,
-    mention_indicator: char,
-    mentions: Vec<MentionInfo>,
+    pub text_buffer: String,
+    pub mention_indicator: char,
+    pub mentions: Vec<MentionInfo>,
 
     // the start index of a mention is inclusive
-    mention_starts: BTreeMap<usize, usize>, // maps the mention start index with the `Self::mentions` Vec
+    pub mention_starts: BTreeMap<usize, usize>, // maps the mention start index with the `Self::mentions` Vec
 
     // the end index of a mention is exclusive
-    mention_ends: BTreeMap<usize, usize>, // maps the mention end index with the `Self::mentions` Vec
+    pub mention_ends: BTreeMap<usize, usize>, // maps the mention end index with the `Self::mentions` Vec
 }
 
 impl Default for PostBuffer {
@@ -288,7 +288,8 @@ impl PostBuffer {
     pub fn get_mention_string<'a>(&'a self, mention_index: &MentionIndex<'a>) -> &'a str {
         &self
             .text_buffer
-            .char_range(mention_index.info.start_index + 1..mention_index.info.end_index) // don't include the delim
+            .char_range(mention_index.info.start_index + 1..mention_index.info.end_index)
+        // don't include the delim
     }
 
     pub fn select_full_mention(&mut self, mention_index: usize, pk: Pubkey) {
@@ -335,6 +336,25 @@ impl PostBuffer {
             text: out,
             mentions,
         }
+    }
+
+    // mapping from start index to end index of each finalized mention ordered according to when mention appears in text
+    pub fn to_indicies_mapping(&self) -> Option<Vec<(usize, usize)>> {
+        let mut mapping = if self.mentions.is_empty() {
+            return None;
+        } else {
+            Vec::new()
+        };
+
+        for (start_ind, mention_ind) in &self.mention_starts {
+            if let Some(info) = self.mentions.get(*mention_ind) {
+                if matches!(info.mention_type, MentionType::Finalized(_)) {
+                    mapping.push((*start_ind, info.end_index));
+                }
+            }
+        }
+
+        Some(mapping)
     }
 }
 
@@ -500,6 +520,10 @@ impl TextBuffer for PostBuffer {
                 }
             }
         }
+        info!(
+            "[delete_char_range] mentions: {:?}, starts: {:?}, ends: {:?}",
+            self.mentions, self.mention_starts, self.mention_ends
+        );
     }
 }
 
@@ -743,6 +767,8 @@ mod tests {
         buf.delete_char_range(6..11);
         assert_eq!(buf.as_str(), "hello ");
         assert!(buf.mentions.is_empty());
+        assert!(buf.mention_starts.is_empty());
+        assert!(buf.mention_ends.is_empty());
     }
 
     #[test]
@@ -762,8 +788,12 @@ mod tests {
 
         assert_eq!(buf.mentions.len(), 2);
         let mut mentions = buf.mentions.iter();
-        assert_eq!(mentions.next().unwrap().bounds(), (0, 5));
-        assert_eq!(mentions.next().unwrap().bounds(), (11, 13));
+        let jb_mention = mentions.next().unwrap();
+        let kk_mention = mentions.next().unwrap();
+        assert_eq!(jb_mention.bounds(), (0, 5));
+        assert_eq!(jb_mention.mention_type, MentionType::Finalized(JB55()));
+        assert_eq!(kk_mention.bounds(), (11, 13));
+        assert_eq!(kk_mention.mention_type, MentionType::Pending);
     }
 
     #[test]

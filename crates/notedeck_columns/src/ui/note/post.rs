@@ -5,11 +5,11 @@ use crate::post::{MentionType, NewPost};
 use crate::profile::get_display_name;
 use crate::ui::search_results::SearchResultsView;
 use crate::ui::{self, Preview, PreviewConfig};
-use crate::Result;
-use egui::text::CCursorRange;
+use crate::{colors, Result};
+use egui::text::{CCursorRange, LayoutJob};
 use egui::text_edit::TextEditOutput;
 use egui::widgets::text_edit::TextEdit;
-use egui::{vec2, Frame, Layout, Margin, Pos2, Rect, ScrollArea, Sense};
+use egui::{vec2, Frame, Layout, Margin, Pos2, ScrollArea, Sense, TextFormat};
 use enostr::{FilledKeypair, FullKeypair, NoteId, Pubkey, RelayPool};
 use nostrdb::{Ndb, Transaction};
 
@@ -26,6 +26,7 @@ pub struct PostView<'a> {
     note_cache: &'a mut NoteCache,
     poster: FilledKeypair<'a>,
     id_source: Option<egui::Id>,
+    inner_rect: egui::Rect,
 }
 
 #[derive(Clone)]
@@ -88,6 +89,7 @@ impl<'a> PostView<'a> {
         img_cache: &'a mut ImageCache,
         note_cache: &'a mut NoteCache,
         poster: FilledKeypair<'a>,
+        inner_rect: egui::Rect,
     ) -> Self {
         let id_source: Option<egui::Id> = None;
         PostView {
@@ -98,6 +100,7 @@ impl<'a> PostView<'a> {
             poster,
             id_source,
             post_type,
+            inner_rect,
         }
     }
 
@@ -127,10 +130,18 @@ impl<'a> PostView<'a> {
             );
         }
 
+        let indicies_mapping = self.draft.buffer.to_indicies_mapping();
+        let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
+            let mut layout_job = post_layout_job(string, &indicies_mapping);
+            layout_job.wrap.max_width = wrap_width;
+            ui.fonts(|f| f.layout_job(layout_job))
+        };
+
         let textedit = TextEdit::multiline(&mut self.draft.buffer)
             .hint_text(egui::RichText::new("Write a banger note here...").weak())
             .frame(false)
-            .desired_width(ui.available_width());
+            .desired_width(ui.available_width())
+            .layouter(&mut layouter);
 
         let out = textedit.show(ui);
 
@@ -187,15 +198,14 @@ impl<'a> PostView<'a> {
                 }
 
                 if let Some(hint) = &self.draft.cur_mention_hint {
+                    let hint_rect = {
+                        let mut hint_rect = self.inner_rect;
+                        hint_rect.set_top(hint.pos.y);
+                        hint_rect
+                    };
                     let hint_selection =
                         SearchResultsView::new(&mut self.img_cache, &self.ndb, txn, &hint.results)
-                            .show_windowed(
-                                Rect::from_min_max(
-                                    hint.pos,
-                                    Pos2::new(ui.available_width(), ui.available_height()),
-                                ),
-                                ui,
-                            );
+                            .show_in_rect(hint_rect, ui);
 
                     if let Some(hint_index) = hint_selection {
                         if let Some(pk) = hint.results.get(hint_index) {
@@ -577,12 +587,41 @@ fn calculate_mention_hints_pos(out: &TextEditOutput, char_pos: usize) -> egui::P
             cur_pos += row.glyphs.len();
         } else if let Some(glyph) = row.glyphs.get(char_pos - cur_pos) {
             let mut pos = glyph.pos + out.galley_pos.to_vec2();
-            pos.y += 2.0 * row.rect.height();
+            pos.y += row.rect.height();
             return pos;
         }
     }
 
     out.text_clip_rect.left_bottom()
+}
+
+fn post_layout_job(text: &str, indicies_mapping: &Option<Vec<(usize, usize)>>) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    let colored_fmt = {
+        let mut fmt = TextFormat::default();
+        fmt.color = colors::PINK;
+        fmt
+    };
+
+    let mut prev_text_index = 0;
+    if let Some(indicies_mapping) = indicies_mapping {
+        for (start_ind, end_ind) in indicies_mapping {
+            job.append(
+                &text[prev_text_index..*start_ind],
+                0.0,
+                TextFormat::default(),
+            );
+
+            job.append(&text[*start_ind..*end_ind], 0.0, colored_fmt.clone());
+            prev_text_index = *end_ind;
+        }
+    }
+
+    if prev_text_index < text.len() {
+        job.append(&text[prev_text_index..], 0.0, TextFormat::default());
+    }
+
+    job
 }
 
 mod preview {
@@ -638,6 +677,7 @@ mod preview {
                 app.img_cache,
                 app.note_cache,
                 self.poster.to_filled(),
+                ui.available_rect_before_wrap(),
             )
             .ui(&txn, ui);
         }
