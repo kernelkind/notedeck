@@ -256,6 +256,7 @@ fn render_nav_body(
     ctx: &mut AppContext<'_>,
     top: &Route,
     col: usize,
+    inner_rect: egui::Rect,
 ) -> Option<RenderNavAction> {
     match top {
         Route::Timeline(tlr) => render_timeline_route(
@@ -270,6 +271,7 @@ fn render_nav_body(
             *tlr,
             col,
             app.textmode,
+            inner_rect,
             ui,
         ),
         Route::Accounts(amr) => {
@@ -306,6 +308,7 @@ fn render_nav_body(
                 ctx.img_cache,
                 ctx.note_cache,
                 kp,
+                inner_rect,
             )
             .ui(&txn, ui);
 
@@ -417,6 +420,7 @@ fn render_nav_body(
 #[must_use = "RenderNavResponse must be handled by calling .process_render_nav_response(..)"]
 pub fn render_nav(
     col: usize,
+    inner_rect: egui::Rect,
     app: &mut Damus,
     ctx: &mut AppContext<'_>,
     ui: &mut egui::Ui,
@@ -454,7 +458,14 @@ pub fn render_nav(
             col,
         )
         .show(ui),
-        NavUiType::Body => render_nav_body(ui, app, ctx, nav.routes().last().expect("top"), col),
+        NavUiType::Body => render_nav_body(
+            ui,
+            app,
+            ctx,
+            nav.routes().last().expect("top"),
+            col,
+            inner_rect,
+        ),
     });
 
     RenderNavResponse::new(col, nav_response)
