@@ -1,4 +1,4 @@
-use egui::TextBuffer;
+use egui::{text::LayoutJob, TextBuffer};
 use enostr::{FullKeypair, Pubkey};
 use nostrdb::{Note, NoteBuilder, NoteReply};
 use std::{
@@ -341,6 +341,46 @@ impl PostBuffer {
             mentions,
         }
     }
+
+    pub fn to_layout_job(&self) -> LayoutJob {
+        let mut job = LayoutJob::default();
+        let colored_fmt = egui::TextFormat {
+            color: crate::colors::PINK,
+            ..Default::default()
+        };
+
+        let mut prev_text_index = 0;
+        for (start_ind, mention_ind) in &self.mention_starts {
+            if let Some(info) = self.mentions.get(*mention_ind) {
+                if matches!(info.mention_type, MentionType::Finalized(_)) {
+                    let end_ind = info.end_index;
+                    job.append(
+                        &self.text_buffer[prev_text_index..*start_ind],
+                        0.0,
+                        egui::TextFormat::default(),
+                    );
+
+                    job.append(
+                        &self.text_buffer[*start_ind..end_ind],
+                        0.0,
+                        colored_fmt.clone(),
+                    );
+                    prev_text_index = end_ind;
+                }
+            }
+        }
+
+        if prev_text_index < self.text_buffer.len() {
+            job.append(
+                &self.text_buffer[prev_text_index..],
+                0.0,
+                egui::TextFormat::default(),
+            );
+        }
+
+        job
+    }
+}
 
 pub fn downcast_post_buffer(buffer: &dyn TextBuffer) -> Option<&PostBuffer> {
     let mut hasher = DefaultHasher::new();
