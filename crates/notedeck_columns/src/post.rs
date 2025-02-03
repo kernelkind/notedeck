@@ -2,7 +2,9 @@ use egui::TextBuffer;
 use enostr::{FullKeypair, Pubkey};
 use nostrdb::{Note, NoteBuilder, NoteReply};
 use std::{
+    any::TypeId,
     collections::{BTreeMap, HashSet},
+    hash::{DefaultHasher, Hash, Hasher},
     ops::Range,
 };
 use tracing::error;
@@ -339,6 +341,17 @@ impl PostBuffer {
             mentions,
         }
     }
+
+pub fn downcast_post_buffer(buffer: &dyn TextBuffer) -> Option<&PostBuffer> {
+    let mut hasher = DefaultHasher::new();
+    TypeId::of::<PostBuffer>().hash(&mut hasher);
+    let post_id = hasher.finish() as usize;
+
+    if buffer.type_id() == post_id {
+        unsafe { Some(&*(buffer as *const dyn TextBuffer as *const PostBuffer)) }
+    } else {
+        None
+    }
 }
 
 pub struct PostOutput {
@@ -491,6 +504,12 @@ impl TextBuffer for PostBuffer {
                 }
             }
         }
+    }
+
+    fn type_id(&self) -> usize {
+        let mut hasher = DefaultHasher::new();
+        TypeId::of::<PostBuffer>().hash(&mut hasher);
+        hasher.finish() as usize
     }
 }
 
