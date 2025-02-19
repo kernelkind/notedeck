@@ -4,13 +4,13 @@ use crate::ui::note::{PostResponse, PostType};
 use enostr::{FilledKeypair, NoteId};
 use nostrdb::Ndb;
 
-use notedeck::{MediaCache, NoteCache};
+use notedeck::{Images, NoteCache};
 
 pub struct PostReplyView<'a> {
     ndb: &'a Ndb,
     poster: FilledKeypair<'a>,
     note_cache: &'a mut NoteCache,
-    img_cache: &'a mut MediaCache,
+    img_cache: &'a mut Images,
     draft: &'a mut Draft,
     note: &'a nostrdb::Note<'a>,
     id_source: Option<egui::Id>,
@@ -18,12 +18,13 @@ pub struct PostReplyView<'a> {
 }
 
 impl<'a> PostReplyView<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ndb: &'a Ndb,
         poster: FilledKeypair<'a>,
         draft: &'a mut Draft,
         note_cache: &'a mut NoteCache,
-        img_cache: &'a mut MediaCache,
+        img_cache: &'a mut Images,
         note: &'a nostrdb::Note<'a>,
         inner_rect: egui::Rect,
     ) -> Self {
