@@ -1,3 +1,4 @@
+use crate::urls::{UrlCache, UrlMimes};
 use crate::Result;
 use egui::TextureHandle;
 use poll_promise::Promise;
@@ -25,6 +26,7 @@ pub struct MediaCache {
     url_imgs: MediaCacheMap,
 }
 
+#[derive(Clone)]
 pub enum MediaCacheType {
     Image,
     Gif,
@@ -143,5 +145,27 @@ impl MediaCache {
 pub fn get_texture(textured_image: &TexturedImage) -> &TextureHandle {
     match textured_image {
         TexturedImage::Static(texture_handle) => texture_handle,
+    }
+}
+
+pub struct Images {
+    pub static_imgs: MediaCache,
+    pub gifs: MediaCache,
+    pub urls: UrlMimes,
+}
+
+impl Images {
+    /// path to directory to place [`MediaCache`]s
+    pub fn new(path: path::PathBuf) -> Self {
+        Self {
+            static_imgs: MediaCache::new(path.join(MediaCache::rel_dir(MediaCacheType::Image))),
+            gifs: MediaCache::new(path.join(MediaCache::rel_dir(MediaCacheType::Gif))),
+            urls: UrlMimes::new(UrlCache::new(path.join(UrlCache::rel_dir()))),
+        }
+    }
+
+    pub fn migrate_v0(&self) -> Result<()> {
+        self.static_imgs.migrate_v0()?;
+        self.gifs.migrate_v0()
     }
 }
