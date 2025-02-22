@@ -261,6 +261,8 @@ fn image_carousel(
     images: Vec<(String, MediaCacheType)>,
     carousel_id: egui::Id,
 ) {
+    #[cfg(feature = "profiling")]
+    puffin::profile_function!();
     // let's make sure everything is within our area
 
     let height = 360.0;
@@ -273,6 +275,8 @@ fn image_carousel(
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for (image, cache_type) in images {
+                        #[cfg(feature = "profiling")]
+                        puffin::profile_scope!("render_images", image.clone());
                         render_images(
                             ui,
                             img_cache,
@@ -287,6 +291,8 @@ fn image_carousel(
                             },
                             |ui, url, renderable_media| {
                                 let image_src = get_source(renderable_media);
+                                #[cfg(feature = "profiling")]
+                                puffin::profile_scope!("egui_add_image", url);
                                 let img_resp = ui.add(
                                     Image::new(image_src)
                                         .max_height(height)
