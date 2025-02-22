@@ -1,12 +1,13 @@
 use crate::urls::{UrlCache, UrlMimes};
 use crate::Result;
-use egui::TextureHandle;
+use egui::{ImageSource, TextureHandle};
 use poll_promise::Promise;
 
 use egui::ColorImage;
 
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File};
+use std::sync::Arc;
 
 use hex::ToHex;
 use sha2::Digest;
@@ -19,6 +20,30 @@ pub type MediaCacheMap = HashMap<String, MediaCacheValue>;
 
 pub enum TexturedImage {
     Static(TextureHandle),
+    Animated(ImageBytes),
+}
+
+pub struct ImageBytes {
+    pub uri: String,
+    pub bytes: Arc<[u8]>,
+}
+
+impl From<ImageBytes> for ImageSource<'_> {
+    fn from(value: ImageBytes) -> Self {
+        ImageSource::Bytes {
+            uri: value.uri.into(),
+            bytes: egui::load::Bytes::Shared(value.bytes.clone()),
+        }
+    }
+}
+
+impl ImageBytes {
+    pub fn new(uri: String, bytes: Vec<u8>) -> Self {
+        Self {
+            uri,
+            bytes: bytes.into(),
+        }
+    }
 }
 
 pub struct MediaCache {
@@ -145,6 +170,7 @@ impl MediaCache {
 pub fn get_texture(textured_image: &TexturedImage) -> &TextureHandle {
     match textured_image {
         TexturedImage::Static(texture_handle) => texture_handle,
+        TexturedImage::Animated(_image_bytes) => todo!(),
     }
 }
 
