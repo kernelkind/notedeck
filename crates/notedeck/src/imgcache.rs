@@ -29,10 +29,10 @@ pub struct ImageBytes {
     pub bytes: Arc<[u8]>,
 }
 
-impl From<ImageBytes> for ImageSource<'_> {
-    fn from(value: ImageBytes) -> Self {
+impl From<&ImageBytes> for ImageSource<'_> {
+    fn from(value: &ImageBytes) -> Self {
         ImageSource::Bytes {
-            uri: value.uri.into(),
+            uri: value.uri.clone().into(),
             bytes: egui::load::Bytes::Shared(value.bytes.clone()),
         }
     }
@@ -179,14 +179,6 @@ impl MediaCache {
 
     pub fn map_mut(&mut self) -> &mut MediaCacheMap {
         &mut self.url_imgs
-    }
-}
-
-// TODO: temporary...
-pub fn get_texture(textured_image: &TexturedImage) -> &TextureHandle {
-    match textured_image {
-        TexturedImage::Static(texture_handle) => texture_handle,
-        TexturedImage::Animated(_image_bytes) => todo!(),
     }
 }
 

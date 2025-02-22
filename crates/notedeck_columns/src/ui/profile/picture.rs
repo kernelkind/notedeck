@@ -1,7 +1,7 @@
 use crate::images::ImageType;
-use crate::ui::images::render_images;
+use crate::ui::images::{get_source, render_images};
 use crate::ui::{Preview, PreviewConfig};
-use egui::{vec2, Sense, Stroke, TextureHandle};
+use egui::{vec2, ImageSource, Sense, Stroke};
 use nostrdb::{Ndb, Transaction};
 use tracing::info;
 
@@ -107,15 +107,15 @@ fn render_pfp(
             paint_circle(ui, ui_size, border);
         },
         |ui, _, renderable_media| {
-            let texture_handle = notedeck::get_texture(renderable_media);
-            pfp_image(ui, texture_handle, ui_size, border);
+            let image_src = get_source(renderable_media);
+            pfp_image(ui, image_src, ui_size, border);
         },
     )
 }
 
 fn pfp_image(
     ui: &mut egui::Ui,
-    img: &TextureHandle,
+    img: ImageSource<'_>,
     size: f32,
     border: Option<Stroke>,
 ) -> egui::Response {

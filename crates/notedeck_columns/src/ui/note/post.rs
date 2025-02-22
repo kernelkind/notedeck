@@ -2,7 +2,7 @@ use crate::draft::{Draft, Drafts, MentionHint};
 use crate::media_upload::{nostrbuild_nip96_upload, MediaPath};
 use crate::post::{downcast_post_buffer, MentionType, NewPost};
 use crate::profile::get_display_name;
-use crate::ui::images::render_images;
+use crate::ui::images::{get_source, render_images};
 use crate::ui::search_results::SearchResultsView;
 use crate::ui::{self, Preview, PreviewConfig};
 use crate::Result;
@@ -13,7 +13,7 @@ use egui::{vec2, Frame, Layout, Margin, Pos2, ScrollArea, Sense, TextBuffer};
 use enostr::{FilledKeypair, FullKeypair, NoteId, Pubkey, RelayPool};
 use nostrdb::{Ndb, Transaction};
 
-use notedeck::{get_texture, supported_mime_hosted_at_url, Images, NoteCache};
+use notedeck::{supported_mime_hosted_at_url, Images, NoteCache};
 use tracing::error;
 
 use super::contents::render_note_preview;
@@ -406,12 +406,9 @@ impl<'a> PostView<'a> {
                             media_size
                         };
 
-                        let texture_handle = get_texture(renderable_media);
-                        let img_resp = ui.add(
-                            egui::Image::new(texture_handle)
-                                .max_size(size)
-                                .rounding(12.0),
-                        );
+                        let img_source = get_source(renderable_media);
+                        let img_resp =
+                            ui.add(egui::Image::new(img_source).max_size(size).rounding(12.0));
 
                         let remove_button_rect = {
                             let top_left = img_resp.rect.left_top();

@@ -1,4 +1,4 @@
-use crate::ui::images::render_images;
+use crate::ui::images::{get_source, render_images};
 use crate::ui::{
     self,
     note::{NoteOptions, NoteResponse},
@@ -286,8 +286,9 @@ fn image_carousel(
                                 ui.allocate_space(egui::vec2(spinsz, spinsz));
                             },
                             |ui, url, renderable_media| {
+                                let image_src = get_source(renderable_media);
                                 let img_resp = ui.add(
-                                    Image::new(notedeck::get_texture(renderable_media))
+                                    Image::new(image_src)
                                         .max_height(height)
                                         .rounding(5.0)
                                         .fit_to_original_size(1.0),

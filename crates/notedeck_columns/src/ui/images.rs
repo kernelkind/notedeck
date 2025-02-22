@@ -71,3 +71,12 @@ pub fn render_media_cache(
         })
         .response
 }
+
+pub fn get_source<'a>(renderable_media: &TexturedImage) -> egui::ImageSource<'a> {
+    match renderable_media {
+        notedeck::TexturedImage::Static(texture_handle) => {
+            egui::load::SizedTexture::from_handle(texture_handle).into()
+        }
+        notedeck::TexturedImage::Animated(image_bytes) => image_bytes.into(),
+    }
+}
