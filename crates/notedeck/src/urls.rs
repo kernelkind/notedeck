@@ -9,8 +9,9 @@ use std::{
 
 use egui::TextBuffer;
 use poll_promise::Promise;
+use url::Url;
 
-use crate::Error;
+use crate::{Error, MediaCacheType};
 
 const FILE_NAME: &str = "urls.bin";
 const SAVE_INTERVAL: Duration = Duration::from_secs(60);
@@ -195,7 +196,6 @@ struct SupportedMimeType {
 }
 
 impl SupportedMimeType {
-    #[allow(unused)]
     pub fn from_extension(extension: &str) -> Result<Self, Error> {
         if let Some(mime) = mime_guess::from_ext(extension)
             .first()
@@ -207,12 +207,69 @@ impl SupportedMimeType {
         }
     }
 
+    pub fn from_mime(mime: mime_guess::mime::Mime) -> Result<Self, Error> {
+        if is_mime_supported(&mime) {
+            Ok(Self { mime })
+        } else {
+            Err(Error::Generic("Unsupported mime type".to_owned()))
+        }
+    }
+
     #[allow(unused)]
     pub fn to_mime(&self) -> &str {
         self.mime.essence_str()
+    }
+
+    pub fn to_cache_type(&self) -> MediaCacheType {
+        if self.mime == mime_guess::mime::IMAGE_GIF {
+            MediaCacheType::Gif
+        } else {
+            MediaCacheType::Image
+        }
     }
 }
 
 fn is_mime_supported(mime: &mime_guess::Mime) -> bool {
     mime.type_() == mime_guess::mime::IMAGE
+}
+
+fn url_has_supported_mime(url: &str) -> MimeHostedAtUrl {
+    if let Ok(url) = Url::parse(url) {
+        if let Some(path) = url.path_segments() {
+            if let Some(file_name) = path.last() {
+                if let Some(ext) = std::path::Path::new(file_name)
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                {
+                    if let Ok(supported) = SupportedMimeType::from_extension(ext) {
+                        return MimeHostedAtUrl::Yes(supported.to_cache_type());
+                    } else {
+                        return MimeHostedAtUrl::No;
+                    }
+                }
+            }
+        }
+    }
+    MimeHostedAtUrl::Maybe
+}
+
+pub fn supported_mime_hosted_at_url(urls: &mut UrlMimes, url: &str) -> Option<MediaCacheType> {
+    match url_has_supported_mime(url) {
+        MimeHostedAtUrl::Yes(cache_type) => Some(cache_type),
+        MimeHostedAtUrl::Maybe => urls
+            .get(url)
+            .and_then(|s| s.parse::<mime_guess::mime::Mime>().ok())
+            .and_then(|mime: mime_guess::mime::Mime| {
+                SupportedMimeType::from_mime(mime)
+                    .ok()
+                    .map(|s| s.to_cache_type())
+            }),
+        MimeHostedAtUrl::No => None,
+    }
+}
+
+enum MimeHostedAtUrl {
+    Yes(MediaCacheType),
+    Maybe,
+    No,
 }
