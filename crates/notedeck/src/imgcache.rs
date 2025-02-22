@@ -7,6 +7,7 @@ use egui::ColorImage;
 
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File};
+use std::io::Write;
 use std::sync::Arc;
 
 use hex::ToHex;
@@ -38,11 +39,8 @@ impl From<ImageBytes> for ImageSource<'_> {
 }
 
 impl ImageBytes {
-    pub fn new(uri: String, bytes: Vec<u8>) -> Self {
-        Self {
-            uri,
-            bytes: bytes.into(),
-        }
+    pub fn new(uri: String, bytes: Arc<[u8]>) -> Self {
+        Self { uri, bytes }
     }
 }
 
@@ -105,6 +103,24 @@ impl MediaCache {
             data.size[1] as u32,
             image::ColorType::Rgba8.into(),
         )?;
+
+        Ok(())
+    }
+
+    pub fn write_bytes(cache_dir: &path::Path, hashed_url: &str, bytes: &[u8]) -> Result<()> {
+        let file_path = cache_dir.join(hashed_url);
+
+        if let Some(p) = file_path.parent() {
+            create_dir_all(p)?;
+        }
+
+        let mut file = File::options()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(file_path)?;
+
+        file.write_all(bytes)?;
 
         Ok(())
     }

@@ -1,5 +1,6 @@
 use egui::{pos2, Color32, ColorImage, Rect, Sense, SizeHint};
 use image::imageops::FilterType;
+use notedeck::ImageBytes;
 use notedeck::MediaCache;
 use notedeck::MediaCacheType;
 use notedeck::Result;
@@ -7,6 +8,7 @@ use notedeck::TexturedImage;
 use poll_promise::Promise;
 use std::path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::fs;
 
 //pub type ImageCacheKey = String;
@@ -207,9 +209,20 @@ fn fetch_img_from_disk(
                     Default::default(),
                 )))
             }
-            MediaCacheType::Gif => todo!(),
+            MediaCacheType::Gif => {
+                let data: Arc<[u8]> = Arc::from(fs::read(path).await?.into_boxed_slice());
+
+                let key = MediaCache::key(&url);
+                let img_bytes = ImageBytes::new(to_bytes_iri(&key), data.clone());
+
+                Ok(TexturedImage::Animated(img_bytes))
+            }
         }
     })
+}
+
+fn to_bytes_iri(hashed_url: &str) -> String {
+    format!("bytes://{hashed_url}.gif")
 }
 
 pub fn fetch_binary_from_disk(path: PathBuf) -> Result<Vec<u8>> {
@@ -257,10 +270,10 @@ fn fetch_img_from_net(
     let cloned_url = url.to_owned();
     let cache_path = cache_path.to_owned();
     ehttp::fetch(request, move |response| {
+        let response = response.map_err(notedeck::Error::Generic);
         let handle = match cache_type {
             MediaCacheType::Image => {
                 response
-                    .map_err(notedeck::Error::Generic)
                     .and_then(|resp| parse_img_response(resp, imgtyp))
                     .map(|img| {
                         let texture_handle =
@@ -274,7 +287,23 @@ fn fetch_img_from_net(
                         TexturedImage::Static(texture_handle)
                     })
             }
-            MediaCacheType::Gif => todo!(),
+            MediaCacheType::Gif => response.map(|resp| {
+                let bytes: Arc<[u8]> = Arc::from(resp.bytes.into_boxed_slice());
+
+                let key = MediaCache::key(&cloned_url);
+                let img_bytes_uri = to_bytes_iri(&key);
+
+                let cloned_bytes = bytes.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = MediaCache::write_bytes(&cache_path, &key, &cloned_bytes) {
+                        tracing::error!("Could not write gif to file {e}");
+                    }
+                });
+
+                let img_bytes = ImageBytes::new(img_bytes_uri, bytes.clone());
+
+                TexturedImage::Animated(img_bytes)
+            }),
         };
 
         sender.send(handle); // send the results back to the UI thread.
