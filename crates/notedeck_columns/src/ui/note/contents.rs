@@ -8,7 +8,7 @@ use egui::{Color32, Hyperlink, Image, RichText};
 use nostrdb::{BlockType, Mention, Ndb, Note, NoteKey, Transaction};
 use tracing::warn;
 
-use notedeck::{Images, NoteCache};
+use notedeck::{supported_mime_hosted_at_url, Images, MediaCacheType, NoteCache};
 
 pub struct NoteContents<'a> {
     ndb: &'a Ndb,
@@ -126,10 +126,6 @@ pub fn render_note_preview(
         .inner
 }
 
-fn is_image_link(url: &str) -> bool {
-    url.ends_with("png") || url.ends_with("jpg") || url.ends_with("jpeg")
-}
-
 #[allow(clippy::too_many_arguments)]
 fn render_note_contents(
     ui: &mut egui::Ui,
@@ -145,7 +141,7 @@ fn render_note_contents(
     puffin::profile_function!();
 
     let selectable = options.has_selectable_text();
-    let mut images: Vec<String> = vec![];
+    let mut images: Vec<(String, MediaCacheType)> = vec![];
     let mut note_action: Option<NoteAction> = None;
     let mut inline_note: Option<(&[u8; 32], &str)> = None;
     let hide_media = options.has_hide_media();
@@ -211,9 +207,13 @@ fn render_note_contents(
                 }
 
                 BlockType::Url => {
-                    let lower_url = block.as_str().to_lowercase();
-                    if !hide_media && is_image_link(&lower_url) {
-                        images.push(block.as_str().to_string());
+                    let url = block.as_str();
+                    if !hide_media {
+                        if let Some(cache_type) =
+                            supported_mime_hosted_at_url(&mut img_cache.urls, url)
+                        {
+                            images.push((url.to_string(), cache_type));
+                        }
                     } else {
                         #[cfg(feature = "profiling")]
                         puffin::profile_scope!("url contents");
@@ -258,7 +258,7 @@ fn render_note_contents(
 fn image_carousel(
     ui: &mut egui::Ui,
     img_cache: &mut Images,
-    images: Vec<String>,
+    images: Vec<(String, MediaCacheType)>,
     carousel_id: egui::Id,
 ) {
     // let's make sure everything is within our area
@@ -272,12 +272,13 @@ fn image_carousel(
             .id_salt(carousel_id)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    for image in images {
+                    for (image, cache_type) in images {
                         render_images(
                             ui,
                             img_cache,
                             &image,
                             ImageType::Content(width.round() as u32, height.round() as u32),
+                            cache_type,
                             |ui| {
                                 ui.allocate_space(egui::vec2(spinsz, spinsz));
                             },

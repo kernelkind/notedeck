@@ -5,7 +5,7 @@ use egui::{vec2, Sense, Stroke, TextureHandle};
 use nostrdb::{Ndb, Transaction};
 use tracing::info;
 
-use notedeck::{AppContext, Images};
+use notedeck::{supported_mime_hosted_at_url, AppContext, Images};
 
 pub struct ProfilePic<'cache, 'url> {
     cache: &'cache mut Images,
@@ -92,11 +92,14 @@ fn render_pfp(
     // We will want to downsample these so it's not blurry on hi res displays
     let img_size = 128u32;
 
+    let cache_type = supported_mime_hosted_at_url(&mut img_cache.urls, url)
+        .unwrap_or(notedeck::MediaCacheType::Image);
     render_images(
         ui,
         img_cache,
         url,
         ImageType::Profile(img_size),
+        cache_type,
         |ui| {
             paint_circle(ui, ui_size, border);
         },

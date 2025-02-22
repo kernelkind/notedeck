@@ -1,6 +1,7 @@
 use egui::{pos2, Color32, ColorImage, Rect, Sense, SizeHint};
 use image::imageops::FilterType;
 use notedeck::MediaCache;
+use notedeck::MediaCacheType;
 use notedeck::Result;
 use notedeck::TexturedImage;
 use poll_promise::Promise;
@@ -178,29 +179,36 @@ fn fetch_img_from_disk(
     ctx: &egui::Context,
     url: &str,
     path: &path::Path,
+    cache_type: MediaCacheType,
 ) -> Promise<Result<TexturedImage>> {
     let ctx = ctx.clone();
     let url = url.to_owned();
     let path = path.to_owned();
     Promise::spawn_async(async move {
-        let data = fs::read(path).await?;
-        let image_buffer = image::load_from_memory(&data).map_err(notedeck::Error::Image)?;
+        match cache_type {
+            MediaCacheType::Image => {
+                let data = fs::read(path).await?;
+                let image_buffer =
+                    image::load_from_memory(&data).map_err(notedeck::Error::Image)?;
 
-        // TODO: remove unwrap here
-        let flat_samples = image_buffer.as_flat_samples_u8().unwrap();
-        let img = ColorImage::from_rgba_unmultiplied(
-            [
-                image_buffer.width() as usize,
-                image_buffer.height() as usize,
-            ],
-            flat_samples.as_slice(),
-        );
+                // TODO: remove unwrap here
+                let flat_samples = image_buffer.as_flat_samples_u8().unwrap();
+                let img = ColorImage::from_rgba_unmultiplied(
+                    [
+                        image_buffer.width() as usize,
+                        image_buffer.height() as usize,
+                    ],
+                    flat_samples.as_slice(),
+                );
 
-        Ok(TexturedImage::Static(ctx.load_texture(
-            &url,
-            img,
-            Default::default(),
-        )))
+                Ok(TexturedImage::Static(ctx.load_texture(
+                    &url,
+                    img,
+                    Default::default(),
+                )))
+            }
+            MediaCacheType::Gif => todo!(),
+        }
     })
 }
 
@@ -222,14 +230,15 @@ pub fn fetch_img(
     ctx: &egui::Context,
     url: &str,
     imgtyp: ImageType,
+    cache_type: MediaCacheType,
 ) -> Promise<Result<TexturedImage>> {
     let key = MediaCache::key(url);
     let path = img_cache.cache_dir.join(key);
 
     if path.exists() {
-        fetch_img_from_disk(ctx, url, &path)
+        fetch_img_from_disk(ctx, url, &path, cache_type)
     } else {
-        fetch_img_from_net(&img_cache.cache_dir, ctx, url, imgtyp)
+        fetch_img_from_net(&img_cache.cache_dir, ctx, url, imgtyp, cache_type)
     }
 
     // TODO: fetch image from local cache
@@ -240,6 +249,7 @@ fn fetch_img_from_net(
     ctx: &egui::Context,
     url: &str,
     imgtyp: ImageType,
+    cache_type: MediaCacheType,
 ) -> Promise<Result<TexturedImage>> {
     let (sender, promise) = Promise::new();
     let request = ehttp::Request::get(url);
@@ -247,17 +257,25 @@ fn fetch_img_from_net(
     let cloned_url = url.to_owned();
     let cache_path = cache_path.to_owned();
     ehttp::fetch(request, move |response| {
-        let handle = response
-            .map_err(notedeck::Error::Generic)
-            .and_then(|resp| parse_img_response(resp, imgtyp))
-            .map(|img| {
-                let texture_handle = ctx.load_texture(&cloned_url, img.clone(), Default::default());
+        let handle = match cache_type {
+            MediaCacheType::Image => {
+                response
+                    .map_err(notedeck::Error::Generic)
+                    .and_then(|resp| parse_img_response(resp, imgtyp))
+                    .map(|img| {
+                        let texture_handle =
+                            ctx.load_texture(&cloned_url, img.clone(), Default::default());
 
-                // write to disk
-                std::thread::spawn(move || MediaCache::write(&cache_path, &cloned_url, img));
+                        // write to disk
+                        std::thread::spawn(move || {
+                            MediaCache::write(&cache_path, &cloned_url, img)
+                        });
 
-                TexturedImage::Static(texture_handle)
-            });
+                        TexturedImage::Static(texture_handle)
+                    })
+            }
+            MediaCacheType::Gif => todo!(),
+        };
 
         sender.send(handle); // send the results back to the UI thread.
         ctx.request_repaint();
