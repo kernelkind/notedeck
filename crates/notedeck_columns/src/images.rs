@@ -222,7 +222,6 @@ fn fetch_img_from_disk(
     })
 }
 
-#[allow(dead_code)]
 pub fn generate_blurhash_texturehandle(
     ctx: &egui::Context,
     blurhash: &str,
