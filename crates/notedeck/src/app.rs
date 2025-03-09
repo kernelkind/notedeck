@@ -1,3 +1,4 @@
+use crate::jobs::Jobs;
 use crate::persist::{AppSizeHandler, ZoomHandler};
 use crate::{
     Accounts, AppContext, Args, DataPath, DataPathType, Directory, FileKeyStorage, Images,
@@ -31,6 +32,7 @@ pub struct Notedeck {
     zoom: ZoomHandler,
     app_size: AppSizeHandler,
     unrecognized_args: BTreeSet<String>,
+    jobs: Jobs,
 }
 
 fn margin_top(narrow: bool) -> f32 {
@@ -199,6 +201,8 @@ impl Notedeck {
             error!("error migrating image cache: {e}");
         }
 
+        let jobs = Jobs::default();
+
         Self {
             ndb,
             img_cache,
@@ -213,6 +217,7 @@ impl Notedeck {
             zoom,
             app_size,
             unrecognized_args,
+            jobs,
         }
     }
 
@@ -232,6 +237,7 @@ impl Notedeck {
             path: &self.path,
             args: &self.args,
             theme: &mut self.theme,
+            jobs: &mut self.jobs,
         }
     }
 
