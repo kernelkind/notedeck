@@ -346,6 +346,7 @@ impl<'a, 'd> NoteView<'a, 'd> {
 
         let mut note_action: Option<NoteAction> = None;
         let mut selected_option: Option<NoteContextSelection> = None;
+        let mut media_action: Option<MediaAction> = None;
 
         let hitbox_id = note_hitbox_id(note_key, self.options(), self.parent);
         let profile = self
@@ -407,6 +408,10 @@ impl<'a, 'd> NoteView<'a, 'd> {
                     note_action = Some(action.clone());
                 }
 
+                if let Some(action) = contents.media_action() {
+                    media_action = Some(action.clone());
+                }
+
                 if self.options().has_actionbar() {
                     if let Some(action) = render_note_actionbar(ui, self.note.id(), note_key).inner
                     {
@@ -454,6 +459,10 @@ impl<'a, 'd> NoteView<'a, 'd> {
                         note_action = Some(action.clone());
                     }
 
+                    if let Some(action) = contents.media_action() {
+                        media_action = Some(action.clone());
+                    }
+
                     if self.options().has_actionbar() {
                         if let Some(action) =
                             render_note_actionbar(ui, self.note.id(), note_key).inner
@@ -495,6 +504,7 @@ impl<'a, 'd> NoteView<'a, 'd> {
 
         NoteResponse::new(response)
             .with_action(note_action)
+            .with_media_action(media_action)
             .select_option(selected_option)
     }
 }
