@@ -1,4 +1,4 @@
-use crate::{Accounts, Args, DataPath, Images, NoteCache, ThemeHandler, UnknownIds};
+use crate::{Accounts, Args, DataPath, Images, NoteCache, ThemeHandler, UnknownIds, WalletState};
 
 use enostr::RelayPool;
 use nostrdb::Ndb;
@@ -12,6 +12,7 @@ pub struct AppContext<'a> {
     pub pool: &'a mut RelayPool,
     pub note_cache: &'a mut NoteCache,
     pub accounts: &'a mut Accounts,
+    pub wallet: &'a mut WalletState,
     pub path: &'a DataPath,
     pub args: &'a Args,
     pub theme: &'a mut ThemeHandler,

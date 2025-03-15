@@ -1,7 +1,7 @@
 use crate::persist::{AppSizeHandler, ZoomHandler};
 use crate::{
     Accounts, AppContext, Args, DataPath, DataPathType, Directory, FileKeyStorage, Images,
-    KeyStorageType, NoteCache, RelayDebugView, ThemeHandler, UnknownIds,
+    KeyStorageType, NoteCache, RelayDebugView, ThemeHandler, UnknownIds, WalletState,
 };
 use egui::ThemePreference;
 use enostr::RelayPool;
@@ -24,6 +24,7 @@ pub struct Notedeck {
     pool: RelayPool,
     note_cache: NoteCache,
     accounts: Accounts,
+    wallet: WalletState,
     path: DataPath,
     args: Args,
     theme: ThemeHandler,
@@ -200,6 +201,8 @@ impl Notedeck {
             error!("error migrating image cache: {e}");
         }
 
+        let wallet = WalletState::default();
+
         Self {
             ndb,
             img_cache,
@@ -207,6 +210,7 @@ impl Notedeck {
             pool,
             note_cache,
             accounts,
+            wallet,
             path: path.clone(),
             args: parsed_args,
             theme,
@@ -230,6 +234,7 @@ impl Notedeck {
             pool: &mut self.pool,
             note_cache: &mut self.note_cache,
             accounts: &mut self.accounts,
+            wallet: &mut self.wallet,
             path: &self.path,
             args: &self.args,
             theme: &mut self.theme,
