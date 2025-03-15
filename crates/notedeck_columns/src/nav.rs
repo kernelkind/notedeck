@@ -20,6 +20,7 @@ use crate::{
         profile::EditProfileView,
         search::{FocusState, SearchView},
         support::SupportView,
+        wallet::WalletView,
         RelayView, View,
     },
     Damus,
@@ -27,7 +28,7 @@ use crate::{
 
 use egui_nav::{Nav, NavAction, NavResponse, NavUiType};
 use nostrdb::Transaction;
-use notedeck::{AccountsAction, AppContext};
+use notedeck::{AccountsAction, AppContext, WalletAction};
 use tracing::error;
 
 #[allow(clippy::enum_variant_names)]
@@ -38,6 +39,7 @@ pub enum RenderNavAction {
     NoteAction(NoteAction),
     ProfileAction(ProfileAction),
     SwitchingAction(SwitchingAction),
+    WalletAction(WalletAction),
 }
 
 pub enum SwitchingAction {
@@ -193,6 +195,9 @@ impl RenderNavResponse {
                             .column_mut(col)
                             .router_mut(),
                     );
+                }
+                RenderNavAction::WalletAction(_wallet_action) => {
+                    // TODO(kernelkind): process wallet_action
                 }
             }
         }
@@ -518,6 +523,10 @@ fn render_nav_body(
                 error!("Pubkey in EditProfile route did not have an nsec attached in Accounts");
             }
             action
+        }
+        Route::Wallet => {
+            WalletView::new(ctx.wallet).ui(ui);
+            None
         }
     }
 }
