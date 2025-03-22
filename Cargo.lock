@@ -2880,6 +2880,7 @@ dependencies = [
  "egui",
  "ehttp",
  "enostr",
+ "futures",
  "hashbrown",
  "hex",
  "image",
