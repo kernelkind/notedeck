@@ -22,7 +22,10 @@ use crate::{
     ui::{self, View},
 };
 
-use egui::emath::{pos2, Vec2};
+use egui::{
+    emath::{pos2, Vec2},
+    Mesh,
+};
 use egui::{Id, Label, Pos2, Rect, Response, RichText, Sense};
 use enostr::{KeypairUnowned, NoteId, Pubkey};
 use nostrdb::{Ndb, Note, NoteKey, Transaction};
@@ -615,22 +618,17 @@ fn render_note_actionbar(
             || Ok(AnyZapState::None),
             |kp| zaps.any_zap_state_for(kp.pubkey.bytes(), zap_target),
         );
-        let zap_resp =
-            cur_acc
-                .filter(|k| k.secret_key.is_some())
-                .map(|_| match zap_state.clone() {
-                    Ok(any_zap_state) => match any_zap_state {
-                        AnyZapState::None => ui.add(zap_button(false)),
-                        AnyZapState::Pending => ui.spinner(),
-                        AnyZapState::LocalOnly | AnyZapState::Confirmed => ui.add(zap_button(true)),
-                    },
-                    Err(zapping_error) => {
-                        let (rect, _) =
-                            ui.allocate_at_least(egui::vec2(10.0, 10.0), egui::Sense::click());
-                        ui.add(x_button(rect))
-                            .on_hover_text(format!("{zapping_error}"))
-                    }
-                });
+        let zap_resp = cur_acc
+            .filter(|k| k.secret_key.is_some())
+            .map(|_| match &zap_state {
+                Ok(any_zap_state) => ui.add(zap_button(any_zap_state.clone(), note_id)),
+                Err(zapping_error) => {
+                    let (rect, _) =
+                        ui.allocate_at_least(egui::vec2(10.0, 10.0), egui::Sense::click());
+                    ui.add(x_button(rect))
+                        .on_hover_text(format!("{zapping_error}"))
+                }
+            });
 
         let to_noteid = |id: &[u8; 32]| NoteId::new(*id);
 
@@ -730,7 +728,7 @@ fn quote_repost_button(ui: &mut egui::Ui, note_key: NoteKey) -> egui::Response {
     resp.union(put_resp)
 }
 
-fn zap_button(colored: bool) -> impl egui::Widget {
+fn zap_button(state: AnyZapState, noteid: &[u8; 32]) -> impl egui::Widget {
     move |ui: &mut egui::Ui| -> egui::Response {
         let img_data = egui::include_image!("../../../../../assets/icons/zap_4x.png");
 
@@ -738,12 +736,26 @@ fn zap_button(colored: bool) -> impl egui::Widget {
 
         let mut img = egui::Image::new(img_data).max_width(size);
 
-        if colored {
-            img = img.tint(egui::Color32::from_rgb(0xFF, 0xB7, 0x57));
-        }
+        match state {
+            AnyZapState::None => {
+                if !ui.visuals().dark_mode {
+                    img = img.tint(egui::Color32::BLACK);
+                }
+            }
+            AnyZapState::Pending => {
+                // let time = ui.input(|i| i.time);
 
-        if !colored && !ui.visuals().dark_mode {
-            img = img.tint(egui::Color32::BLACK);
+                // ui.ctx().animate_bool(noteid, true)
+                // let alpha = ((((time.sin() + 1.0) / 2.0) * 235.0) + 10.0).clamp(0.0, 255.0) as u8;
+
+                // img = img.tint(egui::Color32::from_rgba_unmultiplied(
+                //     0xFF, 0xB7, 0x57, alpha,
+                // ));
+            }
+            AnyZapState::LocalOnly => {
+                img = img.tint(egui::Color32::from_rgb(0xFF, 0xB7, 0x57));
+            }
+            AnyZapState::Confirmed => {}
         }
 
         // align rect to note contents
