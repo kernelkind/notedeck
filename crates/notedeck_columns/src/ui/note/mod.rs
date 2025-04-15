@@ -9,6 +9,7 @@ pub mod reply_description;
 pub use contents::NoteContents;
 use contents::NoteContext;
 pub use context::{NoteContextButton, NoteContextSelection};
+use notedeck_ui::ImagePulseTint;
 pub use options::NoteOptions;
 pub use post::{NewPostAction, PostAction, PostResponse, PostType, PostView};
 pub use quote_repost::QuoteRepostView;
@@ -22,10 +23,7 @@ use crate::{
     ui::{self, View},
 };
 
-use egui::{
-    emath::{pos2, Vec2},
-    Mesh,
-};
+use egui::emath::{pos2, Vec2};
 use egui::{Id, Label, Pos2, Rect, Response, RichText, Sense};
 use enostr::{KeypairUnowned, NoteId, Pubkey};
 use nostrdb::{Ndb, Note, NoteKey, Transaction};
@@ -728,13 +726,15 @@ fn quote_repost_button(ui: &mut egui::Ui, note_key: NoteKey) -> egui::Response {
     resp.union(put_resp)
 }
 
-fn zap_button(state: AnyZapState, noteid: &[u8; 32]) -> impl egui::Widget {
+fn zap_button(state: AnyZapState, noteid: &[u8; 32]) -> impl egui::Widget + use<'_> {
     move |ui: &mut egui::Ui| -> egui::Response {
         let img_data = egui::include_image!("../../../../../assets/icons/zap_4x.png");
 
         let (rect, size, resp) = ui::anim::hover_expand_small(ui, ui.id().with("zap"));
 
         let mut img = egui::Image::new(img_data).max_width(size);
+        let id = ui.id().with(("pulse", noteid));
+        let ctx = ui.ctx().clone();
 
         match state {
             AnyZapState::None => {
@@ -743,14 +743,9 @@ fn zap_button(state: AnyZapState, noteid: &[u8; 32]) -> impl egui::Widget {
                 }
             }
             AnyZapState::Pending => {
-                // let time = ui.input(|i| i.time);
-
-                // ui.ctx().animate_bool(noteid, true)
-                // let alpha = ((((time.sin() + 1.0) / 2.0) * 235.0) + 10.0).clamp(0.0, 255.0) as u8;
-
-                // img = img.tint(egui::Color32::from_rgba_unmultiplied(
-                //     0xFF, 0xB7, 0x57, alpha,
-                // ));
+                img = ImagePulseTint::new(&ctx, id, img, &[0xFF, 0xB7, 0x57], 50, 255)
+                    .with_speed(0.35)
+                    .animate();
             }
             AnyZapState::LocalOnly => {
                 img = img.tint(egui::Color32::from_rgb(0xFF, 0xB7, 0x57));
