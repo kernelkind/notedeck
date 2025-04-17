@@ -19,7 +19,7 @@ use crate::{
         profile::EditProfileView,
         search::{FocusState, SearchView},
         support::SupportView,
-        wallet::{WalletAction, WalletState, WalletView},
+        wallet::{get_default_zap_state, WalletAction, WalletState, WalletView},
         RelayView,
     },
     Damus,
@@ -545,8 +545,13 @@ fn render_nav_body(
                 notedeck::WalletType::Auto => 's: {
                     if let Some(cur_acc) = ctx.accounts.get_selected_account_mut() {
                         if let Some(wallet) = &mut cur_acc.wallet {
+                            let default_zap_state = get_default_zap_state(
+                                &wallet.default_zap,
+                                &mut ctx.global_wallet.ui_state.pending_zap_amount,
+                            );
                             break 's WalletState::Wallet {
                                 wallet: &mut wallet.wallet,
+                                default_zap_state,
                                 can_create_local_wallet: false,
                             };
                         }
@@ -559,8 +564,13 @@ fn render_nav_body(
                         };
                     };
 
+                    let default_zap_state = get_default_zap_state(
+                        &wallet.default_zap,
+                        &mut ctx.global_wallet.ui_state.pending_zap_amount,
+                    );
                     WalletState::Wallet {
                         wallet: &mut wallet.wallet,
+                        default_zap_state,
                         can_create_local_wallet: true,
                     }
                 }
@@ -578,8 +588,13 @@ fn render_nav_body(
                         };
                     };
 
+                    let default_zap_state = get_default_zap_state(
+                        &wallet.default_zap,
+                        &mut ctx.global_wallet.ui_state.pending_zap_amount,
+                    );
                     WalletState::Wallet {
                         wallet: &mut wallet.wallet,
+                        default_zap_state,
                         can_create_local_wallet: false,
                     }
                 }

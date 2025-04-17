@@ -1,5 +1,8 @@
 use egui::Layout;
-use notedeck::{Accounts, GlobalWallet, Wallet, WalletError, WalletUIState};
+use notedeck::{
+    Accounts, DefaultZapMsats, GlobalWallet, PendingDefaultZapState, UserZapMsatsUnowned, Wallet,
+    WalletError, WalletUIState,
+};
 
 use crate::route::{Route, Router};
 
@@ -9,12 +12,37 @@ use super::widgets::styled_button;
 pub enum WalletState<'a> {
     Wallet {
         wallet: &'a mut Wallet,
+        default_zap_state: DefaultZapState<'a>,
         can_create_local_wallet: bool,
     },
     NoWallet {
         state: &'a mut WalletUIState,
         show_local_only: bool,
     },
+}
+
+#[derive(Debug)]
+pub enum DefaultZapState<'a> {
+    Pending(&'a mut PendingDefaultZapState), // User input
+    Valid(UserZapMsatsUnowned<'a>),
+}
+
+pub fn get_default_zap_state<'a>(
+    default_zap: &'a DefaultZapMsats,
+    pending: &'a mut PendingDefaultZapState,
+) -> DefaultZapState<'a> {
+    if pending.is_rewriting {
+        return DefaultZapState::Pending(pending);
+    }
+
+    if let Some(user_selection) = default_zap.try_into_user_unowned() {
+        DefaultZapState::Valid(user_selection)
+    } else {
+        if pending.amount_sats.is_empty() {
+            pending.amount_sats = (default_zap.get_default_zap_msats() / 1000).to_string();
+        }
+        DefaultZapState::Pending(pending)
+    }
 }
 
 #[derive(Debug)]
@@ -105,6 +133,7 @@ impl<'a> WalletView<'a> {
         match &mut self.state {
             WalletState::Wallet {
                 wallet,
+                default_zap_state: _,
                 can_create_local_wallet,
             } => show_with_wallet(ui, wallet, *can_create_local_wallet),
             WalletState::NoWallet {

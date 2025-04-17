@@ -8,7 +8,10 @@ use poll_promise::Promise;
 use tokenator::{ParseError, TokenParser, TokenSerializable};
 use tokio::sync::RwLock;
 
-use crate::{zaps::UserZapMsats, Accounts, DataPath, DefaultZapMsats, TokenHandler};
+use crate::{
+    zaps::{PendingDefaultZapState, UserZapMsats},
+    Accounts, DataPath, DefaultZapMsats, TokenHandler,
+};
 
 pub fn get_wallet_for_mut<'a>(
     accounts: &'a mut Accounts,
@@ -35,6 +38,7 @@ pub struct WalletUIState {
     pub buf: String,
     pub error_msg: Option<WalletError>,
     pub for_local_only: bool,
+    pub pending_zap_amount: PendingDefaultZapState,
 }
 
 #[derive(Debug)]

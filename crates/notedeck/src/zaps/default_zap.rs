@@ -70,3 +70,15 @@ impl TokenSerializable for UserZapMsats {
         writer.write_token(&self.msats.to_string());
     }
 }
+
+#[derive(Debug, Default)]
+pub struct PendingDefaultZapState {
+    pub amount_sats: String,
+    pub error_message: Option<DefaultZapError>,
+    pub is_rewriting: bool,
+}
+
+#[derive(Debug)]
+pub enum DefaultZapError {
+    InvalidUserInput,
+}
