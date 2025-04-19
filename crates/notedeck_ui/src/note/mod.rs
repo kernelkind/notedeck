@@ -3,6 +3,7 @@ pub mod context;
 pub mod options;
 pub mod reply_description;
 
+use crate::jobs::JobsCache;
 use crate::{
     profile::name::one_line_display_name_widget, widgets::x_button, ImagePulseTint, ProfilePic,
     ProfilePreview, Username,
@@ -31,6 +32,7 @@ pub struct NoteView<'a, 'd> {
     note: &'a nostrdb::Note<'a>,
     framed: bool,
     flags: NoteOptions,
+    jobs: &'a mut JobsCache,
 }
 
 pub struct NoteResponse {
@@ -72,6 +74,7 @@ impl<'a, 'd> NoteView<'a, 'd> {
         cur_acc: &'a Option<KeypairUnowned<'a>>,
         note: &'a nostrdb::Note<'a>,
         mut flags: NoteOptions,
+        jobs: &'a mut JobsCache,
     ) -> Self {
         flags.set_actionbar(true);
         flags.set_note_previews(true);
@@ -86,6 +89,7 @@ impl<'a, 'd> NoteView<'a, 'd> {
             note,
             flags,
             framed,
+            jobs,
         }
     }
 
@@ -206,6 +210,7 @@ impl<'a, 'd> NoteView<'a, 'd> {
                 txn,
                 self.note,
                 self.flags,
+                self.jobs,
             ));
             //});
         })
@@ -320,7 +325,14 @@ impl<'a, 'd> NoteView<'a, 'd> {
                         .text_style(style.text_style()),
                 );
             });
-            NoteView::new(self.note_context, self.cur_acc, &note_to_repost, self.flags).show(ui)
+            NoteView::new(
+                self.note_context,
+                self.cur_acc,
+                &note_to_repost,
+                self.flags,
+                self.jobs,
+            )
+            .show(ui)
         } else {
             self.show_standard(ui)
         }
@@ -420,6 +432,7 @@ impl<'a, 'd> NoteView<'a, 'd> {
                                         &note_reply,
                                         self.note_context,
                                         self.flags,
+                                        self.jobs,
                                     )
                                 })
                                 .inner;
@@ -431,8 +444,14 @@ impl<'a, 'd> NoteView<'a, 'd> {
                     });
                 });
 
-                let mut contents =
-                    NoteContents::new(self.note_context, self.cur_acc, txn, self.note, self.flags);
+                let mut contents = NoteContents::new(
+                    self.note_context,
+                    self.cur_acc,
+                    txn,
+                    self.note,
+                    self.flags,
+                    self.jobs,
+                );
 
                 ui.add(&mut contents);
 
@@ -483,6 +502,7 @@ impl<'a, 'd> NoteView<'a, 'd> {
                                 &note_reply,
                                 self.note_context,
                                 self.flags,
+                                self.jobs,
                             );
 
                             if action.is_some() {
@@ -497,6 +517,7 @@ impl<'a, 'd> NoteView<'a, 'd> {
                         txn,
                         self.note,
                         self.flags,
+                        self.jobs,
                     );
                     ui.add(&mut contents);
 
