@@ -59,6 +59,7 @@ pub struct WalletUIState {
 #[derive(Debug)]
 pub enum WalletError {
     InvalidURI,
+    NoWallet,
 }
 
 pub struct Wallet {
