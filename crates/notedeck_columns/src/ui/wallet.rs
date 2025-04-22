@@ -118,12 +118,24 @@ impl WalletAction {
                     break 's;
                 };
 
-                let Some(wallet) = get_current_wallet(accounts, global_wallet) else {
-                    global_wallet.ui_state.error_msg = Some(WalletError::NoWallet);
-                    break 's;
-                };
+                'a: {
+                    if let Some(acc) = accounts.get_selected_account_mut() {
+                        if acc.wallet.is_some() {
+                            accounts.update_current_account(|acc| {
+                                if let Some(wallet) = &mut acc.wallet {
+                                    wallet.default_zap.set_user_selection(sats * 1000);
+                                }
+                            });
+                            break 'a;
+                        }
+                    };
+                    let Some(wallet) = &mut global_wallet.wallet else {
+                        break 's;
+                    };
+                    wallet.default_zap.set_user_selection(sats * 1000);
+                    global_wallet.save_wallet();
+                }
 
-                wallet.default_zap.set_user_selection(sats * 1000);
                 global_wallet.ui_state.pending_zap_amount = PendingDefaultZapState::default();
             }
             WalletAction::EditDefaultZaps => 's: {
