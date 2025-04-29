@@ -34,7 +34,7 @@ fn execute_note_action(
     accounts: &mut Accounts,
     global_wallet: &mut GlobalWallet,
     zaps: &mut Zaps,
-    _images: &mut Images,
+    images: &mut Images,
     ui: &mut egui::Ui,
 ) -> Option<TimelineOpenResult> {
     match action {
@@ -111,7 +111,7 @@ fn execute_note_action(
             None
         }
         NoteAction::Media(media_action) => {
-            media_action.process(ui);
+            media_action.process(ui, images);
             None
         }
     }

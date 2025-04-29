@@ -1,4 +1,8 @@
+use std::cell::OnceCell;
+
 use crate::{
+    blur::imeta_blurhashes,
+    contacts::trust_media_from_pk2,
     jobs::JobsCache,
     note::{NoteAction, NoteOptions, NoteResponse, NoteView},
 };
@@ -8,9 +12,9 @@ use enostr::KeypairUnowned;
 use nostrdb::{BlockType, Mention, Note, NoteKey, Transaction};
 use tracing::warn;
 
-use notedeck::{supported_mime_hosted_at_url, MediaCacheType, NoteContext};
+use notedeck::NoteContext;
 
-use super::media::image_carousel;
+use super::media::{find_supported_media_type, image_carousel, MediaRenderType};
 
 pub struct NoteContents<'a, 'd> {
     note_context: &'a mut NoteContext<'d>,
@@ -116,7 +120,6 @@ pub fn render_note_contents(
 ) -> NoteResponse {
     let note_key = note.key().expect("todo: implement non-db notes");
     let selectable = options.has_selectable_text();
-    let mut images: Vec<(String, MediaCacheType)> = vec![];
     let mut note_action: Option<NoteAction> = None;
     let mut inline_note: Option<(&[u8; 32], &str)> = None;
     let hide_media = options.has_hide_media();
@@ -131,6 +134,9 @@ pub fn render_note_contents(
         let _ = ui.allocate_at_least(egui::vec2(ui.available_width(), 0.0), egui::Sense::click());
     }
 
+    let mut supported_medias: Vec<MediaRenderType> = vec![];
+    let blurhashes = OnceCell::new();
+
     let response = ui.horizontal_wrapped(|ui| {
         let blocks = if let Ok(blocks) = note_context.ndb.get_blocks_by_key(txn, note_key) {
             blocks
@@ -139,6 +145,8 @@ pub fn render_note_contents(
             ui.weak(note.content());
             return;
         };
+
+        let media_trusted = OnceCell::new();
 
         ui.spacing_mut().item_spacing.x = 0.0;
 
@@ -199,15 +207,32 @@ pub fn render_note_contents(
                 BlockType::Url => {
                     let mut found_supported = || -> bool {
                         let url = block.as_str();
-                        if let Some(cache_type) =
-                            supported_mime_hosted_at_url(&mut note_context.img_cache.urls, url)
-                        {
-                            images.push((url.to_string(), cache_type));
-                            true
-                        } else {
-                            false
-                        }
+
+                        let blurs = blurhashes.get_or_init(|| imeta_blurhashes(note));
+
+                        let trusted_media = media_trusted.get_or_init(|| {
+                            trust_media_from_pk2(
+                                note_context.ndb,
+                                txn,
+                                cur_acc.as_ref().map(|k| k.pubkey.bytes()),
+                                note.pubkey(),
+                            )
+                        });
+
+                        let Some(media_type) = find_supported_media_type(
+                            ui,
+                            &mut note_context.img_cache.urls,
+                            blurs,
+                            *trusted_media,
+                            url,
+                        ) else {
+                            return false;
+                        };
+
+                        supported_medias.push(media_type);
+                        true
                     };
+
                     if hide_media || !found_supported() {
                         ui.add(Hyperlink::from_label_and_url(
                             RichText::new(block.as_str()).color(link_color),
@@ -266,14 +291,25 @@ pub fn render_note_contents(
         None
     };
 
-    if !images.is_empty() && !options.has_textmode() {
+    let mut media_action = None;
+    if !supported_medias.is_empty() && !options.has_textmode() {
         ui.add_space(2.0);
         let carousel_id = egui::Id::new(("carousel", note.key().expect("expected tx note")));
-        image_carousel(ui, note_context.img_cache, images, carousel_id);
+
+        media_action = image_carousel(
+            ui,
+            note_context.img_cache,
+            note_context.job_pool,
+            jobs,
+            supported_medias,
+            carousel_id,
+        );
         ui.add_space(2.0);
     }
 
-    let note_action = preview_note_action.or(note_action);
+    let note_action = preview_note_action
+        .or(note_action)
+        .or(media_action.map(NoteAction::Media));
 
     NoteResponse::new(response.response).with_action(note_action)
 }
