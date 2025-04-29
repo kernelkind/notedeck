@@ -23,11 +23,32 @@ pub struct TexturesCache {
 }
 
 impl TexturesCache {
+    pub fn handle_and_get_loadable_state(
+        &mut self,
+        url: &str,
+        closure: impl FnOnce() -> Promise<Option<Result<TexturedImage>>>,
+    ) -> LoadableTextureState {
+        let internal = self.handle_and_get_state_internal(url, true, closure);
+
+        internal.into()
+    }
+
     pub fn handle_and_get_state(
         &mut self,
         url: &str,
         closure: impl FnOnce() -> Promise<Option<Result<TexturedImage>>>,
     ) -> TextureState {
+        let internal = self.handle_and_get_state_internal(url, false, closure);
+
+        internal.into()
+    }
+
+    fn handle_and_get_state_internal(
+        &mut self,
+        url: &str,
+        use_loading: bool,
+        closure: impl FnOnce() -> Promise<Option<Result<TexturedImage>>>,
+    ) -> &mut TextureStateInternal {
         let state = match self.cache.raw_entry_mut().from_key(url) {
             hashbrown::hash_map::RawEntryMut::Occupied(entry) => 's: {
                 let state = entry.into_mut();
@@ -49,7 +70,13 @@ impl TexturesCache {
                 };
 
                 match res {
-                    Ok(textured) => *state = TextureStateInternal::Loading(textured),
+                    Ok(textured) => {
+                        *state = if use_loading {
+                            TextureStateInternal::Loading(textured)
+                        } else {
+                            TextureStateInternal::Loaded(textured)
+                        }
+                    }
                     Err(e) => *state = TextureStateInternal::Error(e),
                 }
 
@@ -63,7 +90,7 @@ impl TexturesCache {
             }
         };
 
-        state.into()
+        state
     }
 
     pub fn insert_pending(&mut self, url: &str, promise: Promise<Option<Result<TexturedImage>>>) {
@@ -88,13 +115,30 @@ impl TexturesCache {
     }
 }
 
-pub enum TextureState<'a> {
+pub enum LoadableTextureState<'a> {
     Pending,
     Error(&'a crate::Error),
     Loading {
         actual_image_tex: &'a mut TexturedImage,
     }, // the texture is in the loading state, for transitioning between the pending and loaded states
     Loaded(&'a mut TexturedImage),
+}
+
+pub enum TextureState<'a> {
+    Pending,
+    Error(&'a crate::Error),
+    Loaded(&'a mut TexturedImage),
+}
+
+impl<'a> From<&'a mut TextureStateInternal> for TextureState<'a> {
+    fn from(value: &'a mut TextureStateInternal) -> Self {
+        match value {
+            TextureStateInternal::Pending(_) => TextureState::Pending,
+            TextureStateInternal::Error(error) => TextureState::Error(error),
+            TextureStateInternal::Loading(textured_image) => TextureState::Loaded(textured_image),
+            TextureStateInternal::Loaded(textured_image) => TextureState::Loaded(textured_image),
+        }
+    }
 }
 
 pub enum TextureStateInternal {
@@ -104,15 +148,17 @@ pub enum TextureStateInternal {
     Loaded(TexturedImage),
 }
 
-impl<'a> From<&'a mut TextureStateInternal> for TextureState<'a> {
+impl<'a> From<&'a mut TextureStateInternal> for LoadableTextureState<'a> {
     fn from(value: &'a mut TextureStateInternal) -> Self {
         match value {
-            TextureStateInternal::Pending(_) => TextureState::Pending,
-            TextureStateInternal::Error(error) => TextureState::Error(error),
-            TextureStateInternal::Loading(textured_image) => TextureState::Loading {
+            TextureStateInternal::Pending(_) => LoadableTextureState::Pending,
+            TextureStateInternal::Error(error) => LoadableTextureState::Error(error),
+            TextureStateInternal::Loading(textured_image) => LoadableTextureState::Loading {
                 actual_image_tex: textured_image,
             },
-            TextureStateInternal::Loaded(textured_image) => TextureState::Loaded(textured_image),
+            TextureStateInternal::Loaded(textured_image) => {
+                LoadableTextureState::Loaded(textured_image)
+            }
         }
     }
 }
@@ -315,6 +361,13 @@ impl Images {
     pub fn migrate_v0(&self) -> Result<()> {
         self.static_imgs.migrate_v0()?;
         self.gifs.migrate_v0()
+    }
+
+    pub fn get_cache(&self, cache_type: MediaCacheType) -> &MediaCache {
+        match cache_type {
+            MediaCacheType::Image => &self.static_imgs,
+            MediaCacheType::Gif => &self.gifs,
+        }
     }
 }
 

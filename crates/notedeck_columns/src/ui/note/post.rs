@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::draft::{Draft, Drafts, MentionHint};
 use crate::media_upload::{nostrbuild_nip96_upload, MediaPath};
 use crate::post::{downcast_post_buffer, MentionType, NewPost};
@@ -15,13 +13,11 @@ use egui::{
 };
 use enostr::{FilledKeypair, FullKeypair, NoteId, Pubkey, RelayPool};
 use nostrdb::{Ndb, Transaction};
-use notedeck::{GifState, TextureState};
 use notedeck_ui::blur::PixelDimensions;
-use notedeck_ui::images::MediaUIAction;
+use notedeck_ui::images::{get_render_state, RenderState};
 use notedeck_ui::jobs::JobsCache;
 use notedeck_ui::{
     gif::{handle_repaint, retrieve_latest_texture},
-    images::render_images,
     note::render_note_preview,
     NoteOptions, ProfilePic,
 };
@@ -145,11 +141,11 @@ impl<'a, 'd> PostView<'a, 'd> {
                 Some(ProfilePic::from_profile(self.note_context.img_cache, p)?.size(pfp_size))
             });
 
-        if let Some(pfp) = poster_pfp {
-            ui.add(pfp);
+        if let Some(mut pfp) = poster_pfp {
+            ui.add(&mut pfp);
         } else {
             ui.add(
-                ProfilePic::new(self.note_context.img_cache, notedeck::profile::no_pfp_url())
+                &mut ProfilePic::new(self.note_context.img_cache, notedeck::profile::no_pfp_url())
                     .size(pfp_size),
             );
         }
@@ -444,26 +440,24 @@ impl<'a, 'd> PostView<'a, 'd> {
             };
 
             let url = &media.url;
-            render_images(
-                ui.ctx().clone(),
+            let cur_state = get_render_state(
+                ui.ctx(),
                 self.note_context.img_cache,
                 cache_type,
                 url,
                 notedeck_ui::images::ImageType::Content,
-                |cur_state, gifs| {
-                    render_post_view_media(
-                        ui,
-                        &mut self.draft.upload_errors,
-                        &mut to_remove,
-                        i,
-                        width,
-                        height,
-                        cur_state,
-                        gifs,
-                        url,
-                    )
-                },
             );
+
+            render_post_view_media(
+                ui,
+                &mut self.draft.upload_errors,
+                &mut to_remove,
+                i,
+                width,
+                height,
+                cur_state,
+                url,
+            )
         }
         to_remove.reverse();
         for i in to_remove {
@@ -551,25 +545,16 @@ fn render_post_view_media(
     cur_index: usize,
     width: u32,
     height: u32,
-    cur_state: TextureState,
-    gifs: &mut HashMap<String, GifState>,
+    render_state: RenderState,
     url: &str,
-) -> Option<MediaUIAction> {
-    match cur_state {
+) {
+    match render_state.texture_state {
         notedeck::TextureState::Pending => {
             ui.spinner();
-            None
         }
         notedeck::TextureState::Error(e) => {
             upload_errors.push(e.to_string());
             error!("{e}");
-            None
-        }
-        notedeck::TextureState::Loading {
-            actual_image_tex: _,
-        } => {
-            ui.spinner();
-            Some(MediaUIAction::DoneLoading)
         }
         notedeck::TextureState::Loaded(renderable_media) => {
             let max_size = 300;
@@ -584,8 +569,10 @@ fn render_post_view_media(
             .to_points(ui.pixels_per_point())
             .to_vec();
 
-            let texture_handle =
-                handle_repaint(ui, retrieve_latest_texture(url, gifs, renderable_media));
+            let texture_handle = handle_repaint(
+                ui,
+                retrieve_latest_texture(url, render_state.gifs, renderable_media),
+            );
             let img_resp = ui.add(
                 egui::Image::new(texture_handle)
                     .max_size(size)
@@ -602,7 +589,6 @@ fn render_post_view_media(
                 to_remove.push(cur_index);
             }
             ui.advance_cursor_after_rect(img_resp.rect);
-            None
         }
     }
 }

@@ -1,6 +1,7 @@
 use super::context::ContextSelection;
-use crate::zaps::NoteZapTargetOwned;
+use crate::{zaps::NoteZapTargetOwned, Images, MediaCacheType, TexturedImage};
 use enostr::{NoteId, Pubkey};
+use poll_promise::Promise;
 
 #[derive(Debug)]
 pub enum NoteAction {
@@ -35,15 +36,63 @@ pub enum ZapAction {
     ClearError(NoteZapTargetOwned),
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum MediaAction {
-    Unblur(String), // URL to unblur
+    Unblur {
+        url: String,
+    }, // URL to unblur
+    FetchNoPfpImage {
+        url: String,
+        no_pfp_promise: Promise<Option<Result<TexturedImage, crate::Error>>>,
+    },
+    DoneLoading {
+        url: String,
+        cache_type: MediaCacheType,
+    },
+}
+
+impl std::fmt::Debug for MediaAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unblur { url } => f.debug_struct("Unblur").field("url", url).finish(),
+            Self::FetchNoPfpImage {
+                url,
+                no_pfp_promise,
+            } => f
+                .debug_struct("FetchNoPfpImage")
+                .field("url", url)
+                .field("no_pfp_promise ready", &no_pfp_promise.ready().is_some())
+                .finish(),
+            Self::DoneLoading { url, cache_type } => f
+                .debug_struct("DoneLoading")
+                .field("url", url)
+                .field("cache_type", cache_type)
+                .finish(),
+        }
+    }
 }
 
 impl MediaAction {
-    pub fn process(&self, ui: &egui::Ui) {
-        match &self {
-            MediaAction::Unblur(url) => send_unblur_signal(ui.ctx(), url),
+    pub fn process(self, ui: &egui::Ui, images: &mut Images) {
+        match self {
+            MediaAction::Unblur { url } => send_unblur_signal(ui.ctx(), &url),
+            MediaAction::FetchNoPfpImage {
+                url,
+                no_pfp_promise,
+            } => {
+                tracing::info!("GOT FETCH NO PFP ACTION");
+                images
+                    .static_imgs
+                    .textures_cache
+                    .insert_pending(&url, no_pfp_promise);
+            }
+            MediaAction::DoneLoading { url, cache_type } => {
+                let cache = match cache_type {
+                    MediaCacheType::Image => &mut images.static_imgs,
+                    MediaCacheType::Gif => &mut images.gifs,
+                };
+
+                cache.textures_cache.move_to_loaded(&url);
+            }
         }
     }
 }

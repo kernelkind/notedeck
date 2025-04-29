@@ -3,11 +3,11 @@ use image::codecs::gif::GifDecoder;
 use image::imageops::FilterType;
 use image::{AnimationDecoder, DynamicImage, FlatSamples, Frame};
 use notedeck::{
-    Animation, GifState, ImageFrame, Images, MediaCache, MediaCacheType, TextureFrame,
-    TextureState, TexturedImage,
+    Animation, GifStateMap, ImageFrame, Images, LoadableTextureState, MediaCache, MediaCacheType,
+    TextureFrame, TextureState, TexturedImage,
 };
 use poll_promise::Promise;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::path::{self, Path};
@@ -424,55 +424,69 @@ fn fetch_img_from_net(
     promise
 }
 
-pub fn render_images(
-    ctx: Context,
-    images: &mut Images,
+pub fn get_loadable_render_state<'a>(
+    ctx: &Context,
+    images: &'a mut Images,
     cache_type: MediaCacheType,
     url: &str,
     img_type: ImageType,
-    render: impl FnOnce(TextureState, &mut HashMap<String, GifState>) -> Option<MediaUIAction>,
-) {
-    let gif_states = &mut images.gif_states;
+) -> LoadableRenderState<'a> {
+    let cache = match cache_type {
+        MediaCacheType::Image => &mut images.static_imgs,
+        MediaCacheType::Gif => &mut images.gifs,
+    };
+
+    let cur_state = cache.textures_cache.handle_and_get_loadable_state(url, || {
+        crate::images::fetch_img(&cache.cache_dir, ctx, url, img_type, cache_type)
+    });
+
+    LoadableRenderState {
+        texture_state: cur_state,
+        gifs: &mut images.gif_states,
+    }
+}
+
+pub fn get_render_state<'a>(
+    ctx: &Context,
+    images: &'a mut Images,
+    cache_type: MediaCacheType,
+    url: &str,
+    img_type: ImageType,
+) -> RenderState<'a> {
     let cache = match cache_type {
         MediaCacheType::Image => &mut images.static_imgs,
         MediaCacheType::Gif => &mut images.gifs,
     };
 
     let cur_state = cache.textures_cache.handle_and_get_state(url, || {
-        crate::images::fetch_img(&cache.cache_dir, &ctx, url, img_type, cache_type)
+        crate::images::fetch_img(&cache.cache_dir, ctx, url, img_type, cache_type)
     });
 
-    let Some(action) = render(cur_state, gif_states) else {
-        return;
-    };
-
-    process_media_ui_action(&ctx, cache, action, url);
-}
-
-fn process_media_ui_action(
-    ctx: &Context,
-    cache: &mut MediaCache,
-    action: MediaUIAction,
-    url: &str,
-) {
-    match action {
-        MediaUIAction::FetchNoPfpImage => {
-            let promise = crate::images::fetch_img(
-                &cache.cache_dir,
-                ctx,
-                notedeck::profile::no_pfp_url(),
-                ImageType::Profile(128),
-                MediaCacheType::Image,
-            );
-            cache.textures_cache.insert_pending(url, promise);
-        }
-        MediaUIAction::DoneLoading => {
-            cache.textures_cache.move_to_loaded(url);
-        }
+    RenderState {
+        texture_state: cur_state,
+        gifs: &mut images.gif_states,
     }
 }
 
-pub enum MediaUIAction {
-    FetchNoPfpImage,
-    DoneLoading,
+pub struct LoadableRenderState<'a> {
+    pub texture_state: LoadableTextureState<'a>,
+    pub gifs: &'a mut GifStateMap,
+}
+
+pub struct RenderState<'a> {
+    pub texture_state: TextureState<'a>,
+    pub gifs: &'a mut GifStateMap,
+}
+
+pub fn fetch_no_pfp_promise(
+    ctx: &Context,
+    cache: &MediaCache,
+) -> Promise<Option<Result<TexturedImage, notedeck::Error>>> {
+    crate::images::fetch_img(
+        &cache.cache_dir,
+        ctx,
+        notedeck::profile::no_pfp_url(),
+        ImageType::Profile(128),
+        MediaCacheType::Image,
+    )
 }

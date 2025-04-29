@@ -12,6 +12,7 @@ use crate::{
 
 pub use contents::{render_note_contents, render_note_preview, NoteContents};
 pub use context::NoteContextButton;
+use notedeck::note::MediaAction;
 pub use options::NoteOptions;
 pub use reply_description::reply_desc;
 
@@ -227,7 +228,8 @@ impl<'a, 'd> NoteView<'a, 'd> {
         note_key: NoteKey,
         profile: &Result<nostrdb::ProfileRecord<'_>, nostrdb::Error>,
         ui: &mut egui::Ui,
-    ) -> egui::Response {
+    ) -> (egui::Response, Option<MediaAction>) {
+        let mut action = None;
         if !self.options().has_wide() {
             ui.spacing_mut().item_spacing.x = 16.0;
         } else {
@@ -237,7 +239,7 @@ impl<'a, 'd> NoteView<'a, 'd> {
         let pfp_size = self.options().pfp_size();
 
         let sense = Sense::click();
-        match profile
+        let resp = match profile
             .as_ref()
             .ok()
             .and_then(|p| p.record().profile()?.picture())
@@ -257,11 +259,11 @@ impl<'a, 'd> NoteView<'a, 'd> {
                     anim_speed,
                 );
 
-                ui.put(
-                    rect,
-                    ProfilePic::new(self.note_context.img_cache, pic).size(size),
-                )
-                .on_hover_ui_at_pointer(|ui| {
+                let mut pfp = ProfilePic::new(self.note_context.img_cache, pic).size(size);
+                let pfp_resp = ui.put(rect, &mut pfp);
+
+                action = action.or(pfp.action);
+                pfp_resp.on_hover_ui_at_pointer(|ui| {
                     ui.set_max_width(300.0);
                     ui.add(ProfilePreview::new(
                         profile.as_ref().unwrap(),
@@ -282,14 +284,16 @@ impl<'a, 'd> NoteView<'a, 'd> {
                 let size = (pfp_size + NoteView::expand_size()) as f32;
                 let (rect, _response) = ui.allocate_exact_size(egui::vec2(size, size), sense);
 
-                ui.put(
-                    rect,
+                let mut pfp =
                     ProfilePic::new(self.note_context.img_cache, notedeck::profile::no_pfp_url())
-                        .size(pfp_size as f32),
-                )
-                .interact(sense)
+                        .size(pfp_size as f32);
+                let resp = ui.put(rect, &mut pfp).interact(sense);
+                action = action.or(pfp.action);
+
+                resp
             }
-        }
+        };
+        (resp, action)
     }
 
     pub fn show_impl(&mut self, ui: &mut egui::Ui) -> NoteResponse {
@@ -395,8 +399,13 @@ impl<'a, 'd> NoteView<'a, 'd> {
         let response = if self.options().has_wide() {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    if self.pfp(note_key, &profile, ui).clicked() {
+                    let (pfp_resp, action) = self.pfp(note_key, &profile, ui);
+                    if pfp_resp.clicked() {
                         note_action = Some(NoteAction::Profile(Pubkey::new(*self.note.pubkey())));
+                    } else {
+                        if let Some(action) = action {
+                            note_action = Some(NoteAction::Media(action));
+                        }
                     };
 
                     let size = ui.available_size();
@@ -479,8 +488,13 @@ impl<'a, 'd> NoteView<'a, 'd> {
         } else {
             // main design
             ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
-                if self.pfp(note_key, &profile, ui).clicked() {
+                let (pfp_resp, action) = self.pfp(note_key, &profile, ui);
+                if pfp_resp.clicked() {
                     note_action = Some(NoteAction::Profile(Pubkey::new(*self.note.pubkey())));
+                } else {
+                    if let Some(action) = action {
+                        note_action = Some(NoteAction::Media(action));
+                    }
                 };
 
                 ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {

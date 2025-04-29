@@ -14,7 +14,7 @@ use crate::{
         RenderableBlur,
     },
     gif::{handle_repaint, retrieve_latest_texture},
-    images::{render_images, ImageType, MediaUIAction},
+    images::{get_loadable_render_state, get_render_state, ImageType},
     jobs::{BlurhashParams, Job, JobId, JobParams, JobState, JobsCache},
     AnimationHelper, PulseAlpha,
 };
@@ -102,29 +102,26 @@ fn show_full_screen_media(
         .fixed_pos(ui.ctx().screen_rect().min)
         .frame(egui::Frame::NONE)
         .show(ui.ctx(), |ui| {
-            ui.centered_and_justified(|ui| {
-                let ctx_cloned = ui.ctx().clone();
-
-                render_images(
-                    ctx_cloned,
+            ui.centered_and_justified(|ui| 's: {
+                let cur_state = get_render_state(
+                    ui.ctx(),
                     img_cache,
                     cache_type,
                     image_url,
                     ImageType::Content,
-                    |state, gif_states| 's: {
-                        let notedeck::TextureState::Loaded(textured_image) = state else {
-                            break 's None;
-                        };
+                );
 
-                        render_full_screen_media(
-                            ui,
-                            textured_image,
-                            gif_states,
-                            image_url,
-                            carousel_id,
-                        )
-                    },
-                )
+                let notedeck::TextureState::Loaded(textured_image) = cur_state.texture_state else {
+                    break 's;
+                };
+
+                render_full_screen_media(
+                    ui,
+                    textured_image,
+                    cur_state.gifs,
+                    image_url,
+                    carousel_id,
+                );
             })
         });
 }
@@ -135,7 +132,7 @@ fn render_full_screen_media(
     gif_states: &mut HashMap<String, GifState>,
     image_url: &str,
     carousel_id: egui::Id,
-) -> Option<MediaUIAction> {
+) {
     let screen_rect = ui.ctx().screen_rect();
 
     // escape
@@ -276,7 +273,6 @@ fn render_full_screen_media(
     }
 
     copy_link(image_url, response);
-    None
 }
 
 fn copy_link(url: &str, img_resp: Response) {
@@ -300,18 +296,15 @@ fn render_media(
     carousel_id: egui::Id,
 ) -> Option<MediaAction> {
     match media_type {
-        MediaRenderType::Trusted(renderable_media) => {
-            render_trusted_media(
-                ui,
-                img_cache,
-                &renderable_media,
-                height,
-                spinsz,
-                carousel_id,
-                jobs,
-            );
-            None
-        }
+        MediaRenderType::Trusted(renderable_media) => render_trusted_media(
+            ui,
+            img_cache,
+            &renderable_media,
+            height,
+            spinsz,
+            carousel_id,
+            jobs,
+        ),
         MediaRenderType::Untrusted(blur_type) => match blur_type {
             BlurType::Blurhash(renderable_blur) => {
                 let available_points = PointDimensions {
@@ -329,7 +322,9 @@ fn render_media(
                 let resp = render_default_blur(ui, height, url);
 
                 if resp.clicked() {
-                    Some(MediaAction::Unblur(url.to_owned()))
+                    Some(MediaAction::Unblur {
+                        url: url.to_owned(),
+                    })
                 } else {
                     None
                 }
@@ -476,7 +471,9 @@ fn render_blurhash(
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
     {
-        Some(MediaAction::Unblur(renderable_blur.url.to_owned()))
+        Some(MediaAction::Unblur {
+            url: renderable_blur.url.to_owned(),
+        })
     } else {
         None
     }
@@ -523,42 +520,42 @@ fn render_trusted_media(
     spinsz: f32,
     carousel_id: egui::Id,
     jobs: &JobsCache,
-) {
-    let ctx = ui.ctx().clone();
+) -> Option<MediaAction> {
     let url = renderable_media.url;
     let cache_type = renderable_media.media_type.clone();
-    render_images(
-        ctx,
+    let cur_state = get_loadable_render_state(
+        ui.ctx(),
         img_cache,
-        cache_type,
+        cache_type.clone(),
         url,
         ImageType::Content,
-        |cur_state, gif_states| match cur_state {
-            notedeck::TextureState::Pending => {
-                shimmer_loading_media(jobs, ui, url, height);
-                None
-            }
-            notedeck::TextureState::Error(_) => {
-                ui.allocate_space(egui::vec2(spinsz, spinsz));
-                None
-            }
-            notedeck::TextureState::Loading { actual_image_tex } => {
-                show_image_transition(jobs, ui, height, url, actual_image_tex)
-            }
-            notedeck::TextureState::Loaded(textured_image) => {
-                render_success_media(
-                    ui,
-                    url,
-                    textured_image,
-                    gif_states,
-                    &renderable_media.media_type,
-                    height,
-                    carousel_id,
-                );
-                None
-            }
-        },
     );
+
+    match cur_state.texture_state {
+        notedeck::LoadableTextureState::Pending => {
+            shimmer_loading_media(jobs, ui, url, height);
+            None
+        }
+        notedeck::LoadableTextureState::Error(_) => {
+            ui.allocate_space(egui::vec2(spinsz, spinsz));
+            None
+        }
+        notedeck::LoadableTextureState::Loading { actual_image_tex } => {
+            show_image_transition(jobs, ui, height, url, actual_image_tex, &cache_type)
+        }
+        notedeck::LoadableTextureState::Loaded(textured_image) => {
+            render_success_media(
+                ui,
+                url,
+                textured_image,
+                cur_state.gifs,
+                renderable_media.media_type.clone(),
+                height,
+                carousel_id,
+            );
+            None
+        }
+    }
 }
 
 fn render_success_media(
@@ -566,7 +563,7 @@ fn render_success_media(
     url: &str,
     tex: &mut TexturedImage,
     gifs: &mut GifStateMap,
-    cache_type: &MediaCacheType,
+    cache_type: MediaCacheType,
     height: f32,
     carousel_id: egui::Id,
 ) {
@@ -579,7 +576,7 @@ fn render_success_media(
             mem.data.insert_temp(carousel_id.with("show_popup"), true);
             mem.data.insert_temp(
                 carousel_id.with("current_image"),
-                (url.to_owned(), cache_type.clone()),
+                (url.to_owned(), cache_type),
             );
         });
     }
@@ -667,9 +664,13 @@ pub fn show_image_transition(
     max_height: f32,
     url: &str,
     image_tex: &TexturedImage,
-) -> Option<MediaUIAction> {
+    cache_type: &MediaCacheType,
+) -> Option<MediaAction> {
     if show_transition(jobs, ui, max_height, url, image_tex) {
-        Some(MediaUIAction::DoneLoading)
+        Some(MediaAction::DoneLoading {
+            url: url.to_owned(),
+            cache_type: cache_type.clone(),
+        })
     } else {
         None
     }

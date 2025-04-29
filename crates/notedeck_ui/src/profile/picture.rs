@@ -1,7 +1,8 @@
 use crate::gif::{handle_repaint, retrieve_latest_texture};
-use crate::images::{render_images, ImageType};
-use egui::{vec2, Sense, Stroke, TextureHandle};
+use crate::images::{fetch_no_pfp_promise, get_render_state, ImageType};
+use egui::{vec2, InnerResponse, Sense, Stroke, TextureHandle};
 
+use notedeck::note::MediaAction;
 use notedeck::{supported_mime_hosted_at_url, Images};
 
 pub struct ProfilePic<'cache, 'url> {
@@ -9,11 +10,16 @@ pub struct ProfilePic<'cache, 'url> {
     url: &'url str,
     size: f32,
     border: Option<Stroke>,
+    pub action: Option<MediaAction>,
 }
 
-impl egui::Widget for ProfilePic<'_, '_> {
+impl egui::Widget for &mut ProfilePic<'_, '_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        render_pfp(ui, self.cache, self.url, self.size, self.border)
+        let inner = render_pfp(ui, self.cache, self.url, self.size, self.border);
+
+        self.action = inner.inner;
+
+        inner.response
     }
 }
 
@@ -25,6 +31,7 @@ impl<'cache, 'url> ProfilePic<'cache, 'url> {
             url,
             size,
             border: None,
+            action: None,
         }
     }
 
@@ -91,49 +98,45 @@ fn render_pfp(
     url: &str,
     ui_size: f32,
     border: Option<Stroke>,
-) -> egui::Response {
+) -> InnerResponse<Option<MediaAction>> {
     // We will want to downsample these so it's not blurry on hi res displays
     let img_size = 128u32;
 
     let cache_type = supported_mime_hosted_at_url(&mut img_cache.urls, url)
         .unwrap_or(notedeck::MediaCacheType::Image);
 
-    egui::Frame::NONE
-        .show(ui, |ui| {
-            render_images(
-                ui.ctx().clone(),
-                img_cache,
-                cache_type,
-                url,
-                ImageType::Profile(img_size),
-                |cur_state, gif_states| match cur_state {
-                    notedeck::TextureState::Pending => {
-                        paint_circle(ui, ui_size, border);
-                        None
-                    }
-                    notedeck::TextureState::Error(e) => {
-                        paint_circle(ui, ui_size, border);
-                        tracing::error!("Failed to fetch profile at url {url}: {e}");
-                        Some(crate::images::MediaUIAction::FetchNoPfpImage)
-                    }
-                    notedeck::TextureState::Loading {
-                        actual_image_tex: _,
-                    } => {
-                        paint_circle(ui, ui_size, border);
-                        Some(crate::images::MediaUIAction::DoneLoading)
-                    }
-                    notedeck::TextureState::Loaded(textured_image) => {
-                        let texture_handle = handle_repaint(
-                            ui,
-                            retrieve_latest_texture(url, gif_states, textured_image),
-                        );
-                        pfp_image(ui, texture_handle, ui_size, border);
-                        None
-                    }
-                },
-            )
-        })
-        .response
+    egui::Frame::NONE.show(ui, |ui| {
+        let cur_state = get_render_state(
+            ui.ctx(),
+            img_cache,
+            cache_type.clone(),
+            url,
+            ImageType::Profile(img_size),
+        );
+
+        match cur_state.texture_state {
+            notedeck::TextureState::Pending => {
+                paint_circle(ui, ui_size, border);
+                None
+            }
+            notedeck::TextureState::Error(e) => {
+                paint_circle(ui, ui_size, border);
+                tracing::error!("Failed to fetch profile at url {url}: {e}");
+                Some(MediaAction::FetchNoPfpImage {
+                    url: url.to_owned(),
+                    no_pfp_promise: fetch_no_pfp_promise(ui.ctx(), img_cache.get_cache(cache_type)),
+                })
+            }
+            notedeck::TextureState::Loaded(textured_image) => {
+                let texture_handle = handle_repaint(
+                    ui,
+                    retrieve_latest_texture(url, cur_state.gifs, textured_image),
+                );
+                pfp_image(ui, texture_handle, ui_size, border);
+                None
+            }
+        }
+    })
 }
 
 #[profiling::function]
