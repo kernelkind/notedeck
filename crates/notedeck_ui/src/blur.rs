@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
+use egui::Context;
 use nostrdb::Note;
+
+use crate::jobs::{Job, JobError, JobParamsOwned};
 
 pub struct Blur<'a> {
     pub blurhash: &'a str,
@@ -141,4 +144,65 @@ fn find_blur(tag_iter: nostrdb::TagIter) -> Option<(&str, Blur)> {
             dimensions,
         },
     ))
+}
+
+pub(crate) fn blur_media(ctx: &Context, url: &str, media_trusted: bool) -> bool {
+    !media_trusted && {
+        let id = egui::Id::new(("blur", url));
+        ctx.data(|d| d.get_temp(id)).unwrap_or_else(|| {
+            ctx.data_mut(|d| d.insert_temp(id, true));
+            true
+        })
+    }
+}
+
+pub(crate) enum BlurType<'a> {
+    Blurhash(RenderableBlur<'a>),
+    Default(&'a str),
+}
+
+pub(crate) struct RenderableBlur<'a> {
+    pub url: &'a str,
+    pub blur: &'a Blur<'a>,
+}
+
+pub(crate) fn compute_blurhash(
+    params: Option<JobParamsOwned>,
+    dims: PixelDimensions,
+) -> Result<Job, JobError> {
+    #[allow(irrefutable_let_patterns)]
+    let Some(JobParamsOwned::Blurhash(params)) = params
+    else {
+        return Err(JobError::InvalidParameters);
+    };
+
+    let maybe_handle = match generate_blurhash_texturehandle(
+        &params.ctx,
+        &params.blurhash,
+        &params.url,
+        dims.x,
+        dims.y,
+    ) {
+        Ok(tex) => Some(tex),
+        Err(e) => {
+            tracing::error!("failed to render blurhash: {e}");
+            None
+        }
+    };
+
+    Ok(Job::Blurhash(maybe_handle))
+}
+
+fn generate_blurhash_texturehandle(
+    ctx: &egui::Context,
+    blurhash: &str,
+    url: &str,
+    width: u32,
+    height: u32,
+) -> notedeck::Result<egui::TextureHandle> {
+    let bytes = blurhash::decode(blurhash, width, height, 1.0)
+        .map_err(|e| notedeck::Error::Generic(e.to_string()))?;
+
+    let img = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &bytes);
+    Ok(ctx.load_texture(url, img, Default::default()))
 }
