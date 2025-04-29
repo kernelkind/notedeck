@@ -437,8 +437,8 @@ impl<'a, 'd> NoteView<'a, 'd> {
 
                 ui.add(&mut contents);
 
-                if let Some(action) = contents.action() {
-                    note_action = Some(action.clone());
+                if let Some(action) = contents.action {
+                    note_action = Some(action);
                 }
 
                 if self.options().has_actionbar() {
@@ -501,8 +501,8 @@ impl<'a, 'd> NoteView<'a, 'd> {
                     );
                     ui.add(&mut contents);
 
-                    if let Some(action) = contents.action() {
-                        note_action = Some(action.clone());
+                    if let Some(action) = contents.action {
+                        note_action = Some(action);
                     }
 
                     if self.options().has_actionbar() {
