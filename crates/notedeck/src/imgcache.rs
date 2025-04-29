@@ -13,8 +13,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use hex::ToHex;
 use sha2::Digest;
-use std::path::PathBuf;
 use std::path::{self};
+use std::path::{Path, PathBuf};
 use tracing::warn;
 
 pub type MediaCacheValue = Promise<Result<TexturedImage>>;
@@ -214,6 +214,7 @@ pub struct ImageFrame {
 pub struct MediaCache {
     pub cache_dir: path::PathBuf,
     url_imgs: MediaCacheMap,
+    pub cache_type: MediaCacheType,
 }
 
 #[derive(Clone)]
@@ -223,10 +224,12 @@ pub enum MediaCacheType {
 }
 
 impl MediaCache {
-    pub fn new(cache_dir: path::PathBuf) -> Self {
+    pub fn new(parent_dir: &Path, cache_type: MediaCacheType) -> Self {
+        let cache_dir = parent_dir.join(Self::rel_dir(cache_type.clone()));
         Self {
             cache_dir,
             url_imgs: HashMap::new(),
+            cache_type,
         }
     }
 
@@ -360,8 +363,8 @@ impl Images {
     /// path to directory to place [`MediaCache`]s
     pub fn new(path: path::PathBuf) -> Self {
         Self {
-            static_imgs: MediaCache::new(path.join(MediaCache::rel_dir(MediaCacheType::Image))),
-            gifs: MediaCache::new(path.join(MediaCache::rel_dir(MediaCacheType::Gif))),
+            static_imgs: MediaCache::new(&path, MediaCacheType::Image),
+            gifs: MediaCache::new(&path, MediaCacheType::Gif),
             urls: UrlMimes::new(UrlCache::new(path.join(UrlCache::rel_dir()))),
             gif_states: Default::default(),
         }
