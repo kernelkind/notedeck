@@ -13,12 +13,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use hex::ToHex;
 use sha2::Digest;
-use std::path::{self};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::path::{self, Path};
 use tracing::warn;
-
-pub type MediaCacheValue = Promise<Option<Result<TexturedImage>>>;
-pub type MediaCacheMap = HashMap<String, MediaCacheValue>;
 
 #[derive(Default)]
 pub struct TexturesCache {
@@ -29,7 +26,6 @@ impl TexturesCache {
     pub fn handle_and_get_state(
         &mut self,
         url: &str,
-
         closure: impl FnOnce() -> Promise<Option<Result<TexturedImage>>>,
     ) -> TextureState {
         let state = match self.cache.raw_entry_mut().from_key(url) {
@@ -167,11 +163,11 @@ pub struct ImageFrame {
 
 pub struct MediaCache {
     pub cache_dir: path::PathBuf,
-    url_imgs: MediaCacheMap,
+    pub textures_cache: TexturesCache,
     pub cache_type: MediaCacheType,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum MediaCacheType {
     Image,
     Gif,
@@ -182,7 +178,7 @@ impl MediaCache {
         let cache_dir = parent_dir.join(Self::rel_dir(cache_type.clone()));
         Self {
             cache_dir,
-            url_imgs: HashMap::new(),
+            textures_cache: TexturesCache::default(),
             cache_type,
         }
     }
@@ -281,14 +277,6 @@ impl MediaCache {
             }
         }
         Ok(())
-    }
-
-    pub fn map(&self) -> &MediaCacheMap {
-        &self.url_imgs
-    }
-
-    pub fn map_mut(&mut self) -> &mut MediaCacheMap {
-        &mut self.url_imgs
     }
 }
 
