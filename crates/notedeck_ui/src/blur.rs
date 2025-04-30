@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use egui::Context;
 use nostrdb::Note;
 
 use crate::jobs::{Job, JobError, JobParamsOwned};
@@ -146,24 +145,9 @@ fn find_blur(tag_iter: nostrdb::TagIter) -> Option<(&str, Blur)> {
     ))
 }
 
-pub(crate) fn blur_media(ctx: &Context, url: &str, media_trusted: bool) -> bool {
-    !media_trusted && {
-        let id = egui::Id::new(("blur", url));
-        ctx.data(|d| d.get_temp(id)).unwrap_or_else(|| {
-            ctx.data_mut(|d| d.insert_temp(id, true));
-            true
-        })
-    }
-}
-
-pub(crate) enum BlurType<'a> {
-    Blurhash(RenderableBlur<'a>),
-    Default(&'a str),
-}
-
-pub(crate) struct RenderableBlur<'a> {
-    pub url: &'a str,
-    pub blur: &'a Blur<'a>,
+pub enum ObfuscationType<'a> {
+    Blurhash(&'a Blur<'a>),
+    Default,
 }
 
 pub(crate) fn compute_blurhash(

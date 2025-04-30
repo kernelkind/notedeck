@@ -23,7 +23,7 @@ pub struct TexturesCache {
 }
 
 impl TexturesCache {
-    pub fn handle_and_get_loadable_state(
+    pub fn handle_and_get_or_insert_loadable(
         &mut self,
         url: &str,
         closure: impl FnOnce() -> Promise<Option<Result<TexturedImage>>>,
@@ -33,7 +33,7 @@ impl TexturesCache {
         internal.into()
     }
 
-    pub fn handle_and_get_state(
+    pub fn handle_and_get_or_insert(
         &mut self,
         url: &str,
         closure: impl FnOnce() -> Promise<Option<Result<TexturedImage>>>,
@@ -50,35 +50,9 @@ impl TexturesCache {
         closure: impl FnOnce() -> Promise<Option<Result<TexturedImage>>>,
     ) -> &mut TextureStateInternal {
         let state = match self.cache.raw_entry_mut().from_key(url) {
-            hashbrown::hash_map::RawEntryMut::Occupied(entry) => 's: {
+            hashbrown::hash_map::RawEntryMut::Occupied(entry) => {
                 let state = entry.into_mut();
-
-                let TextureStateInternal::Pending(promise) = state else {
-                    break 's state;
-                };
-
-                let Some(res) = promise.ready_mut() else {
-                    break 's state;
-                };
-
-                let Some(res) = res.take() else {
-                    tracing::error!("Failed to take the promise");
-                    *state = TextureStateInternal::Error(crate::Error::Generic(
-                        "Promise already taken".to_owned(),
-                    ));
-                    break 's state;
-                };
-
-                match res {
-                    Ok(textured) => {
-                        *state = if use_loading {
-                            TextureStateInternal::Loading(textured)
-                        } else {
-                            TextureStateInternal::Loaded(textured)
-                        }
-                    }
-                    Err(e) => *state = TextureStateInternal::Error(e),
-                }
+                handle_occupied(state, use_loading);
 
                 state
             }
@@ -113,6 +87,41 @@ impl TexturesCache {
             Some(TextureStateInternal::Loaded(textured))
         });
     }
+
+    pub fn get_and_handle(&mut self, url: &str) -> Option<LoadableTextureState> {
+        self.cache.get_mut(url).map(|state| {
+            handle_occupied(state, true);
+            state.into()
+        })
+    }
+}
+
+fn handle_occupied(state: &mut TextureStateInternal, use_loading: bool) {
+    let TextureStateInternal::Pending(promise) = state else {
+        return;
+    };
+
+    let Some(res) = promise.ready_mut() else {
+        return;
+    };
+
+    let Some(res) = res.take() else {
+        tracing::error!("Failed to take the promise");
+        *state =
+            TextureStateInternal::Error(crate::Error::Generic("Promise already taken".to_owned()));
+        return;
+    };
+
+    match res {
+        Ok(textured) => {
+            *state = if use_loading {
+                TextureStateInternal::Loading(textured)
+            } else {
+                TextureStateInternal::Loaded(textured)
+            }
+        }
+        Err(e) => *state = TextureStateInternal::Error(e),
+    }
 }
 
 pub enum LoadableTextureState<'a> {
@@ -122,6 +131,13 @@ pub enum LoadableTextureState<'a> {
         actual_image_tex: &'a mut TexturedImage,
     }, // the texture is in the loading state, for transitioning between the pending and loaded states
     Loaded(&'a mut TexturedImage),
+}
+
+pub enum OwnedTextureState {
+    Pending,
+    Error,
+    Loading,
+    Loaded,
 }
 
 pub enum TextureState<'a> {
@@ -137,6 +153,17 @@ impl<'a> From<&'a mut TextureStateInternal> for TextureState<'a> {
             TextureStateInternal::Error(error) => TextureState::Error(error),
             TextureStateInternal::Loading(textured_image) => TextureState::Loaded(textured_image),
             TextureStateInternal::Loaded(textured_image) => TextureState::Loaded(textured_image),
+        }
+    }
+}
+
+impl<'a> From<&'a TextureStateInternal> for OwnedTextureState {
+    fn from(value: &'a TextureStateInternal) -> Self {
+        match value {
+            TextureStateInternal::Pending(_) => OwnedTextureState::Pending,
+            TextureStateInternal::Error(_) => OwnedTextureState::Error,
+            TextureStateInternal::Loading(_) => OwnedTextureState::Loading,
+            TextureStateInternal::Loaded(_) => OwnedTextureState::Loaded,
         }
     }
 }
@@ -213,7 +240,7 @@ pub struct MediaCache {
     pub cache_type: MediaCacheType,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum MediaCacheType {
     Image,
     Gif,

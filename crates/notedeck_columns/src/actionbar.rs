@@ -111,7 +111,7 @@ fn execute_note_action(
             None
         }
         NoteAction::Media(media_action) => {
-            media_action.process(ui, images);
+            media_action.process(images);
             None
         }
     }

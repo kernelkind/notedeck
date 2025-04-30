@@ -122,7 +122,7 @@ fn render_pfp(
             notedeck::TextureState::Error(e) => {
                 paint_circle(ui, ui_size, border);
                 tracing::error!("Failed to fetch profile at url {url}: {e}");
-                Some(MediaAction::FetchNoPfpImage {
+                Some(MediaAction::FetchImage {
                     url: url.to_owned(),
                     cache_type: cache_type.clone(),
                     no_pfp_promise: fetch_no_pfp_promise(ui.ctx(), img_cache.get_cache(cache_type)),

@@ -14,7 +14,7 @@ use tracing::warn;
 
 use notedeck::NoteContext;
 
-use super::media::{find_supported_media_type, image_carousel, MediaRenderType};
+use super::media::{find_renderable_media, image_carousel, RenderableMedia};
 
 pub struct NoteContents<'a, 'd> {
     note_context: &'a mut NoteContext<'d>,
@@ -134,7 +134,7 @@ pub fn render_note_contents(
         let _ = ui.allocate_at_least(egui::vec2(ui.available_width(), 0.0), egui::Sense::click());
     }
 
-    let mut supported_medias: Vec<MediaRenderType> = vec![];
+    let mut supported_medias: Vec<RenderableMedia> = vec![];
     let blurhashes = OnceCell::new();
 
     let response = ui.horizontal_wrapped(|ui| {
@@ -145,8 +145,6 @@ pub fn render_note_contents(
             ui.weak(note.content());
             return;
         };
-
-        let media_trusted = OnceCell::new();
 
         ui.spacing_mut().item_spacing.x = 0.0;
 
@@ -210,22 +208,9 @@ pub fn render_note_contents(
 
                         let blurs = blurhashes.get_or_init(|| imeta_blurhashes(note));
 
-                        let trusted_media = media_trusted.get_or_init(|| {
-                            trust_media_from_pk2(
-                                note_context.ndb,
-                                txn,
-                                cur_acc.as_ref().map(|k| k.pubkey.bytes()),
-                                note.pubkey(),
-                            )
-                        });
-
-                        let Some(media_type) = find_supported_media_type(
-                            ui,
-                            &mut note_context.img_cache.urls,
-                            blurs,
-                            *trusted_media,
-                            url,
-                        ) else {
+                        let Some(media_type) =
+                            find_renderable_media(&mut note_context.img_cache.urls, blurs, url)
+                        else {
                             return false;
                         };
 
@@ -296,6 +281,13 @@ pub fn render_note_contents(
         ui.add_space(2.0);
         let carousel_id = egui::Id::new(("carousel", note.key().expect("expected tx note")));
 
+        let trusted_media = trust_media_from_pk2(
+            note_context.ndb,
+            txn,
+            cur_acc.as_ref().map(|k| k.pubkey.bytes()),
+            note.pubkey(),
+        );
+
         media_action = image_carousel(
             ui,
             note_context.img_cache,
@@ -303,6 +295,7 @@ pub fn render_note_contents(
             jobs,
             supported_medias,
             carousel_id,
+            trusted_media,
         );
         ui.add_space(2.0);
     }

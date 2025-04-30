@@ -43,10 +43,7 @@ pub struct ZapTargetAmount {
 }
 
 pub enum MediaAction {
-    Unblur {
-        url: String,
-    }, // URL to unblur
-    FetchNoPfpImage {
+    FetchImage {
         url: String,
         cache_type: MediaCacheType,
         no_pfp_promise: Promise<Option<Result<TexturedImage, crate::Error>>>,
@@ -60,8 +57,7 @@ pub enum MediaAction {
 impl std::fmt::Debug for MediaAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unblur { url } => f.debug_struct("Unblur").field("url", url).finish(),
-            Self::FetchNoPfpImage {
+            Self::FetchImage {
                 url,
                 cache_type,
                 no_pfp_promise,
@@ -81,19 +77,18 @@ impl std::fmt::Debug for MediaAction {
 }
 
 impl MediaAction {
-    pub fn process(self, ui: &egui::Ui, images: &mut Images) {
+    pub fn process(self, images: &mut Images) {
         match self {
-            MediaAction::Unblur { url } => send_unblur_signal(ui.ctx(), &url),
-            MediaAction::FetchNoPfpImage {
+            MediaAction::FetchImage {
                 url,
                 cache_type,
-                no_pfp_promise,
+                no_pfp_promise: promise,
             } => {
-                tracing::info!("GOT FETCH NO PFP ACTION");
+                tracing::info!("FETCHING IMAGE: {url}");
                 images
                     .get_cache_mut(cache_type)
                     .textures_cache
-                    .insert_pending(&url, no_pfp_promise);
+                    .insert_pending(&url, promise);
             }
             MediaAction::DoneLoading { url, cache_type } => {
                 let cache = match cache_type {
@@ -105,9 +100,4 @@ impl MediaAction {
             }
         }
     }
-}
-
-fn send_unblur_signal(ctx: &egui::Context, url: &str) {
-    let id = egui::Id::new(("blur", url));
-    ctx.data_mut(|d| d.insert_temp(id, false))
 }

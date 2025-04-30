@@ -424,28 +424,6 @@ fn fetch_img_from_net(
     promise
 }
 
-pub fn get_loadable_render_state<'a>(
-    ctx: &Context,
-    images: &'a mut Images,
-    cache_type: MediaCacheType,
-    url: &str,
-    img_type: ImageType,
-) -> LoadableRenderState<'a> {
-    let cache = match cache_type {
-        MediaCacheType::Image => &mut images.static_imgs,
-        MediaCacheType::Gif => &mut images.gifs,
-    };
-
-    let cur_state = cache.textures_cache.handle_and_get_loadable_state(url, || {
-        crate::images::fetch_img(&cache.cache_dir, ctx, url, img_type, cache_type)
-    });
-
-    LoadableRenderState {
-        texture_state: cur_state,
-        gifs: &mut images.gif_states,
-    }
-}
-
 pub fn get_render_state<'a>(
     ctx: &Context,
     images: &'a mut Images,
@@ -458,7 +436,7 @@ pub fn get_render_state<'a>(
         MediaCacheType::Gif => &mut images.gifs,
     };
 
-    let cur_state = cache.textures_cache.handle_and_get_state(url, || {
+    let cur_state = cache.textures_cache.handle_and_get_or_insert(url, || {
         crate::images::fetch_img(&cache.cache_dir, ctx, url, img_type, cache_type)
     });
 
