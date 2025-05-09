@@ -1,5 +1,6 @@
 pub mod contents;
 pub mod context;
+pub mod custom_zap;
 pub mod options;
 pub mod reply_description;
 
