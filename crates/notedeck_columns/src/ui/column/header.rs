@@ -444,7 +444,6 @@ impl<'a> NavTitle<'a> {
                     self.timeline_pfp(ui, kind, pfp_size);
                 }
             },
-
             Route::Reply(_) => {}
             Route::Quote(_) => {}
             Route::Accounts(_as) => {}
@@ -461,6 +460,7 @@ impl<'a> NavTitle<'a> {
                 ui.add(ui::side_panel::search_button());
             }
             Route::Wallet(_) => {}
+            Route::CustomizeZapAmount(_) => {}
         }
     }
 
