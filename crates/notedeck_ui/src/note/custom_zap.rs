@@ -6,7 +6,8 @@ impl CustomZapView {
         Self {}
     }
 
-    pub fn ui(&mut self, _ui: &mut egui::Ui) -> Option<u64> {
-        unimplemented!()
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<u64> {
+        ui.label("hello from custom zap view");
+        None
     }
 }
