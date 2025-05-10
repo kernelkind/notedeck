@@ -39,6 +39,7 @@ pub fn get_current_wallet<'a>(
     Some(wallet)
 }
 
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum WalletType {
     Auto,

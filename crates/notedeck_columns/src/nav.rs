@@ -15,7 +15,7 @@ use crate::{
         column::NavTitle,
         configure_deck::ConfigureDeckView,
         edit_deck::{EditDeckResponse, EditDeckView},
-        note::{NewPostAction, PostAction, PostType},
+        note::{custom_zap::CustomZapView, NewPostAction, PostAction, PostType},
         profile::EditProfileView,
         search::{FocusState, SearchView},
         support::SupportView,
@@ -27,8 +27,11 @@ use crate::{
 
 use egui_nav::{Nav, NavAction, NavResponse, NavUiType};
 use nostrdb::Transaction;
-use notedeck::{get_current_wallet, AccountsAction, AppContext, NoteAction, NoteContext};
-use notedeck_ui::{note::custom_zap::CustomZapView, View};
+use notedeck::{
+    get_current_default_msats, get_current_wallet, AccountsAction, AppContext, NoteAction,
+    NoteContext,
+};
+use notedeck_ui::View;
 use tracing::error;
 
 #[allow(clippy::enum_variant_names)]
@@ -587,17 +590,29 @@ fn render_nav_body(
                 .ui(ui)
                 .map(RenderNavAction::WalletAction)
         }
-        Route::CustomizeZapAmount(target) => CustomZapView::new().ui(ui).map(|msats| {
-            get_active_columns_mut(ctx.accounts, &mut app.decks_cache)
-                .get_first_router()
-                .go_back();
-            RenderNavAction::NoteAction(NoteAction::Zap(notedeck::ZapAction::Send(
-                notedeck::note::ZapTargetAmount {
-                    target: target.clone(),
-                    specified_msats: Some(msats),
-                },
-            )))
-        }),
+        Route::CustomizeZapAmount(target) => {
+            let txn = Transaction::new(&ctx.ndb).expect("txn");
+            let default_msats = get_current_default_msats(ctx.accounts, ctx.global_wallet);
+            CustomZapView::new(
+                ctx.img_cache,
+                &ctx.ndb,
+                &txn,
+                &target.zap_recipient,
+                default_msats,
+            )
+            .ui(ui)
+            .map(|msats| {
+                get_active_columns_mut(ctx.accounts, &mut app.decks_cache)
+                    .get_first_router()
+                    .go_back();
+                RenderNavAction::NoteAction(NoteAction::Zap(notedeck::ZapAction::Send(
+                    notedeck::note::ZapTargetAmount {
+                        target: target.clone(),
+                        specified_msats: Some(msats),
+                    },
+                )))
+            })
+        }
     }
 }
 
