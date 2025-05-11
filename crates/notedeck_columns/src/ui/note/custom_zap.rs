@@ -11,7 +11,7 @@ use notedeck::{
 };
 use notedeck_ui::{colors, profile::display_name_widget, AnimationHelper, ProfilePic};
 
-use crate::ui::widgets::{styled_button, styled_button_togglable};
+use crate::ui::widgets::styled_button_togglable;
 
 pub struct CustomZapView<'a> {
     images: &'a mut Images,
@@ -58,60 +58,74 @@ impl<'a> CustomZapView<'a> {
         let profile = profile.as_ref();
         show_profile(ui, self.images, profile);
 
+        ui.add_space(8.0);
+
+        let slider_width = {
+            let desired_slider_width = ui.available_width() * 0.6;
+            if desired_slider_width < 224.0 {
+                224.0
+            } else {
+                desired_slider_width
+            }
+        };
+
         let id = ui.id().with(("CustomZap", self.target_pubkey));
-        let typed_sats = show_amount(ui, id, self.default_msats);
 
         let default_sats = self.default_msats / 1000;
-        let mut slider_sats = typed_sats.unwrap_or(default_sats);
+        ui.with_layout(Layout::top_down(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 16.0);
+            ui.spacing_mut().slider_width = slider_width;
 
-        let resp = ui
-            .with_layout(Layout::top_down(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing = vec2(0.0, 8.0);
+            let mut cur_amount = if let Some(input) = ui.data(|d| d.get_temp(id)) {
+                input
+            } else {
+                (self.default_msats / 1000).to_string()
+            };
+            show_amount(ui, id, &mut cur_amount, slider_width);
+            let mut maybe_sats = cur_amount.parse::<u64>().ok();
 
-                ui.add(Slider::new(&mut slider_sats, 1..=100000));
-
-                let mut new_selection = if let Some(typed_sats) = typed_sats {
-                    if typed_sats != slider_sats {
-                        Some(slider_sats)
-                    } else {
-                        None
-                    }
-                } else {
-                    if slider_sats == default_sats {
-                        None
-                    } else {
-                        Some(slider_sats)
-                    }
-                };
-                tracing::info!(
-                    "typed_sats: {:?}, new selection: {:?}",
-                    typed_sats,
-                    new_selection
+            let prev_slider_sats = maybe_sats.unwrap_or(default_sats).clamp(1, 100000);
+            let mut slider_sats = prev_slider_sats;
+            ui.allocate_new_ui(egui::UiBuilder::new(), |ui| {
+                ui.set_width(slider_width);
+                ui.add(
+                    Slider::new(&mut slider_sats, 1..=100000)
+                        .logarithmic(true)
+                        .trailing_fill(true)
+                        .show_value(false),
                 );
+            });
 
-                if let Some(selection) = show_selection_buttons(ui, typed_sats.or(new_selection)) {
-                    new_selection = Some(selection);
-                }
+            if slider_sats != prev_slider_sats {
+                cur_amount = prev_slider_sats.to_string();
+                maybe_sats = Some(prev_slider_sats);
+            }
 
-                if let Some(selection) = new_selection {
-                    tracing::info!("inserted selection {selection}");
-                    ui.data_mut(|d| d.insert_temp(id, selection.to_string()));
-                }
+            if let Some(selection) = show_selection_buttons(ui, maybe_sats) {
+                cur_amount = selection.to_string();
+                maybe_sats = Some(selection);
+            }
 
-                ui.add(styled_button_togglable(
-                    "Send",
-                    colors::PINK,
-                    typed_sats.is_some(),
-                ))
-            })
-            .inner;
+            ui.data_mut(|d| d.insert_temp(id, cur_amount));
 
-        if resp.clicked() {
-            return typed_sats.map(|i| i * 1000);
-        }
+            let resp = ui.add(styled_button_togglable(
+                "Send",
+                colors::PINK,
+                is_valid_zap(maybe_sats),
+            ));
 
-        None
+            if resp.clicked() {
+                maybe_sats.map(|i| i * 1000)
+            } else {
+                None
+            }
+        })
+        .inner
     }
+}
+
+fn is_valid_zap(amount: Option<u64>) -> bool {
+    amount.map_or(false, |sats| sats > 0)
 }
 
 fn show_title(ui: &mut egui::Ui) {
@@ -162,13 +176,7 @@ fn show_profile(ui: &mut egui::Ui, images: &mut Images, profile: Option<&Profile
     );
 }
 
-fn show_amount(ui: &mut egui::Ui, id: egui::Id, default_msats: u64) -> Option<u64> {
-    let user_input = if let Some(input) = ui.data(|d| d.get_temp(id)) {
-        input
-    } else {
-        (default_msats / 1000).to_string()
-    };
-
+fn show_amount(ui: &mut egui::Ui, id: egui::Id, user_input: &mut String, width: f32) {
     let user_input_font = NotedeckTextStyle::Heading.get_bolded_font(ui.ctx());
 
     let user_input_id = id.with("sats_amount");
@@ -179,8 +187,6 @@ fn show_amount(ui: &mut egui::Ui, id: egui::Id, default_msats: u64) -> Option<u6
         ui.visuals().text_color(),
     );
 
-    let amount_section_margin: f32 = 8.0;
-    let available_width = ui.available_width() - (amount_section_margin * 2.0);
     let painter = ui.painter();
 
     let sats_galley = painter.layout_no_wrap(
@@ -189,33 +195,21 @@ fn show_amount(ui: &mut egui::Ui, id: egui::Id, default_msats: u64) -> Option<u6
         ui.visuals().noninteractive().text_color(),
     );
 
-    let mut user_input = if let Some(input) = ui.data(|d| d.get_temp(id)) {
-        input
-    } else {
-        (default_msats / 1000).to_string()
-    };
-
     let user_input_rect = {
         let mut rect = user_input_galley.rect;
         rect.extend_with_x(user_input_galley.rect.left() - 8.0);
         rect
     };
-    let sats_width = sats_galley.rect.width();
-    let user_input_padding = if user_input_rect.width() + sats_width > available_width {
-        0.0
-    } else if (user_input_rect.width() / 2.0) + sats_width > (available_width / 2.0) {
-        available_width - sats_width - user_input_rect.width()
-    } else {
-        (available_width / 2.0) - (user_input_rect.width() / 2.0)
-    };
+    let sats_width = sats_galley.rect.width() + 8.0;
 
-    let mut maybe_msats = None;
     Frame::NONE
         .fill(ui.visuals().noninteractive().weak_bg_fill)
         .corner_radius(8)
         .show(ui, |ui| {
+            ui.set_width(width);
+            ui.add_space(8.0);
             ui.with_layout(Layout::top_down(egui::Align::Center), |ui| {
-                let textedit = egui::TextEdit::singleline(&mut user_input)
+                let textedit = egui::TextEdit::singleline(user_input)
                     .frame(false)
                     .id(user_input_id)
                     .font(user_input_font);
@@ -226,8 +220,20 @@ fn show_amount(ui: &mut egui::Ui, id: egui::Id, default_msats: u64) -> Option<u6
                         .color(ui.visuals().noninteractive().text_color()),
                 ));
 
+                let user_input_padding = {
+                    let available_width = ui.available_width();
+                    if user_input_rect.width() + sats_width > available_width {
+                        0.0
+                    } else if (user_input_rect.width() / 2.0) + sats_width > (available_width / 2.0)
+                    {
+                        available_width - sats_width - user_input_rect.width()
+                    } else {
+                        (available_width / 2.0) - (user_input_rect.width() / 2.0)
+                    }
+                };
+
                 let user_input_rect = {
-                    let max_input_width = available_width - sats_width;
+                    let max_input_width = ui.available_width() - sats_width;
 
                     let user_input_size = if user_input_rect.width() > max_input_width {
                         vec2(max_input_width, user_input_rect.height())
@@ -267,74 +273,40 @@ fn show_amount(ui: &mut egui::Ui, id: egui::Id, default_msats: u64) -> Option<u6
 
                 ui.advance_cursor_after_rect(sats_rect);
 
-                maybe_msats = user_input.parse::<u64>().ok();
-
-                if maybe_msats.is_none() {
+                if !is_valid_zap(user_input.parse::<u64>().ok()) {
                     ui.colored_label(ui.visuals().warn_fg_color, "Please enter valid amount.");
                 }
+                ui.add_space(8.0);
             });
         });
 
+    // let user_changed = cur_input != Some(user_input.clone());
     ui.memory_mut(|m| m.request_focus(user_input_id));
-    ui.data_mut(|d| d.insert_temp(id, user_input));
-
-    maybe_msats
+    // ui.data_mut(|d| d.insert_temp(id, user_input));
 }
+
+const SELECTION_BUTTONS: [ZapSelectionButton; 8] = [
+    ZapSelectionButton::First,
+    ZapSelectionButton::Second,
+    ZapSelectionButton::Third,
+    ZapSelectionButton::Fourth,
+    ZapSelectionButton::Fifth,
+    ZapSelectionButton::Sixth,
+    ZapSelectionButton::Seventh,
+    ZapSelectionButton::Eighth,
+];
 
 fn show_selection_buttons(ui: &mut egui::Ui, sats_selection: Option<u64>) -> Option<u64> {
     let mut our_selection = None;
     ui.allocate_ui_with_layout(
-        vec2(248.0, 116.0),
+        vec2(224.0, 116.0),
         Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
         |ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            our_selection = our_selection.or(show_selection_button(
-                ui,
-                sats_selection,
-                ZapSelectionButton::First,
-            ));
 
-            our_selection = our_selection.or(show_selection_button(
-                ui,
-                sats_selection,
-                ZapSelectionButton::Second,
-            ));
-
-            our_selection = our_selection.or(show_selection_button(
-                ui,
-                sats_selection,
-                ZapSelectionButton::Third,
-            ));
-
-            our_selection = our_selection.or(show_selection_button(
-                ui,
-                sats_selection,
-                ZapSelectionButton::Fourth,
-            ));
-
-            our_selection = our_selection.or(show_selection_button(
-                ui,
-                sats_selection,
-                ZapSelectionButton::Fifth,
-            ));
-
-            our_selection = our_selection.or(show_selection_button(
-                ui,
-                sats_selection,
-                ZapSelectionButton::Sixth,
-            ));
-
-            our_selection = our_selection.or(show_selection_button(
-                ui,
-                sats_selection,
-                ZapSelectionButton::Seventh,
-            ));
-
-            our_selection = our_selection.or(show_selection_button(
-                ui,
-                sats_selection,
-                ZapSelectionButton::Eighth,
-            ));
+            for button in SELECTION_BUTTONS {
+                our_selection = our_selection.or(show_selection_button(ui, sats_selection, button));
+            }
         },
     );
 
