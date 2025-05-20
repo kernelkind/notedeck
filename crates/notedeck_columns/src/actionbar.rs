@@ -27,6 +27,7 @@ fn execute_note_action(
     action: NoteAction,
     ndb: &Ndb,
     router: &mut Router<Route>,
+    sheet_router: &mut Option<Router<Route>>,
     timeline_cache: &mut TimelineCache,
     note_cache: &mut NoteCache,
     pool: &mut RelayPool,
@@ -98,7 +99,12 @@ fn execute_note_action(
                 }
                 ZapAction::ClearError(target) => clear_zap_error(&sender, zaps, target),
                 ZapAction::CustomizeAmount(target) => {
-                    router.route_to(Route::CustomizeZapAmount(target.to_owned()))
+                    let route = Route::CustomizeZapAmount(target.to_owned());
+                    if let Some(sheet_router) = sheet_router {
+                        sheet_router.route_to(route);
+                    } else {
+                        *sheet_router = Some(Router::new(vec![route]));
+                    }
                 }
             }
 
@@ -138,11 +144,14 @@ pub fn execute_and_process_note_action(
     images: &mut Images,
     ui: &mut egui::Ui,
 ) {
-    let router = columns.column_mut(col).router_mut();
+    let cols = columns.column_mut(col);
+    let router = &mut cols.router;
+    let sheet_router = &mut cols.sheet_router;
     if let Some(br) = execute_note_action(
         action,
         ndb,
         router,
+        sheet_router,
         timeline_cache,
         note_cache,
         pool,

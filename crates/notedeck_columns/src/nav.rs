@@ -626,6 +626,12 @@ pub fn render_nav(
     ctx: &mut AppContext<'_>,
     ui: &mut egui::Ui,
 ) -> RenderNavResponse {
+    if let Some(sheet_router) = &app.columns(ctx.accounts)
+            .column(col)
+            .sheet_router() {
+
+            }
+
     let nav_response = Nav::new(
         &app.columns(ctx.accounts)
             .column(col)

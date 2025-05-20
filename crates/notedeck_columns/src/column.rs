@@ -11,13 +11,17 @@ use tracing::warn;
 
 #[derive(Clone, Debug)]
 pub struct Column {
-    router: Router<Route>,
+    pub router: Router<Route>,
+    pub sheet_router: Option<Router<Route>>,
 }
 
 impl Column {
     pub fn new(routes: Vec<Route>) -> Self {
         let router = Router::new(routes);
-        Column { router }
+        Column {
+            router,
+            sheet_router: None,
+        }
     }
 
     pub fn router(&self) -> &Router<Route> {
@@ -26,6 +30,14 @@ impl Column {
 
     pub fn router_mut(&mut self) -> &mut Router<Route> {
         &mut self.router
+    }
+
+    pub fn sheet_router(&self) -> Option<&Router<Route>> {
+        self.sheet_router.as_ref()
+    }
+
+    pub fn sheet_router_mut(&mut self) -> &mut Option<Router<Route>> {
+        &mut self.sheet_router
     }
 }
 
