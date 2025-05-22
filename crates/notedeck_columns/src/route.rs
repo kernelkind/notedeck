@@ -361,3 +361,38 @@ impl fmt::Display for Route {
         }
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct SingletonRouter<R: Clone> {
+    route: Option<R>,
+    pub returning: bool,
+    pub navigating: bool,
+}
+
+impl<R: Clone> SingletonRouter<R> {
+    pub fn route_to(&mut self, route: R) {
+        self.navigating = true;
+        self.route = Some(route);
+    }
+
+    pub fn go_back(&mut self) {
+        self.returning = true;
+    }
+
+    pub fn clear(&mut self) {
+        self.route = None;
+        self.returning = false;
+    }
+
+    pub fn route(&self) -> &Option<R> {
+        &self.route
+    }
+
+    pub fn new() -> Self {
+        Self {
+            route: None,
+            returning: false,
+            navigating: false,
+        }
+    }
+}

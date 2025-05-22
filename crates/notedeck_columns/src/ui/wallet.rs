@@ -4,7 +4,7 @@ use notedeck::{
     PendingDefaultZapState, Wallet, WalletError, WalletUIState, ZapWallet,
 };
 
-use crate::route::{Route, Router};
+use crate::{nav::RouterAction, route::Route};
 
 use super::widgets::styled_button;
 
@@ -55,23 +55,24 @@ impl WalletAction {
         &self,
         accounts: &mut Accounts,
         global_wallet: &mut GlobalWallet,
-        router: &mut Router<Route>,
-    ) {
+    ) -> Option<RouterAction> {
+        let mut action = None;
+
         match &self {
             WalletAction::SaveURI => {
                 let ui_state = &mut global_wallet.ui_state;
                 if ui_state.for_local_only {
                     ui_state.for_local_only = false;
                     let Some(cur_acc) = accounts.get_selected_account_mut() else {
-                        return;
+                        return None;
                     };
 
                     if cur_acc.wallet.is_some() {
-                        return;
+                        return None;
                     }
 
                     let Some(wallet) = try_create_wallet(ui_state) else {
-                        return;
+                        return None;
                     };
 
                     accounts.update_current_account(move |acc| {
@@ -79,11 +80,11 @@ impl WalletAction {
                     });
                 } else {
                     if global_wallet.wallet.is_some() {
-                        return;
+                        return None;
                     }
 
                     let Some(wallet) = try_create_wallet(ui_state) else {
-                        return;
+                        return None;
                     };
 
                     global_wallet.wallet = Some(wallet.into());
@@ -91,7 +92,9 @@ impl WalletAction {
                 }
             }
             WalletAction::AddLocalOnly => {
-                router.route_to(Route::Wallet(notedeck::WalletType::Local));
+                action = Some(RouterAction::route_to(Route::Wallet(
+                    notedeck::WalletType::Local,
+                )));
                 global_wallet.ui_state.for_local_only = true;
             }
             WalletAction::Delete => {
@@ -100,7 +103,7 @@ impl WalletAction {
                         accounts.update_current_account(|acc| {
                             acc.wallet = None;
                         });
-                        return;
+                        return None;
                     }
                 }
 
@@ -153,6 +156,7 @@ impl WalletAction {
                     (wallet.default_zap.get_default_zap_msats() / 1000).to_string();
             }
         }
+        action
     }
 }
 

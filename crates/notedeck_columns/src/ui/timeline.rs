@@ -130,6 +130,10 @@ fn timeline_ui(
         .auto_shrink([false, false])
         .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible);
 
+    if let Some(offset) = ui.data(|i| i.get_temp::<f32>(scroll_id.with("timeline_scroll_offset"))) {
+        scroll_area = scroll_area.vertical_scroll_offset(offset);
+    }
+
     if let Some(goto_top_resp) = goto_top_resp {
         if goto_top_resp.clicked() {
             scroll_area = scroll_area.vertical_scroll_offset(0.0);
@@ -161,6 +165,13 @@ fn timeline_ui(
             jobs,
         )
         .show(ui)
+    });
+
+    ui.data_mut(|d| {
+        d.insert_temp(
+            scroll_id.with("timeline_scroll_offset"),
+            scroll_output.state.offset.y,
+        )
     });
 
     let at_top_after_scroll = scroll_output.state.offset.y == 0.0;
@@ -362,10 +373,10 @@ impl<'a, 'd> TimelineTabView<'a, 'd> {
         let len = self.tab.notes.len();
 
         let is_muted = self.is_muted;
-        self.tab
-            .list
-            .clone()
-            .borrow_mut()
+        let list = self.tab.list.clone();
+        list.borrow_mut().check_for_resize(true);
+        list.borrow_mut().scroll_position_sync_on_resize(true);
+        list.borrow_mut()
             .ui_custom_layout(ui, len, |ui, start_index| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.spacing_mut().item_spacing.x = 4.0;

@@ -1,6 +1,6 @@
 use crate::{
     actionbar::TimelineOpenResult,
-    route::{Route, Router},
+    route::{Route, Router, SingletonRouter},
     timeline::{Timeline, TimelineCache, TimelineKind},
 };
 use enostr::RelayPool;
@@ -12,7 +12,7 @@ use tracing::warn;
 #[derive(Clone, Debug)]
 pub struct Column {
     pub router: Router<Route>,
-    pub show_sheet: Option<Route>,
+    pub sheet_router: SingletonRouter<Route>,
 }
 
 impl Column {
@@ -20,7 +20,7 @@ impl Column {
         let router = Router::new(routes);
         Column {
             router,
-            show_sheet: None,
+            sheet_router: SingletonRouter::new(),
         }
     }
 
