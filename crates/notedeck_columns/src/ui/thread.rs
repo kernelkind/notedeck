@@ -1,5 +1,5 @@
 use enostr::KeypairUnowned;
-use nostrdb::Transaction;
+use nostrdb::{NoteKey, Transaction};
 use notedeck::{MuteFun, NoteAction, NoteContext, RootNoteId, UnknownIds};
 use notedeck_ui::jobs::JobsCache;
 use notedeck_ui::NoteOptions;
@@ -98,7 +98,7 @@ impl<'a, 'd> ThreadView<'a, 'd> {
                     error!("error polling notes into thread timeline: {err}");
                 }
 
-                TimelineTabView::new(
+                let mut tab_view = TimelineTabView::new(
                     thread_timeline.current_view(),
                     true,
                     self.note_options,
@@ -107,8 +107,18 @@ impl<'a, 'd> ThreadView<'a, 'd> {
                     self.note_context,
                     self.cur_acc,
                     self.jobs,
-                )
-                .show(ui)
+                );
+
+                let thread_scroll_id = egui::Id::new(("thread_scroll", self.selected_note_id));
+                if let Some(key) = ui.data(|d| d.get_temp(thread_scroll_id)) {
+                    tracing::info!("ThreadView: FOUND SCROLL");
+                    tab_view = tab_view.scroll_to_note(NoteKey::new(key));
+                    ui.data_mut(|d| d.remove_temp::<u64>(thread_scroll_id));
+                    // tracing::info!("ThreadView: FOUND SCROLL");
+                    // tab_view = tab_view.scroll_to_noteid(self.selected_note_id);
+                }
+
+                tab_view.show(ui)
             })
             .inner
     }

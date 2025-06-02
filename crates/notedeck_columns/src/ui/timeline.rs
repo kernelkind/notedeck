@@ -2,7 +2,8 @@ use egui::containers::scroll_area::ScrollBarVisibility;
 use egui::{vec2, Direction, Layout, Pos2, Stroke};
 use egui_tabs::TabColor;
 use enostr::KeypairUnowned;
-use nostrdb::Transaction;
+use nostrdb::{NoteKey, Transaction};
+use notedeck::NoteRef;
 use notedeck_ui::jobs::JobsCache;
 use std::f32::consts::PI;
 use tracing::{error, warn};
@@ -331,6 +332,7 @@ pub struct TimelineTabView<'a, 'd> {
     note_context: &'a mut NoteContext<'d>,
     cur_acc: &'a Option<KeypairUnowned<'a>>,
     jobs: &'a mut JobsCache,
+    scroll_to_note: Option<NoteKey>,
 }
 
 impl<'a, 'd> TimelineTabView<'a, 'd> {
@@ -354,7 +356,13 @@ impl<'a, 'd> TimelineTabView<'a, 'd> {
             note_context,
             cur_acc,
             jobs,
+            scroll_to_note: None,
         }
+    }
+
+    pub fn scroll_to_note(mut self, note: NoteKey) -> Self {
+        self.scroll_to_note = Some(note);
+        self
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<NoteAction> {
@@ -362,10 +370,27 @@ impl<'a, 'd> TimelineTabView<'a, 'd> {
         let len = self.tab.notes.len();
 
         let is_muted = self.is_muted;
-        self.tab
-            .list
-            .clone()
-            .borrow_mut()
+        let list = self.tab.list.clone();
+
+        if let Some(key) = self.scroll_to_note {
+            let helper = |cur_index, cur_note: &NoteRef| {
+                if cur_note.key == key {
+                    tracing::info!("Found key, JUMPING to index: {cur_index}");
+                    list.borrow_mut().jump_to(cur_index);
+                }
+            };
+            if self.reversed {
+                for (index, note) in self.tab.notes.iter().rev().enumerate() {
+                    helper(index, note)
+                }
+            } else {
+                for (index, note) in self.tab.notes.iter().enumerate() {
+                    helper(index, note)
+                }
+            }
+        }
+
+        list.borrow_mut()
             .ui_custom_layout(ui, len, |ui, start_index| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.spacing_mut().item_spacing.x = 4.0;

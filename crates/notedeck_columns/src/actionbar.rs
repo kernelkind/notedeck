@@ -54,6 +54,17 @@ fn execute_note_action(
                 break 'ex None;
             };
 
+            if let Ok(res) = ndb.get_note_by_id(txn, note_id.bytes()) {
+                if let Some(key) = res.key() {
+                    ui.data_mut(|d| {
+                        d.insert_temp(
+                            egui::Id::new(("thread_scroll", note_id.bytes())),
+                            key.as_u64(),
+                        )
+                    });
+                    tracing::info!("ExecuteAction: SET SCROLL");
+                }
+            }
             let kind = TimelineKind::Thread(thread_selection);
             router.route_to(Route::Timeline(kind.clone()));
             // NOTE!!: you need the note_id to timeline root id thing
