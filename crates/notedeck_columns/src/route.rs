@@ -1,5 +1,5 @@
 use enostr::{NoteId, Pubkey};
-use notedeck::{NoteZapTargetOwned, WalletType};
+use notedeck::{NoteZapTargetOwned, RootNoteIdBuf, WalletType};
 use std::fmt::{self};
 
 use crate::{
@@ -17,6 +17,7 @@ use tokenator::{ParseError, TokenParser, TokenSerializable, TokenWriter};
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Route {
     Timeline(TimelineKind),
+    Thread(ThreadSelection),
     Accounts(AccountsRoute),
     Reply(NoteId),
     Quote(NoteId),
@@ -50,7 +51,7 @@ impl Route {
     }
 
     pub fn thread(thread_selection: ThreadSelection) -> Self {
-        Route::Timeline(TimelineKind::Thread(thread_selection))
+        Route::Thread(thread_selection)
     }
 
     pub fn profile(pubkey: Pubkey) -> Self {
@@ -76,6 +77,10 @@ impl Route {
     pub fn serialize_tokens(&self, writer: &mut TokenWriter) {
         match self {
             Route::Timeline(timeline_kind) => timeline_kind.serialize_tokens(writer),
+            Route::Thread(selection) => {
+                writer.write_token("thread");
+                writer.write_token(&NoteId::new(*selection.selected_or_root()).hex());
+            }
             Route::Accounts(routes) => routes.serialize_tokens(writer),
             Route::AddColumn(routes) => routes.serialize_tokens(writer),
             Route::Search => writer.write_token("search"),
@@ -196,6 +201,15 @@ impl Route {
                         Ok(Route::Search)
                     })
                 },
+                |p| {
+                    p.parse_all(|p| {
+                        p.parse_token("thread")?;
+                        Ok(Route::Thread(ThreadSelection::from_root_id(
+                            // TODO(kernelkind): this might introduce bugs if we're doing from_root_id
+                            RootNoteIdBuf::new_unsafe(tokenator::parse_hex_id(p)?),
+                        )))
+                    })
+                },
             ],
         )
     }
@@ -203,6 +217,7 @@ impl Route {
     pub fn title(&self) -> ColumnTitle<'_> {
         match self {
             Route::Timeline(kind) => kind.to_title(),
+            Route::Thread(_) => ColumnTitle::simple("Thread"),
             Route::Reply(_id) => ColumnTitle::simple("Reply"),
             Route::Quote(_id) => ColumnTitle::simple("Quote"),
             Route::Relays => ColumnTitle::simple("Relays"),
@@ -339,9 +354,9 @@ impl fmt::Display for Route {
                 TimelineKind::Generic(_) => write!(f, "Custom"),
                 TimelineKind::Search(_) => write!(f, "Search"),
                 TimelineKind::Hashtag(ht) => write!(f, "Hashtag ({})", ht),
-                TimelineKind::Thread(_id) => write!(f, "Thread"),
                 TimelineKind::Profile(_id) => write!(f, "Profile"),
             },
+            Route::Thread(_) => write!(f, "Thread"),
             Route::Reply(_id) => write!(f, "Reply"),
             Route::Quote(_id) => write!(f, "Quote"),
             Route::Relays => write!(f, "Relays"),

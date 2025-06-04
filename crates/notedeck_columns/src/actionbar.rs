@@ -2,10 +2,13 @@ use crate::{
     column::Columns,
     nav::{RouterAction, RouterType},
     route::Route,
-    timeline::{ThreadSelection, TimelineCache, TimelineKind},
+    timeline::{
+        thread::{ThreadNode, Threads},
+        ThreadSelection, TimelineCache, TimelineKind,
+    },
 };
 
-use enostr::{Pubkey, RelayPool};
+use enostr::{NoteId, Pubkey, RelayPool};
 use nostrdb::{Ndb, NoteKey, Transaction};
 use notedeck::{
     get_wallet_for_mut, note::ZapTargetAmount, Accounts, GlobalWallet, Images, NoteAction,
@@ -18,12 +21,17 @@ pub struct NewNotes {
     pub notes: Vec<NoteKey>,
 }
 
+pub enum NotesOpenResult {
+    Timeline(TimelineOpenResult),
+    Thread(NewThreadNotes),
+}
+
 pub enum TimelineOpenResult {
     NewNotes(NewNotes),
 }
 
 struct NoteActionResponse {
-    timeline_res: Option<TimelineOpenResult>,
+    timeline_res: Option<NotesOpenResult>,
     router_action: Option<RouterAction>,
 }
 
@@ -33,6 +41,7 @@ fn execute_note_action(
     action: NoteAction,
     ndb: &Ndb,
     timeline_cache: &mut TimelineCache,
+    threads: &mut Threads,
     note_cache: &mut NoteCache,
     pool: &mut RelayPool,
     txn: &Transaction,
@@ -53,7 +62,9 @@ fn execute_note_action(
         NoteAction::Profile(pubkey) => {
             let kind = TimelineKind::Profile(pubkey);
             router_action = Some(RouterAction::route_to(Route::Timeline(kind.clone())));
-            timeline_res = timeline_cache.open(ndb, note_cache, txn, pool, &kind);
+            timeline_res = timeline_cache
+                .open(ndb, note_cache, txn, pool, &kind)
+                .map(NotesOpenResult::Timeline);
         }
         NoteAction::Note(note_id) => 'ex: {
             let Ok(thread_selection) = ThreadSelection::from_note_id(ndb, note_cache, txn, note_id)
@@ -62,16 +73,17 @@ fn execute_note_action(
                 break 'ex;
             };
 
-            let kind = TimelineKind::Thread(thread_selection);
-            router_action = Some(RouterAction::route_to(Route::Timeline(kind.clone())));
-            // NOTE!!: you need the note_id to timeline root id thing
-
-            timeline_res = timeline_cache.open(ndb, note_cache, txn, pool, &kind);
+            timeline_res = threads
+                .open(ndb, txn, pool, &thread_selection)
+                .map(NotesOpenResult::Thread);
+            router_action = Some(RouterAction::route_to(Route::Thread(thread_selection)));
         }
         NoteAction::Hashtag(htag) => {
             let kind = TimelineKind::Hashtag(htag.clone());
             router_action = Some(RouterAction::route_to(Route::Timeline(kind.clone())));
-            timeline_res = timeline_cache.open(ndb, note_cache, txn, pool, &kind);
+            timeline_res = timeline_cache
+                .open(ndb, note_cache, txn, pool, &kind)
+                .map(NotesOpenResult::Timeline);
         }
         NoteAction::Quote(note_id) => {
             router_action = Some(RouterAction::route_to(Route::quote(note_id)));
@@ -139,6 +151,7 @@ pub fn execute_and_process_note_action(
     columns: &mut Columns,
     col: usize,
     timeline_cache: &mut TimelineCache,
+    threads: &mut Threads,
     note_cache: &mut NoteCache,
     pool: &mut RelayPool,
     txn: &Transaction,
@@ -163,6 +176,7 @@ pub fn execute_and_process_note_action(
         action,
         ndb,
         timeline_cache,
+        threads,
         note_cache,
         pool,
         txn,
@@ -175,7 +189,14 @@ pub fn execute_and_process_note_action(
     );
 
     if let Some(br) = resp.timeline_res {
-        br.process(ndb, note_cache, txn, timeline_cache, unknown_ids);
+        match br {
+            NotesOpenResult::Timeline(timeline_open_result) => {
+                timeline_open_result.process(ndb, note_cache, txn, timeline_cache, unknown_ids)
+            }
+            NotesOpenResult::Thread(thread_open_result) => {
+                thread_open_result.process(threads, ndb, txn, unknown_ids, note_cache);
+            }
+        }
     }
 
     resp.router_action
@@ -237,7 +258,7 @@ impl NewNotes {
         unknown_ids: &mut UnknownIds,
         note_cache: &mut NoteCache,
     ) {
-        let reversed = matches!(&self.id, TimelineKind::Thread(_));
+        let reversed = false;
 
         let timeline = if let Some(profile) = timeline_cache.timelines.get_mut(&self.id) {
             profile
@@ -251,4 +272,70 @@ impl NewNotes {
             error!("error inserting notes into profile timeline: {err}")
         }
     }
+}
+
+// TODO(kernelkind): maybe this should hold Vec<NoteRef> instead of keys
+pub struct NewThreadNotes {
+    pub selected_note_id: NoteId,
+    pub notes: Vec<NoteKey>,
+}
+
+impl NewThreadNotes {
+    pub fn process(
+        &self,
+        threads: &mut Threads,
+        ndb: &Ndb,
+        txn: &Transaction,
+        unknown_ids: &mut UnknownIds,
+        note_cache: &mut NoteCache,
+    ) {
+        tracing::info!("PROCESSING NEW THREAD NOTES");
+        let Some(node) = threads.threads.get_mut(&self.selected_note_id.bytes()) else {
+            tracing::error!("Could not find thread node for {:?}", self.selected_note_id);
+            return;
+        };
+
+        process_thread_notes(&self.notes, node, ndb, txn, unknown_ids, note_cache);
+    }
+}
+
+pub fn process_thread_notes(
+    notes: &Vec<NoteKey>,
+    thread: &mut ThreadNode,
+    ndb: &Ndb,
+    txn: &Transaction,
+    unknown_ids: &mut UnknownIds,
+    note_cache: &mut NoteCache,
+) {
+    if notes.is_empty() {
+        return;
+    }
+
+    let mut new_replies = Vec::new();
+    for key in notes {
+        let note = if let Ok(note) = ndb.get_note_by_key(txn, *key) {
+            note
+        } else {
+            tracing::error!("hit race condition in poll_notes_into_view: https://github.com/damus-io/nostrdb/issues/35 note {:?} was not added to timeline", key);
+            continue;
+        };
+
+        // Ensure that unknown ids are captured when inserting notes
+        UnknownIds::update_from_note(txn, ndb, unknown_ids, note_cache, &note);
+
+        let created_at = note.created_at();
+        let note_ref = notedeck::NoteRef {
+            key: *key,
+            created_at,
+        };
+
+        // TODO(kernelkind): this is a bad O(n), fix it
+        if thread.replies.contains(&note_ref) {
+            continue;
+        }
+
+        new_replies.push(note_ref);
+    }
+
+    thread.insert_replies(&new_replies);
 }

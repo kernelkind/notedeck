@@ -8,7 +8,7 @@ use crate::{
     storage,
     subscriptions::{SubKind, Subscriptions},
     support::Support,
-    timeline::{self, TimelineCache},
+    timeline::{self, thread::Threads, TimelineCache},
     ui::{self, DesktopSidePanel},
     view_state::ViewState,
     Result,
@@ -45,6 +45,7 @@ pub struct Damus {
     pub subscriptions: Subscriptions,
     pub support: Support,
     pub jobs: JobsCache,
+    pub threads: Threads,
 
     //frame_history: crate::frame_history::FrameHistory,
 
@@ -437,6 +438,8 @@ impl Damus {
 
         ctx.accounts.with_fallback(FALLBACK_PUBKEY());
 
+        let threads = Threads::default();
+
         Self {
             subscriptions: Subscriptions::default(),
             since_optimize: parsed_args.since_optimize,
@@ -452,6 +455,7 @@ impl Damus {
             debug,
             unrecognized_args,
             jobs,
+            threads,
         }
     }
 
@@ -496,6 +500,7 @@ impl Damus {
             decks_cache,
             unrecognized_args: BTreeSet::default(),
             jobs: JobsCache::default(),
+            threads: Threads::default(),
         }
     }
 

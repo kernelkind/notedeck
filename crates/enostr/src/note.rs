@@ -143,3 +143,9 @@ impl<'de> Deserialize<'de> for NoteId {
         NoteId::from_hex(&s).map_err(serde::de::Error::custom)
     }
 }
+
+impl<'a> hashbrown::Equivalent<NoteId> for &'a [u8; 32] {
+    fn equivalent(&self, key: &NoteId) -> bool {
+        self.as_slice() == key.bytes()
+    }
+}

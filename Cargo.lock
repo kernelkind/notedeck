@@ -1533,6 +1533,7 @@ version = "0.3.0"
 dependencies = [
  "bech32",
  "ewebsock",
+ "hashbrown",
  "hex",
  "mio",
  "nostr 0.37.0",
@@ -3234,6 +3235,7 @@ dependencies = [
  "egui_virtual_list",
  "ehttp",
  "enostr",
+ "hashbrown",
  "hex",
  "human_format",
  "image",
