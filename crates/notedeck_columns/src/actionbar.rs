@@ -3,7 +3,7 @@ use crate::{
     nav::{RouterAction, RouterType},
     route::Route,
     timeline::{
-        thread::{ThreadNode, Threads},
+        thread::{selected_has_at_least_one_reply, NoteSeenFlags, ThreadNode, Threads},
         ThreadSelection, TimelineCache, TimelineKind,
     },
 };
@@ -305,13 +305,22 @@ impl NewThreadNotes {
             return;
         };
 
-        process_thread_notes(&self.notes, node, ndb, txn, unknown_ids, note_cache);
+        process_thread_notes(
+            &self.notes,
+            node,
+            &mut threads.seen_flags,
+            ndb,
+            txn,
+            unknown_ids,
+            note_cache,
+        );
     }
 }
 
 pub fn process_thread_notes(
     notes: &Vec<NoteKey>,
     thread: &mut ThreadNode,
+    seen_flags: &mut NoteSeenFlags,
     ndb: &Ndb,
     txn: &Transaction,
     unknown_ids: &mut UnknownIds,
@@ -345,6 +354,20 @@ pub fn process_thread_notes(
         }
 
         new_replies.push(note_ref);
+
+        if !seen_flags.contains(note.id()) {
+            let cached_note = note_cache.cached_note_or_insert_mut(*key, &note);
+
+            let note_reply = cached_note.reply.borrow(note.tags());
+
+            let has_reply = if let Some(root) = note_reply.root() {
+                selected_has_at_least_one_reply(ndb, txn, Some(note.id()), root.id)
+            } else {
+                selected_has_at_least_one_reply(ndb, txn, None, note.id())
+            };
+
+            seen_flags.mark_replies(note.id(), has_reply);
+        }
     }
 
     thread.insert_replies(&new_replies);

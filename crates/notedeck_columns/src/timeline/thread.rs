@@ -80,6 +80,9 @@ pub type RootNoteId = NoteId;
 pub struct Threads {
     pub threads: HashMap<NoteId, ThreadNode>,
     pub subs: HashMap<RootNoteId, ReplaceableSub>,
+
+    // true means note has not been selected yet
+    pub seen_flags: NoteSeenFlags,
 }
 
 impl Threads {
@@ -102,6 +105,7 @@ impl Threads {
         };
 
         let selected_note_id = thread.selected_or_root();
+        self.seen_flags.mark_seen(selected_note_id);
 
         let filter = match self.threads.raw_entry_mut().from_key(&selected_note_id) {
             RawEntryMut::Occupied(_entry) => {
@@ -188,8 +192,7 @@ impl Threads {
             selected.id()
         };
 
-        // TODO(kernelkind): this should not need to do a copy
-        let Some(replaceable_sub) = self.subs.get(&NoteId::new(*root_id)) else {
+        let Some(replaceable_sub) = self.subs.get(&root_id) else {
             tracing::error!("Was expecting to find multisub");
             return;
         };
@@ -207,7 +210,15 @@ impl Threads {
 
         tracing::info!("Got {} new notes", keys.len());
 
-        process_thread_notes(&keys, node, ndb, txn, unknown_ids, note_cache);
+        process_thread_notes(
+            &keys,
+            node,
+            &mut self.seen_flags,
+            ndb,
+            txn,
+            unknown_ids,
+            note_cache,
+        );
     }
 
     fn fill_reply_chain_recursive(
@@ -218,7 +229,7 @@ impl Threads {
         ndb: &Ndb,
         txn: &Transaction,
         unknown_ids: &mut UnknownIds,
-        recur_depth: usize,
+        recur_depth: usize, // TODO(kernelkind): Remove
     ) -> bool {
         let (unknown_parent_state, mut have_all_ancestors) = self
             .threads
@@ -232,7 +243,8 @@ impl Threads {
 
         let mut new_parent = None;
 
-        if let Some(parent) = cur_reply.borrow(cur_note.tags()).reply() {
+        let note_reply = cur_reply.borrow(cur_note.tags());
+        if let Some(parent) = note_reply.reply() {
             if unknown_parent_state {
                 new_parent = Some(ParentState::Parent(NoteId::new(*parent.id)));
             }
@@ -257,14 +269,29 @@ impl Threads {
                         have_all_ancestors = true;
                     }
                 }
+
+                if let Some(root) = note_reply.root() {
+                    if !self.seen_flags.contains(&cur_note.id()) {
+                        self.seen_flags.mark_replies(
+                            cur_note.id(),
+                            selected_has_at_least_one_reply(ndb, txn, Some(cur_note.id()), root.id),
+                        );
+                    }
+                }
             } else {
-                unknown_ids.add_note_id_if_missing(ndb, txn, &NoteId::new(*parent.id));
-                // TODO(kernelkind): shouldn't need to clone this
+                unknown_ids.add_note_id_if_missing(ndb, txn, parent.id);
             };
         } else {
             have_all_ancestors = true;
             new_parent = Some(ParentState::None);
             tracing::info!("Found root");
+
+            if !self.seen_flags.contains(cur_note.id()) {
+                self.seen_flags.mark_replies(
+                    cur_note.id(),
+                    selected_has_at_least_one_reply(ndb, txn, None, cur_note.id()),
+                );
+            }
         }
 
         match self.threads.raw_entry_mut().from_key(&cur_note.id()) {
@@ -291,6 +318,25 @@ impl Threads {
 
         have_all_ancestors
     }
+}
+
+pub fn selected_has_at_least_one_reply(
+    ndb: &Ndb,
+    txn: &Transaction,
+    selected: Option<&[u8; 32]>,
+    root: &[u8; 32],
+) -> bool {
+    let filter = if let Some(selected) = selected {
+        &vec![direct_replies_filter_non_root(selected, root)]
+    } else {
+        &vec![direct_replies_filter_root(root)]
+    };
+
+    let Ok(res) = ndb.query(txn, filter, 1) else {
+        return false;
+    };
+
+    !res.is_empty()
 }
 
 fn direct_replies_filter_non_root(
@@ -383,4 +429,28 @@ fn replies_filter_remote(selection: &ThreadSelection) -> Vec<Filter> {
             .limit(1)
             .build(),
     ]
+}
+
+/// Whether a note has been
+#[derive(Default)]
+pub struct NoteSeenFlags {
+    pub flags: HashMap<NoteId, bool>,
+}
+
+impl NoteSeenFlags {
+    pub fn mark_seen(&mut self, note_id: &[u8; 32]) {
+        self.flags.insert(NoteId::new(*note_id), false);
+    }
+
+    pub fn mark_replies(&mut self, note_id: &[u8; 32], has_replies: bool) {
+        self.flags.insert(NoteId::new(*note_id), has_replies);
+    }
+
+    pub fn get(&self, note_id: &[u8; 32]) -> Option<&bool> {
+        self.flags.get(&note_id)
+    }
+
+    pub fn contains(&self, note_id: &[u8; 32]) -> bool {
+        self.flags.contains_key(&note_id)
+    }
 }

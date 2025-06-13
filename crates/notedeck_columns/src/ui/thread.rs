@@ -5,7 +5,7 @@ use notedeck::{MuteFun, NoteAction, NoteContext, UnknownIds};
 use notedeck_ui::jobs::JobsCache;
 use notedeck_ui::{NoteOptions, NoteView};
 
-use crate::timeline::thread::{ParentState, Threads};
+use crate::timeline::thread::{NoteSeenFlags, ParentState, Threads};
 
 pub struct ThreadView<'a, 'd> {
     threads: &'a mut Threads,
@@ -128,7 +128,7 @@ impl<'a, 'd> ThreadView<'a, 'd> {
             .list;
 
         let mut action = None;
-        if let Some(notes) = note_builder.to_notes() {
+        if let Some(notes) = note_builder.to_notes(&mut self.threads.seen_flags) {
             if !full_chain {
                 // TODO: insert UI denoting we don't have the full chain yet
                 ui.colored_label(ui.visuals().error_fg_color, "LOADING NOTES");
@@ -175,6 +175,9 @@ fn show_notes(
         let note = &notes[cur_index];
         let options = note.options(flags);
 
+        if note.unread_and_have_replies {
+            ui.label("UNREAD");
+        }
         let resp = NoteView::new(note_context, zapping_acc, &note.note, options, jobs).show(ui);
 
         if let Some(note_action) = resp.action {
@@ -205,7 +208,7 @@ impl<'a> ThreadNoteBuilder<'a> {
         self.replies.push(note);
     }
 
-    pub fn to_notes(mut self) -> Option<Vec<ThreadNote<'a>>> {
+    pub fn to_notes(mut self, seen_flags: &mut NoteSeenFlags) -> Option<Vec<ThreadNote<'a>>> {
         let Some(selected) = self.selected else {
             return None;
         };
@@ -214,6 +217,7 @@ impl<'a> ThreadNoteBuilder<'a> {
 
         while let Some(note) = self.chain.pop() {
             out.push(ThreadNote {
+                unread_and_have_replies: *seen_flags.get(note.id()).unwrap_or(&false),
                 note,
                 note_type: ThreadNoteType::Chain,
             });
@@ -222,10 +226,12 @@ impl<'a> ThreadNoteBuilder<'a> {
         out.push(ThreadNote {
             note: selected,
             note_type: ThreadNoteType::Selected,
+            unread_and_have_replies: false,
         });
 
         for reply in self.replies {
             out.push(ThreadNote {
+                unread_and_have_replies: *seen_flags.get(reply.id()).unwrap_or(&false),
                 note: reply,
                 note_type: ThreadNoteType::Reply,
             });
@@ -244,6 +250,7 @@ enum ThreadNoteType {
 struct ThreadNote<'a> {
     pub note: Note<'a>,
     note_type: ThreadNoteType,
+    pub unread_and_have_replies: bool,
 }
 
 impl<'a> ThreadNote<'a> {
