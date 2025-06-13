@@ -66,17 +66,27 @@ fn execute_note_action(
                 .open(ndb, note_cache, txn, pool, &kind)
                 .map(NotesOpenResult::Timeline);
         }
-        NoteAction::Note(note_id) => 'ex: {
-            let Ok(thread_selection) = ThreadSelection::from_note_id(ndb, note_cache, txn, note_id)
+        NoteAction::Note {
+            id,
+            preview: threaded,
+        } => 'ex: {
+            let Ok(thread_selection) = ThreadSelection::from_note_id(ndb, note_cache, txn, id)
             else {
-                tracing::error!("No thread selection for {}?", hex::encode(note_id.bytes()));
+                tracing::error!("No thread selection for {}?", hex::encode(id.bytes()));
                 break 'ex;
             };
 
             timeline_res = threads
                 .open(ndb, txn, pool, &thread_selection)
                 .map(NotesOpenResult::Thread);
-            router_action = Some(RouterAction::route_to(Route::Thread(thread_selection)));
+
+            let route = Route::Thread(thread_selection);
+
+            router_action = Some(if threaded {
+                RouterAction::Overlay(route)
+            } else {
+                RouterAction::route_to(route)
+            });
         }
         NoteAction::Hashtag(htag) => {
             let kind = TimelineKind::Hashtag(htag.clone());

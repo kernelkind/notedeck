@@ -303,7 +303,6 @@ fn direct_replies_filter_non_root(
     selected_note_id: &[u8; 32],
     root_id: &[u8; 32],
 ) -> nostrdb::Filter {
-    tracing::info!("CALLING DIRECT REPLIES FILTER NON ROOT");
     nostrdb::Filter::new()
         .kinds([1])
         .custom(|n: nostrdb::Note<'_>| {
@@ -339,7 +338,6 @@ fn direct_replies_filter_non_root(
 
 /// for some reason data must be dereferenced *inside* the custom closure, not outside
 fn direct_replies_filter_root(root_id: &[u8; 32]) -> nostrdb::Filter {
-    tracing::info!("CALLING DIRECT REPLIES FILTER ROOT");
     nostrdb::Filter::new()
         .kinds([1])
         .custom(|n: nostrdb::Note<'_>| {
