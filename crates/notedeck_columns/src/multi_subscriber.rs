@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use enostr::{Filter, NoteId, RelayPool};
 use nostrdb::{Ndb, Subscription};
 use tracing::{error, info};
@@ -146,15 +144,9 @@ impl MultiSubscriber {
     }
 }
 
-/// For managing one remote subscription & multiple local subscriptions which are subsumed by the remote
-#[derive(Default, Debug)]
-pub struct MultiSubscriber2 {
-    pub remote: Option<Remote>,
-    local_subs: HashMap<SubscriberId, LocalSub>,
-}
-
 #[derive(Debug)]
 pub struct LocalSub {
+    pub id: SubscriberId,
     pub sub: Subscription,
     pub filter: Vec<Filter>,
 }
@@ -170,26 +162,22 @@ pub enum SubscriberId {
     Thread(NoteId),
 }
 
-impl MultiSubscriber2 {
+/// Meant for managing one static remote subscription and one replaceable local sub which is subsumed by the remote
+#[derive(Default)]
+pub struct ReplaceableSub {
+    pub remote: Option<Remote>,
+    pub local_sub: Option<LocalSub>,
+}
+
+impl ReplaceableSub {
     pub fn subscribe(
         &mut self,
-        ndb: &Ndb,
+        ndb: &mut Ndb,
         pool: &mut RelayPool,
         id: &SubscriberId,
         local_sub_filter: Vec<Filter>,
         remote_sub_filter: impl FnOnce() -> Vec<Filter>,
     ) {
-        if let Ok(sub) = ndb.subscribe(&local_sub_filter) {
-            tracing::info!("Local subscribe for {:?}", id);
-            self.local_subs.insert(
-                id.clone(),
-                LocalSub {
-                    sub,
-                    filter: local_sub_filter,
-                },
-            );
-        }
-
         if self.remote.is_none() {
             let subid = Uuid::new_v4().to_string();
 
@@ -202,42 +190,54 @@ impl MultiSubscriber2 {
             self.remote = Some(remote);
             tracing::info!("Remote subscribe for {:?}", id);
             pool.subscribe(subid, filter);
-        };
+        }
+
+        if let Some(local_sub) = &self.local_sub {
+            if local_sub.id == *id {
+                return;
+            }
+            match ndb.unsubscribe(local_sub.sub) {
+                Ok(_) => tracing::info!("Unsubscribed from previous local sub: {:?}", local_sub.id),
+                Err(e) => tracing::info!(
+                    "Failed to unsub from previous local sub {:?}: {e}",
+                    local_sub.id
+                ),
+            };
+        }
+
+        if let Ok(sub) = ndb.subscribe(&local_sub_filter) {
+            tracing::info!("Local subscribe for {:?}", id);
+            self.local_sub = Some(LocalSub {
+                id: id.clone(),
+                sub,
+                filter: local_sub_filter,
+            });
+        } else {
+            tracing::error!("Failed to ndb subscribe");
+        }
     }
 
-    pub fn unsubscribe(&mut self, ndb: &mut Ndb, pool: &mut RelayPool, id: &SubscriberId) {
-        let local_sub = self.local_subs.remove(id);
-
-        if let Some(sub) = local_sub {
-            tracing::info!("Unsubscribing from local subscription for: {:?}", id);
+    pub fn unsubscribe(&mut self, ndb: &mut Ndb, pool: &mut RelayPool) {
+        if let Some(sub) = &self.local_sub {
+            tracing::info!("Unsubscribing from local subscription for: {:?}", sub.id);
             let res = ndb.unsubscribe(sub.sub);
 
             if let Err(e) = res {
                 tracing::error!("Failed to unsub ndb: {e}");
             }
         } else {
-            tracing::error!(
-                "Failed to local unsub. Did not find {:?} in local subscriptions",
-                id
-            );
+            tracing::error!("Failed to local unsub",);
         }
 
-        if !self.local_subs.is_empty() {
-            return;
-        }
+        self.local_sub = None;
 
         let Some(remote) = &self.remote else {
-            tracing::error!("Somehow we don't have a remote subscription but we did have a local");
             return;
         };
 
-        tracing::info!("Unsubscribed remote for: {:?}", id);
+        tracing::info!("Unsubscribed remote for: {:?}", remote.subid);
         pool.unsubscribe(remote.subid.clone());
 
         self.remote = None;
-    }
-
-    pub fn get_local(&self, id: &SubscriberId) -> Option<&LocalSub> {
-        self.local_subs.get(id)
     }
 }

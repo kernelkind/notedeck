@@ -506,7 +506,7 @@ fn chrome_handle_app_action(
                 .unwrap();
             let m_action = notedeck_columns::actionbar::execute_and_process_note_action(
                 note_action,
-                ctx.ndb,
+                &mut ctx.ndb,
                 cols,
                 0,
                 &mut columns.timeline_cache,

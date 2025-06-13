@@ -6,7 +6,7 @@ use notedeck::{NoteCache, NoteRef, UnknownIds};
 
 use crate::{
     actionbar::{process_thread_notes, NewThreadNotes},
-    multi_subscriber::{MultiSubscriber2, SubscriberId},
+    multi_subscriber::{ReplaceableSub, SubscriberId},
     timeline::MergeKind,
 };
 
@@ -79,7 +79,7 @@ pub type RootNoteId = NoteId;
 #[derive(Default)]
 pub struct Threads {
     pub threads: HashMap<NoteId, ThreadNode>,
-    pub subs: HashMap<RootNoteId, MultiSubscriber2>,
+    pub subs: HashMap<RootNoteId, ReplaceableSub>,
 }
 
 impl Threads {
@@ -87,7 +87,7 @@ impl Threads {
     /// Similar to [[super::cache::TimelineCache::open]]
     pub fn open(
         &mut self,
-        ndb: &Ndb,
+        ndb: &mut Ndb,
         txn: &Transaction,
         pool: &mut RelayPool,
         thread: &ThreadSelection,
@@ -156,11 +156,7 @@ impl Threads {
         };
 
         if let Some(sub) = self.subs.get_mut(&thread.root_id.to_note_id()) {
-            sub.unsubscribe(
-                ndb,
-                pool,
-                &SubscriberId::Thread(NoteId::new(*thread.selected_or_root())),
-            );
+            sub.unsubscribe(ndb, pool);
         } else {
             tracing::error!("Called close but don't have a multisub");
         }
@@ -193,14 +189,12 @@ impl Threads {
         };
 
         // TODO(kernelkind): this should not need to do a copy
-        let Some(multi_sub) = self.subs.get(&NoteId::new(*root_id)) else {
+        let Some(replaceable_sub) = self.subs.get(&NoteId::new(*root_id)) else {
             tracing::error!("Was expecting to find multisub");
             return;
         };
 
-        // TODO(kernelkind): this should not need to copy
-        let Some(sub) = multi_sub.get_local(&SubscriberId::Thread(NoteId::new(*selected.id())))
-        else {
+        let Some(sub) = &replaceable_sub.local_sub else {
             tracing::error!("Was expecting to find local sub");
             return;
         };

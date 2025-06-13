@@ -39,7 +39,7 @@ struct NoteActionResponse {
 #[allow(clippy::too_many_arguments)]
 fn execute_note_action(
     action: NoteAction,
-    ndb: &Ndb,
+    ndb: &mut Ndb,
     timeline_cache: &mut TimelineCache,
     threads: &mut Threads,
     note_cache: &mut NoteCache,
@@ -157,7 +157,7 @@ fn execute_note_action(
 #[allow(clippy::too_many_arguments)]
 pub fn execute_and_process_note_action(
     action: NoteAction,
-    ndb: &Ndb,
+    ndb: &mut Ndb,
     columns: &mut Columns,
     col: usize,
     timeline_cache: &mut TimelineCache,
