@@ -162,11 +162,14 @@ impl Threads {
         };
 
         if let Some(sub) = self.subs.get_mut(&thread.root_id.to_note_id()) {
-            sub.unsubscribe(
+            if sub.unsubscribe(
                 ndb,
                 pool,
                 &SubscriberId::Thread(NoteId::new(*thread.selected_or_root())),
-            );
+            ) {
+                self.subs.remove(&thread.root_id.to_note_id());
+            }
+            tracing::info!("Multisubs existing: {:?}", self.subs);
         } else {
             tracing::error!("Called close but don't have a multisub");
         }

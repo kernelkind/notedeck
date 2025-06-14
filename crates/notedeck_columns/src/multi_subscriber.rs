@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use enostr::{Filter, NoteId, RelayPool};
 use nostrdb::{Ndb, Subscription};
@@ -146,17 +146,32 @@ impl MultiSubscriber {
     }
 }
 
-#[derive(Debug)]
 pub struct LocalSub {
     pub sub: Subscription,
     pub sub_count: usize,
     pub filter: Vec<Filter>,
 }
 
-#[derive(Debug)]
+impl std::fmt::Debug for LocalSub {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalSub")
+            .field("sub", &self.sub)
+            .field("sub_count", &self.sub_count)
+            .finish()
+    }
+}
+
 pub struct Remote {
     pub filter: Vec<Filter>,
     subid: String,
+}
+
+impl std::fmt::Debug for Remote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Remote")
+            .field("subid", &self.subid)
+            .finish()
+    }
 }
 
 #[derive(PartialEq, Hash, Eq, Clone, Debug)]
@@ -304,7 +319,7 @@ impl MultiSubscriber2 {
         };
     }
 
-    pub fn unsubscribe(&mut self, ndb: &mut Ndb, pool: &mut RelayPool, id: &SubscriberId) {
+    pub fn unsubscribe(&mut self, ndb: &mut Ndb, pool: &mut RelayPool, id: &SubscriberId) -> bool {
         if let Some(local_sub) = self.local_subs.get_mut(id) {
             local_sub.sub_count -= 1;
             if local_sub.sub_count > 0 {
@@ -312,7 +327,7 @@ impl MultiSubscriber2 {
                     "Still have {} local subscribers. Not remote or local unsubscribing",
                     local_sub.sub_count
                 );
-                return;
+                return false;
             }
         };
 
@@ -334,13 +349,13 @@ impl MultiSubscriber2 {
         }
 
         if !self.local_subs.is_empty() {
-            return;
+            return false;
         }
 
         let Some(remote) = &self.remote else {
             tracing::error!("Somehow we don't have a remote subscription but we did have a local");
 
-            return;
+            return false;
         };
 
         tracing::info!("Unsubscribed remote for: {:?}", id);
@@ -348,6 +363,8 @@ impl MultiSubscriber2 {
         pool.unsubscribe(remote.subid.clone());
 
         self.remote = None;
+
+        true
     }
 
     pub fn get_local(&self, id: &SubscriberId) -> Option<&LocalSub> {
