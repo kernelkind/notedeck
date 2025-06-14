@@ -6,7 +6,7 @@ use notedeck::{NoteCache, NoteRef, UnknownIds};
 
 use crate::{
     actionbar::{process_thread_notes, NewThreadNotes},
-    multi_subscriber::{ReplaceableSub, SubscriberId},
+    multi_subscriber::{MultiSubscriber2, SubscriberId},
     timeline::MergeKind,
 };
 
@@ -79,7 +79,7 @@ pub type RootNoteId = NoteId;
 #[derive(Default)]
 pub struct Threads {
     pub threads: HashMap<NoteId, ThreadNode>,
-    pub subs: HashMap<RootNoteId, ReplaceableSub>,
+    pub subs: HashMap<RootNoteId, MultiSubscriber2>,
 
     // true means note has not been selected yet
     pub seen_flags: NoteSeenFlags,
@@ -95,6 +95,7 @@ impl Threads {
         pool: &mut RelayPool,
         thread: &ThreadSelection,
     ) -> Option<NewThreadNotes> {
+        tracing::info!("Opening thread: {:?}", thread);
         let local_sub_filter = if let Some(selected) = &thread.selected_note {
             vec![direct_replies_filter_non_root(
                 selected.bytes(),
@@ -155,12 +156,17 @@ impl Threads {
     }
 
     pub fn close(&mut self, ndb: &mut Ndb, pool: &mut RelayPool, thread: &ThreadSelection) {
+        tracing::info!("Closing thread: {:?}", thread);
         if let Some(thread_node) = self.threads.get_mut(&thread.selected_or_root()) {
             thread_node.replies_state = RepliesState::Stale;
         };
 
         if let Some(sub) = self.subs.get_mut(&thread.root_id.to_note_id()) {
-            sub.unsubscribe(ndb, pool);
+            sub.unsubscribe(
+                ndb,
+                pool,
+                &SubscriberId::Thread(NoteId::new(*thread.selected_or_root())),
+            );
         } else {
             tracing::error!("Called close but don't have a multisub");
         }
@@ -169,6 +175,7 @@ impl Threads {
     /// Responsible for making sure the chain and the direct replies are up to date
     pub fn update(
         &mut self,
+        ui: &mut egui::Ui, // TODO(kernelkind): remove this UI
         selected: &Note<'_>,
         note_cache: &mut NoteCache,
         ndb: &Ndb,
@@ -192,12 +199,14 @@ impl Threads {
             selected.id()
         };
 
-        let Some(replaceable_sub) = self.subs.get(&root_id) else {
+        let Some(multi_sub) = self.subs.get(&root_id) else {
             tracing::error!("Was expecting to find multisub");
             return;
         };
 
-        let Some(sub) = &replaceable_sub.local_sub else {
+        // TODO(kernelkind): shouldn't need to clone
+        let Some(sub) = &multi_sub.get_local(&SubscriberId::Thread(NoteId::new(*selected.id())))
+        else {
             tracing::error!("Was expecting to find local sub");
             return;
         };

@@ -83,6 +83,7 @@ impl<'a, 'd> ThreadView<'a, 'd> {
         };
 
         self.threads.update(
+            ui,
             &cur_note,
             self.note_context.note_cache,
             self.note_context.ndb,

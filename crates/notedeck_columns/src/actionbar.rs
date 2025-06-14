@@ -66,10 +66,7 @@ fn execute_note_action(
                 .open(ndb, note_cache, txn, pool, &kind)
                 .map(NotesOpenResult::Timeline);
         }
-        NoteAction::Note {
-            id,
-            preview: threaded,
-        } => 'ex: {
+        NoteAction::Note { id, preview } => 'ex: {
             let Ok(thread_selection) = ThreadSelection::from_note_id(ndb, note_cache, txn, id)
             else {
                 tracing::error!("No thread selection for {}?", hex::encode(id.bytes()));
@@ -82,10 +79,9 @@ fn execute_note_action(
 
             let route = Route::Thread(thread_selection);
 
-            router_action = Some(if threaded {
-                RouterAction::Overlay(route)
-            } else {
-                RouterAction::route_to(route)
+            router_action = Some(RouterAction::Overlay {
+                route,
+                make_new: preview,
             });
         }
         NoteAction::Hashtag(htag) => {

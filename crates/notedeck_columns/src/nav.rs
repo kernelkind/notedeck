@@ -242,7 +242,7 @@ fn process_nav_resp(
 pub enum RouterAction {
     GoBack,
     RouteTo(Route, RouterType),
-    Overlay(Route),
+    Overlay { route: Route, make_new: bool },
 }
 
 pub enum RouterType {
@@ -268,8 +268,12 @@ impl RouterAction {
                 RouterType::Sheet => sheet_router.route_to(route),
                 RouterType::Stack => stack_router.route_to(route),
             },
-            RouterAction::Overlay(route) => {
-                stack_router.route_to_overlayed(route);
+            RouterAction::Overlay { route, make_new } => {
+                if make_new {
+                    stack_router.route_to_overlaid_new(route);
+                } else {
+                    stack_router.route_to_overlaid(route);
+                }
             }
         }
     }

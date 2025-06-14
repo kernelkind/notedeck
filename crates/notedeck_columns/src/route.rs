@@ -295,9 +295,14 @@ impl<R: Clone> Router<R> {
         self.routes.push(route);
     }
 
-    pub fn route_to_overlayed(&mut self, route: R) {
+    pub fn route_to_overlaid(&mut self, route: R) {
         self.route_to(route);
         self.set_overlaying();
+    }
+
+    pub fn route_to_overlaid_new(&mut self, route: R) {
+        self.route_to(route);
+        self.new_overlay();
     }
 
     // Route to R. Then when it is successfully placed, should call `remove_previous_routes` to remove all previous routes
@@ -315,7 +320,10 @@ impl<R: Clone> Router<R> {
         self.returning = true;
 
         if let Some(range) = self.overlay_ranges.pop() {
+            tracing::info!("Going back, found overlay: {:?}", range);
             self.remove_overlay(range);
+        } else {
+            tracing::info!("Going back, no overlay");
         }
 
         if self.routes.len() == 1 {
@@ -374,11 +382,21 @@ impl<R: Clone> Router<R> {
         };
 
         if let Some(range) = overlaying_active {
+            tracing::info!("FOUND EXISTING OVERLAY. new range: {:?}", range);
             range.end = self.routes.len();
         } else {
-            self.overlay_ranges
-                .push(self.routes.len() - 1..self.routes.len());
+            let new_range = self.routes.len() - 1..self.routes.len();
+            tracing::info!(
+                "DID NOT FIND EXISTING OVERLAY AT TOP. pushing new: {:?}",
+                new_range
+            );
+            self.overlay_ranges.push(new_range);
         }
+    }
+
+    fn new_overlay(&mut self) {
+        let new_range = self.routes.len() - 1..self.routes.len();
+        self.overlay_ranges.push(new_range);
     }
 
     pub fn top(&self) -> &R {
