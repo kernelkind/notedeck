@@ -92,7 +92,7 @@ impl<'a, 'd> ThreadView<'a, 'd> {
 
         let cur_node = self.threads.threads.get(&self.selected_note_id).unwrap();
 
-        let mut full_chain = cur_node.have_all_ancestors;
+        let full_chain = cur_node.have_all_ancestors;
         let mut note_builder = ThreadNoteBuilder::default();
         note_builder.selected = Some(cur_note);
 
@@ -103,11 +103,7 @@ impl<'a, 'd> ThreadView<'a, 'd> {
                 if let Some(res) = self.threads.threads.get(&id.bytes()) {
                     parent_state = res.prev.clone();
                     continue;
-                } else {
-                    full_chain = false;
                 }
-            } else {
-                full_chain = false;
             }
             parent_state = ParentState::Unknown;
         }
@@ -115,8 +111,6 @@ impl<'a, 'd> ThreadView<'a, 'd> {
         for note_ref in &cur_node.replies {
             if let Ok(note) = self.note_context.ndb.get_note_by_key(txn, note_ref.key) {
                 note_builder.add_reply(note);
-            } else {
-                full_chain = false;
             }
         }
 

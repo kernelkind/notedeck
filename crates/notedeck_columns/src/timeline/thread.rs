@@ -222,53 +222,59 @@ impl Threads {
         let mut new_parent = None;
 
         let note_reply = cur_reply.borrow(cur_note.tags());
-        if let Some(parent) = note_reply.reply() {
+
+        let next_link = 's: {
+            let Some(parent) = note_reply.reply() else {
+                break 's NextLink::None;
+            };
+
             if unknown_parent_state {
                 new_parent = Some(ParentState::Parent(NoteId::new(*parent.id)));
             }
 
-            if let Ok(reply_note) = ndb.get_note_by_id(txn, parent.id) {
-                UnknownIds::update_from_note(txn, ndb, unknown_ids, note_cache, &reply_note);
-                let cached_note =
-                    note_cache.cached_note_or_insert_mut(reply_note.key().unwrap(), &reply_note); // TODO(kernelkind): handle unwrap
-                if cached_note.reply.reply.is_some() || cached_note.reply.root.is_some() {
-                    let next_reply = cached_note.reply;
-
-                    let depth = recur_depth + 1;
-                    if self.fill_reply_chain_recursive(
-                        &reply_note,
-                        &next_reply,
-                        note_cache,
-                        ndb,
-                        txn,
-                        unknown_ids,
-                        depth,
-                    ) {
-                        have_all_ancestors = true;
-                    }
-                }
-
-                if let Some(root) = note_reply.root() {
-                    if !self.seen_flags.contains(&cur_note.id()) {
-                        self.seen_flags.mark_replies(
-                            cur_note.id(),
-                            selected_has_at_least_one_reply(ndb, txn, Some(cur_note.id()), root.id),
-                        );
-                    }
-                }
-            } else {
-                unknown_ids.add_note_id_if_missing(ndb, txn, parent.id);
+            let Ok(reply_note) = ndb.get_note_by_id(txn, parent.id) else {
+                break 's NextLink::Unknown(parent.id);
             };
-        } else {
-            have_all_ancestors = true;
-            new_parent = Some(ParentState::None);
-            tracing::info!("Found root");
 
-            if !self.seen_flags.contains(cur_note.id()) {
-                self.seen_flags.mark_replies(
-                    cur_note.id(),
-                    selected_has_at_least_one_reply(ndb, txn, None, cur_note.id()),
-                );
+            NextLink::Next(reply_note)
+        };
+
+        match next_link {
+            NextLink::Unknown(parent) => {
+                unknown_ids.add_note_id_if_missing(ndb, txn, parent);
+            }
+            NextLink::Next(next_note) => {
+                UnknownIds::update_from_note(txn, ndb, unknown_ids, note_cache, &next_note);
+
+                let cached_note =
+                    note_cache.cached_note_or_insert_mut(next_note.key().unwrap(), &next_note); // TODO(kernelkind): handle unwrap
+
+                let depth = recur_depth + 1;
+
+                let next_reply = cached_note.reply;
+                if self.fill_reply_chain_recursive(
+                    &next_note,
+                    &next_reply,
+                    note_cache,
+                    ndb,
+                    txn,
+                    unknown_ids,
+                    depth,
+                ) {
+                    have_all_ancestors = true;
+                }
+            }
+            NextLink::None => {
+                have_all_ancestors = true;
+                new_parent = Some(ParentState::None);
+                tracing::info!("Found root");
+
+                if !self.seen_flags.contains(cur_note.id()) {
+                    self.seen_flags.mark_replies(
+                        cur_note.id(),
+                        selected_has_at_least_one_reply(ndb, txn, None, cur_note.id()),
+                    );
+                }
             }
         }
 
@@ -296,6 +302,12 @@ impl Threads {
 
         have_all_ancestors
     }
+}
+
+enum NextLink<'a> {
+    Unknown(&'a [u8; 32]),
+    Next(Note<'a>),
+    None,
 }
 
 pub fn selected_has_at_least_one_reply(
