@@ -4,6 +4,7 @@ use nostrdb::{Note, Transaction};
 use notedeck::note::root_note_id_from_selected_id;
 use notedeck::{MuteFun, NoteAction, NoteContext, UnknownIds};
 use notedeck_ui::jobs::JobsCache;
+use notedeck_ui::note::NoteResponse;
 use notedeck_ui::{NoteOptions, NoteView};
 
 use crate::timeline::thread::{NoteSeenFlags, ParentState, Threads};
@@ -191,13 +192,8 @@ fn show_notes(
             break 's 0;
         }
 
-        let options = note.options(flags);
-
-        if note.unread_and_have_replies {
-            ui.label("UNREAD");
-        }
         notedeck_ui::padding(8.0, ui, |ui| {
-            let resp = NoteView::new(note_context, zapping_acc, &note.note, options, jobs).show(ui);
+            let resp = note.show(note_context, zapping_acc, flags, jobs, ui);
             if let Some(note_action) = resp.action {
                 action = Some(note_action);
             }
@@ -277,6 +273,35 @@ impl<'a> ThreadNote<'a> {
             ThreadNoteType::Selected => selected_options(cur_options),
             ThreadNoteType::Reply => reply_options(cur_options),
         }
+    }
+
+    fn show(
+        &self,
+        note_context: &'a mut NoteContext<'_>,
+        zapping_acc: Option<&'a KeypairUnowned<'a>>,
+        flags: NoteOptions,
+        jobs: &'a mut JobsCache,
+        ui: &mut egui::Ui,
+    ) -> NoteResponse {
+        // match self.note_type {
+        //     ThreadNoteType::Chain => todo!(),
+        //     ThreadNoteType::Selected => todo!(),
+        //     ThreadNoteType::Reply => todo!(),
+        // }
+
+        if self.unread_and_have_replies {
+            ui.label("UNREAD");
+        }
+
+        // TODO(kernelkind): make custom views for each `ThreadNoteType`
+        NoteView::new(
+            note_context,
+            zapping_acc,
+            &self.note,
+            self.options(flags),
+            jobs,
+        )
+        .show(ui)
     }
 }
 
