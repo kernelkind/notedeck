@@ -74,7 +74,7 @@ fn execute_note_action(
             };
 
             timeline_res = threads
-                .open(ndb, txn, pool, &thread_selection)
+                .open(ndb, txn, pool, &thread_selection, preview)
                 .map(NotesOpenResult::Thread);
 
             let route = Route::Thread(thread_selection);
@@ -295,7 +295,6 @@ impl NewThreadNotes {
         unknown_ids: &mut UnknownIds,
         note_cache: &mut NoteCache,
     ) {
-        tracing::info!("PROCESSING NEW THREAD NOTES");
         let Some(node) = threads.threads.get_mut(&self.selected_note_id.bytes()) else {
             tracing::error!("Could not find thread node for {:?}", self.selected_note_id);
             return;

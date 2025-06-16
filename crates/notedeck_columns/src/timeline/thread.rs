@@ -6,7 +6,7 @@ use notedeck::{NoteCache, NoteRef, UnknownIds};
 
 use crate::{
     actionbar::{process_thread_notes, NewThreadNotes},
-    multi_subscriber::{MultiSubscriber2, SubscriberId},
+    multi_subscriber::ThreadSubs,
     timeline::MergeKind,
 };
 
@@ -79,7 +79,7 @@ pub type RootNoteId = NoteId;
 #[derive(Default)]
 pub struct Threads {
     pub threads: HashMap<NoteId, ThreadNode>,
-    pub subs: HashMap<RootNoteId, MultiSubscriber2>,
+    pub subs: ThreadSubs,
 
     // true means note has not been selected yet
     pub seen_flags: NoteSeenFlags,
@@ -94,6 +94,7 @@ impl Threads {
         txn: &Transaction,
         pool: &mut RelayPool,
         thread: &ThreadSelection,
+        new_scope: bool,
     ) -> Option<NewThreadNotes> {
         tracing::info!("Opening thread: {:?}", thread);
         let local_sub_filter = if let Some(selected) = &thread.selected_note {
@@ -137,15 +138,9 @@ impl Threads {
         });
 
         self.subs
-            .entry(thread.root_id.to_note_id())
-            .or_default()
-            .subscribe(
-                ndb,
-                pool,
-                &SubscriberId::Thread(NoteId::new(*selected_note_id)),
-                local_sub_filter,
-                || replies_filter_remote(thread),
-            );
+            .subscribe(ndb, pool, thread, local_sub_filter, new_scope, || {
+                replies_filter_remote(thread)
+            });
 
         new_notes.and_then(|notes| {
             Some(NewThreadNotes {
@@ -161,24 +156,12 @@ impl Threads {
             thread_node.replies_state = RepliesState::Stale;
         };
 
-        if let Some(sub) = self.subs.get_mut(&thread.root_id.to_note_id()) {
-            if sub.unsubscribe(
-                ndb,
-                pool,
-                &SubscriberId::Thread(NoteId::new(*thread.selected_or_root())),
-            ) {
-                self.subs.remove(&thread.root_id.to_note_id());
-            }
-            tracing::info!("Multisubs existing: {:?}", self.subs);
-        } else {
-            tracing::error!("Called close but don't have a multisub");
-        }
+        self.subs.unsubscribe(ndb, pool, thread);
     }
 
     /// Responsible for making sure the chain and the direct replies are up to date
     pub fn update(
         &mut self,
-        ui: &mut egui::Ui, // TODO(kernelkind): remove this UI
         selected: &Note<'_>,
         note_cache: &mut NoteCache,
         ndb: &Ndb,
@@ -192,24 +175,7 @@ impl Threads {
         self.fill_reply_chain_recursive(selected, &reply, note_cache, ndb, txn, unknown_ids, 0);
         let node = self.threads.get_mut(&selected.id()).unwrap(); //guarenteed to be created in previous method;
 
-        let root_id = if reply.root.is_some() {
-            reply
-                .borrow(selected.tags())
-                .root()
-                .map(|r| r.id)
-                .unwrap_or_else(|| selected.id())
-        } else {
-            selected.id()
-        };
-
-        let Some(multi_sub) = self.subs.get(&root_id) else {
-            tracing::error!("Was expecting to find multisub");
-            return;
-        };
-
-        // TODO(kernelkind): shouldn't need to clone
-        let Some(sub) = &multi_sub.get_local(&SubscriberId::Thread(NoteId::new(*selected.id())))
-        else {
+        let Some(sub) = self.subs.get_local() else {
             tracing::error!("Was expecting to find local sub");
             return;
         };

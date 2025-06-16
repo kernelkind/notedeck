@@ -1,9 +1,10 @@
-use std::{collections::HashMap, fmt::Display};
-
 use enostr::{Filter, NoteId, RelayPool};
+use hashbrown::HashMap;
 use nostrdb::{Ndb, Subscription};
 use tracing::{error, info};
 use uuid::Uuid;
+
+use crate::timeline::{thread::RootNoteId, ThreadSelection};
 
 #[derive(Debug)]
 pub struct MultiSubscriber {
@@ -146,228 +147,194 @@ impl MultiSubscriber {
     }
 }
 
-pub struct LocalSub {
-    pub sub: Subscription,
-    pub sub_count: usize,
-    pub filter: Vec<Filter>,
-}
+#[derive(Default)]
+pub struct ThreadSubs {
+    pub remotes: HashMap<RootNoteId, Remote>,
 
-impl std::fmt::Debug for LocalSub {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalSub")
-            .field("sub", &self.sub)
-            .field("sub_count", &self.sub_count)
-            .finish()
-    }
+    // each 'scope' represents a thread with the same root id. Navigating to a different root id means we need
+    // a new scope so we can retain the old subscription. Navigating to a note within the same root id replaces the
+    // local subscription in that scope
+    scopes: Vec<ScopedSub>,
 }
 
 pub struct Remote {
     pub filter: Vec<Filter>,
     subid: String,
+    dependers: usize,
 }
 
 impl std::fmt::Debug for Remote {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Remote")
+        f.debug_struct("Remote2")
             .field("subid", &self.subid)
+            .field("dependers", &self.dependers)
             .finish()
     }
 }
 
-#[derive(PartialEq, Hash, Eq, Clone, Debug)]
-pub enum SubscriberId {
-    Thread(NoteId),
+pub struct ScopedSub {
+    pub selection: ThreadSelection,
+    pub sub: Subscription,
+    pub filter: Vec<Filter>,
 }
 
-// /// Meant for managing one static remote subscription and one replaceable local sub which is subsumed by the remote
-// #[derive(Default)]
-// pub struct ReplaceableSub {
-//     pub remote: Option<Remote>,
-//     pub local_sub: Option<LocalSub>,
-// }
+impl ThreadSubs {
+    fn local_sub_new_scope(
+        &mut self,
+        ndb: &mut Ndb,
+        id: &ThreadSelection,
+        local_sub_filter: Vec<Filter>,
+    ) -> isize {
+        let Some(sub) = ndb_sub(ndb, &local_sub_filter, id) else {
+            return 0;
+        };
 
-// impl ReplaceableSub {
-//     pub fn subscribe(
-//         &mut self,
-//         ndb: &mut Ndb,
-//         pool: &mut RelayPool,
-//         id: &SubscriberId,
-//         local_sub_filter: Vec<Filter>,
-//         remote_sub_filter: impl FnOnce() -> Vec<Filter>,
-//     ) {
-//         if self.remote.is_none() {
-//             let subid = Uuid::new_v4().to_string();
+        self.scopes.push(ScopedSub {
+            selection: id.clone(),
+            sub,
+            filter: local_sub_filter,
+        });
 
-//             let filter = remote_sub_filter();
-//             let remote = Remote {
-//                 filter: filter.clone(),
-//                 subid: subid.clone(),
-//             };
+        1
+    }
 
-//             self.remote = Some(remote);
-//             tracing::info!("Remote subscribe for {:?}", id);
-//             pool.subscribe(subid, filter);
-//         }
-
-//         if let Some(local_sub) = &mut self.local_sub {
-//             if local_sub.id == *id {
-//                 local_sub.sub_count += 1;
-//                 return;
-//             }
-//             match ndb.unsubscribe(local_sub.sub) {
-//                 Ok(_) => tracing::info!("Unsubscribed from previous local sub: {:?}", local_sub.id),
-//                 Err(e) => tracing::info!(
-//                     "Failed to unsub from previous local sub {:?}: {e}",
-//                     local_sub.id
-//                 ),
-//             };
-//         }
-
-//         if let Ok(sub) = ndb.subscribe(&local_sub_filter) {
-//             tracing::info!("Local subscribe for {:?}", id);
-//             self.local_sub = Some(LocalSub {
-//                 id: id.clone(),
-//                 sub,
-//                 filter: local_sub_filter,
-//             });
-//         } else {
-//             tracing::error!("Failed to ndb subscribe");
-//         }
-//     }
-
-//     pub fn unsubscribe(&mut self, ndb: &mut Ndb, pool: &mut RelayPool) {
-//         if let Some(sub) = &self.local_sub {
-//             tracing::info!("Unsubscribing from local subscription for: {:?}", sub.id);
-//             let res = ndb.unsubscribe(sub.sub);
-
-//             if let Err(e) = res {
-//                 tracing::error!("Failed to unsub ndb: {e}");
-//             }
-//         } else {
-//             tracing::error!("Failed to local unsub",);
-//         }
-
-//         self.local_sub = None;
-
-//         let Some(remote) = &self.remote else {
-//             return;
-//         };
-
-//         tracing::info!("Unsubscribed remote for: {:?}", remote.subid);
-//         pool.unsubscribe(remote.subid.clone());
-
-//         self.remote = None;
-//     }
-// }
-
-/// For managing one remote subscription & multiple local subscriptions which are subsumed by the remote
-
-#[derive(Default, Debug)]
-
-pub struct MultiSubscriber2 {
-    pub remote: Option<Remote>,
-    local_subs: HashMap<SubscriberId, LocalSub>,
-}
-
-impl MultiSubscriber2 {
     pub fn subscribe(
         &mut self,
-        ndb: &Ndb,
+        ndb: &mut Ndb,
         pool: &mut RelayPool,
-        id: &SubscriberId,
+        id: &ThreadSelection,
         local_sub_filter: Vec<Filter>,
+        new_scope: bool,
         remote_sub_filter: impl FnOnce() -> Vec<Filter>,
     ) {
-        if let Some(local_sub) = self.local_subs.get_mut(id) {
-            local_sub.sub_count += 1;
-            tracing::info!(
-                "ALREADY HAVE LOCAL SUB FOR ID: {:?}. New Count: {}",
-                id,
-                local_sub.sub_count
-            )
+        let new_subs = if new_scope || self.scopes.is_empty() {
+            self.local_sub_new_scope(ndb, id, local_sub_filter)
         } else {
-            if let Ok(sub) = ndb.subscribe(&local_sub_filter) {
-                tracing::info!("Local subscribe for {:?}", id);
+            let cur_scope = self.scopes.last_mut().expect("can't be empty");
+            replace_local_sub(ndb, id, local_sub_filter, cur_scope)
+        };
 
-                self.local_subs.insert(
-                    id.clone(),
-                    LocalSub {
-                        sub,
-                        sub_count: 1,
-                        filter: local_sub_filter,
-                    },
+        let remote = match self.remotes.raw_entry_mut().from_key(&id.root_id.bytes()) {
+            hashbrown::hash_map::RawEntryMut::Occupied(entry) => entry.into_mut(),
+            hashbrown::hash_map::RawEntryMut::Vacant(entry) => {
+                let (_, res) = entry.insert(
+                    NoteId::new(*id.root_id.bytes()),
+                    sub_remote(pool, remote_sub_filter, id),
                 );
-            }
-        }
 
-        if self.remote.is_none() {
-            let subid = Uuid::new_v4().to_string();
-
-            let filter = remote_sub_filter();
-
-            let remote = Remote {
-                filter: filter.clone(),
-
-                subid: subid.clone(),
-            };
-
-            self.remote = Some(remote);
-
-            tracing::info!("Remote subscribe for {:?}", id);
-
-            pool.subscribe(subid, filter);
-        };
-    }
-
-    pub fn unsubscribe(&mut self, ndb: &mut Ndb, pool: &mut RelayPool, id: &SubscriberId) -> bool {
-        if let Some(local_sub) = self.local_subs.get_mut(id) {
-            local_sub.sub_count -= 1;
-            if local_sub.sub_count > 0 {
-                tracing::info!(
-                    "Still have {} local subscribers. Not remote or local unsubscribing",
-                    local_sub.sub_count
-                );
-                return false;
+                res
             }
         };
 
-        let local_sub = self.local_subs.remove(id);
+        remote.dependers = remote.dependers.saturating_add_signed(new_subs);
+        tracing::info!(
+            "Sub stats: num remotes: {}, num locals: {}",
+            self.remotes.len(),
+            self.scopes.len()
+        );
+    }
 
-        if let Some(sub) = local_sub {
-            tracing::info!("Unsubscribing from local subscription for: {:?}", id);
+    pub fn unsubscribe(&mut self, ndb: &mut Ndb, pool: &mut RelayPool, id: &ThreadSelection) {
+        let Some(scope) = self.scopes.pop() else {
+            // panic!("Called unsubscribe but there aren't any scopes left"); // TODO(kernelkind): should probably remove this
+            tracing::error!("CALLED UNSUBSCRIBE BUT THERE AREN'T ANY SCOPES LEFT");
+            return;
+        };
+        ndb_unsub(ndb, scope.sub, id);
 
-            let res = ndb.unsubscribe(sub.sub);
-
-            if let Err(e) = res {
-                tracing::error!("Failed to unsub ndb: {e}");
-            }
-        } else {
-            tracing::error!(
-                "Failed to local unsub. Did not find {:?} in local subscriptions",
-                id
-            );
-        }
-
-        if !self.local_subs.is_empty() {
-            return false;
-        }
-
-        let Some(remote) = &self.remote else {
-            tracing::error!("Somehow we don't have a remote subscription but we did have a local");
-
-            return false;
+        let Some(remote) = self.remotes.get_mut(&id.root_id.bytes()) else {
+            panic!("somehow we're unsubscribing but we don't have a remote");
         };
 
-        tracing::info!("Unsubscribed remote for: {:?}", id);
+        remote.dependers = remote.dependers.saturating_sub(1);
 
-        pool.unsubscribe(remote.subid.clone());
+        if remote.dependers == 0 {
+            let remote = self
+                .remotes
+                .remove(&id.root_id.bytes())
+                .expect("know it exists previously");
+            tracing::info!("Remotely unsubscribed: {}", remote.subid);
+            pool.unsubscribe(remote.subid);
+        }
 
-        self.remote = None;
-
-        true
+        tracing::info!(
+            "Unsub status num remotes: {}, num locals: {}",
+            self.remotes.len(),
+            self.scopes.len()
+        );
     }
 
-    pub fn get_local(&self, id: &SubscriberId) -> Option<&LocalSub> {
-        self.local_subs.get(id)
+    pub fn get_local(&self) -> Option<&ScopedSub> {
+        self.scopes.last()
     }
+}
+
+fn replace_local_sub(
+    ndb: &mut Ndb,
+    selection: &ThreadSelection,
+    local_sub_filter: Vec<Filter>,
+    old_sub: &mut ScopedSub,
+) -> isize {
+    if old_sub.selection == *selection {
+        return 0;
+    }
+
+    let mut new_subs = 0;
+
+    if ndb_unsub(ndb, old_sub.sub, selection) {
+        new_subs -= 1;
+    }
+
+    if let Some(sub) = ndb_sub(ndb, &local_sub_filter, selection) {
+        *old_sub = ScopedSub {
+            selection: selection.clone(),
+            sub,
+            filter: local_sub_filter,
+        };
+        new_subs += 1;
+    }
+
+    new_subs
+}
+
+fn ndb_sub(ndb: &Ndb, filter: &Vec<Filter>, id: impl std::fmt::Debug) -> Option<Subscription> {
+    match ndb.subscribe(filter) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::info!("Failed to get subscription for {:?}: {e}", id);
+            None
+        }
+    }
+}
+
+fn ndb_unsub(ndb: &mut Ndb, sub: Subscription, id: impl std::fmt::Debug) -> bool {
+    match ndb.unsubscribe(sub) {
+        Ok(_) => true,
+        Err(e) => {
+            tracing::info!("Failed to unsub {:?}: {e}", id);
+            false
+        }
+    }
+}
+
+fn sub_remote(
+    pool: &mut RelayPool,
+    remote_sub_filter: impl FnOnce() -> Vec<Filter>,
+    id: impl std::fmt::Debug,
+) -> Remote {
+    let subid = Uuid::new_v4().to_string();
+
+    let filter = remote_sub_filter();
+
+    let remote = Remote {
+        filter: filter.clone(),
+        subid: subid.clone(),
+        dependers: 0,
+    };
+
+    tracing::info!("Remote subscribe for {:?}", id);
+
+    pool.subscribe(subid, filter);
+
+    remote
 }

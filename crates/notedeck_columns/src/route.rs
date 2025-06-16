@@ -382,14 +382,9 @@ impl<R: Clone> Router<R> {
         };
 
         if let Some(range) = overlaying_active {
-            tracing::info!("FOUND EXISTING OVERLAY. new range: {:?}", range);
             range.end = self.routes.len();
         } else {
             let new_range = self.routes.len() - 1..self.routes.len();
-            tracing::info!(
-                "DID NOT FIND EXISTING OVERLAY AT TOP. pushing new: {:?}",
-                new_range
-            );
             self.overlay_ranges.push(new_range);
         }
     }
