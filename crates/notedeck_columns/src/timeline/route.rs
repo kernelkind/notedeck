@@ -16,7 +16,7 @@ pub fn render_timeline_route(
     accounts: &mut Accounts,
     kind: &TimelineKind,
     col: usize,
-    mut note_options: NoteOptions,
+    note_options: NoteOptions,
     depth: usize,
     ui: &mut egui::Ui,
     note_context: &mut NoteContext,
@@ -77,6 +77,7 @@ pub fn render_timeline_route(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_thread_route(
     unknown_ids: &mut UnknownIds,
     threads: &mut Threads,
@@ -144,33 +145,5 @@ pub fn render_profile_route(
         }
     } else {
         None
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use enostr::NoteId;
-    use tokenator::{TokenParser, TokenWriter};
-
-    use crate::timeline::{ThreadSelection, TimelineKind};
-    use enostr::Pubkey;
-    use notedeck::RootNoteIdBuf;
-
-    #[test]
-    fn test_timeline_route_serialize() {
-        // TODO(kernelkind): fix this test
-        // let note_id_hex = "1c54e5b0c386425f7e017d9e068ddef8962eb2ce1bb08ed27e24b93411c12e60";
-        // let note_id = NoteId::from_hex(note_id_hex).unwrap();
-        // let data_str = format!("thread:{}", note_id_hex);
-        // let data = &data_str.split(":").collect::<Vec<&str>>();
-        // let mut token_writer = TokenWriter::default();
-        // let mut parser = TokenParser::new(&data);
-        // let parsed = TimelineKind::parse(&mut parser, &Pubkey::new(*note_id.bytes())).unwrap();
-        // let expected = TimelineKind::Thread(ThreadSelection::from_root_id(
-        //     RootNoteIdBuf::new_unsafe(*note_id.bytes()),
-        // ));
-        // parsed.serialize_tokens(&mut token_writer);
-        // assert_eq!(expected, parsed);
-        // assert_eq!(token_writer.str(), data_str);
     }
 }

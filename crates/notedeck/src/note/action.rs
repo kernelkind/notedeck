@@ -32,10 +32,7 @@ pub enum NoteAction {
 
 impl NoteAction {
     pub fn note(id: NoteId) -> NoteAction {
-        NoteAction::Note {
-            id: id,
-            preview: false,
-        }
+        NoteAction::Note { id, preview: false }
     }
 }
 

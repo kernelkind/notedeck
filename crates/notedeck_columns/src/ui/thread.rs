@@ -98,8 +98,10 @@ impl<'a, 'd> ThreadView<'a, 'd> {
         let cur_node = self.threads.threads.get(&self.selected_note_id).unwrap();
 
         let full_chain = cur_node.have_all_ancestors;
-        let mut note_builder = ThreadNoteBuilder::default();
-        note_builder.selected = Some(cur_note);
+        let mut note_builder = ThreadNoteBuilder {
+            selected: Some(cur_note),
+            ..Default::default()
+        };
 
         let mut parent_state = cur_node.prev.clone();
         while let ParentState::Parent(id) = parent_state {
@@ -127,9 +129,9 @@ impl<'a, 'd> ThreadView<'a, 'd> {
             .list;
 
         let mut action = None;
-        if let Some(notes) = note_builder.to_notes(&mut self.threads.seen_flags) {
+        if let Some(notes) = note_builder.into_notes(&mut self.threads.seen_flags) {
             if !full_chain {
-                // TODO: insert UI denoting we don't have the full chain yet
+                // TODO(kernelkind): insert UI denoting we don't have the full chain yet
                 ui.colored_label(ui.visuals().error_fg_color, "LOADING NOTES");
             }
 
@@ -151,17 +153,18 @@ impl<'a, 'd> ThreadView<'a, 'd> {
                 self.is_muted,
             );
         } else {
-            tracing::error!("Did not find selected note for thread"); // TODO: make this msg more verbose
+            tracing::error!("Did not find selected note for thread"); // TODO(kernelkind): make this msg more verbose
         }
 
         action
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn show_notes(
     ui: &mut egui::Ui,
     list: &mut VirtualList,
-    notes: &Vec<ThreadNote>,
+    notes: &[ThreadNote],
     note_context: &mut NoteContext<'_>,
     zapping_acc: Option<&KeypairUnowned<'_>>,
     flags: NoteOptions,
@@ -182,7 +185,7 @@ fn show_notes(
             note.note.id(),
         )
         .ok()
-        .map_or(false, |root_id| is_muted(&note.note, root_id.bytes()));
+        .is_some_and(|root_id| is_muted(&note.note, root_id.bytes()));
 
         if muted {
             break 's 0;
@@ -224,10 +227,8 @@ impl<'a> ThreadNoteBuilder<'a> {
         self.replies.push(note);
     }
 
-    pub fn to_notes(mut self, seen_flags: &mut NoteSeenFlags) -> Option<Vec<ThreadNote<'a>>> {
-        let Some(selected) = self.selected else {
-            return None;
-        };
+    pub fn into_notes(mut self, seen_flags: &mut NoteSeenFlags) -> Option<Vec<ThreadNote<'a>>> {
+        let selected = self.selected?;
 
         let mut out = Vec::new();
 

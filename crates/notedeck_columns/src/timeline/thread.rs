@@ -6,7 +6,7 @@ use std::{
 use egui_virtual_list::VirtualList;
 use enostr::{NoteId, RelayPool};
 use hashbrown::{hash_map::RawEntryMut, HashMap};
-use nostrdb::{Filter, Ndb, Note, NoteReplyBuf, Transaction};
+use nostrdb::{Filter, Ndb, Note, NoteKey, NoteReplyBuf, Transaction};
 use notedeck::{NoteCache, NoteRef, UnknownIds};
 
 use crate::{
@@ -61,7 +61,7 @@ pub enum InsertionResponse {
 
 impl<T: Copy + Ord + Eq + Hash> HybridSet<T> {
     pub fn insert(&mut self, val: T) -> InsertionResponse {
-        if !self.lookup.insert(val.clone()) {
+        if !self.lookup.insert(val) {
             return InsertionResponse::AlreadyExists;
         }
 
@@ -102,10 +102,6 @@ impl ThreadNode {
             have_all_ancestors: false,
             list: VirtualList::new(),
         }
-    }
-
-    pub fn as_ref(&self) -> &Self {
-        self
     }
 }
 
@@ -178,11 +174,9 @@ impl Threads {
                 replies_filter_remote(thread)
             });
 
-        new_notes.and_then(|notes| {
-            Some(NewThreadNotes {
-                selected_note_id: NoteId::new(*selected_note_id),
-                notes: notes.into_iter().map(|f| f.key).collect(),
-            })
+        new_notes.map(|notes| NewThreadNotes {
+            selected_note_id: NoteId::new(*selected_note_id),
+            notes: notes.into_iter().map(|f| f.key).collect(),
         })
     }
 
@@ -211,19 +205,27 @@ impl Threads {
         unknown_ids: &mut UnknownIds,
         col: usize,
     ) {
-        let reply = note_cache
-            .cached_note_or_insert_mut(selected.key().unwrap(), &selected)
-            .reply; // TODO(kernelkind): handle unwrap
+        let Some(selected_key) = selected.key() else {
+            tracing::error!("Selected note did not have a key");
+            return;
+        };
 
-        self.fill_reply_chain_recursive(selected, &reply, note_cache, ndb, txn, unknown_ids, 0);
-        let node = self.threads.get_mut(&selected.id()).unwrap(); //guarenteed to be created in previous method;
+        let reply = note_cache
+            .cached_note_or_insert_mut(selected_key, selected)
+            .reply;
+
+        self.fill_reply_chain_recursive(selected, &reply, note_cache, ndb, txn, unknown_ids);
+        let node = self
+            .threads
+            .get_mut(&selected.id())
+            .expect("should be guarenteed to exist from `Self::fill_reply_chain_recursive`");
 
         let Some(sub) = self.subs.get_local(col) else {
             tracing::error!("Was expecting to find local sub");
             return;
         };
 
-        let keys = ndb.poll_for_notes(sub.sub.clone(), 10);
+        let keys = ndb.poll_for_notes(sub.sub, 10);
 
         if keys.is_empty() {
             return;
@@ -250,7 +252,6 @@ impl Threads {
         ndb: &Ndb,
         txn: &Transaction,
         unknown_ids: &mut UnknownIds,
-        recur_depth: usize, // TODO(kernelkind): Remove
     ) -> bool {
         let (unknown_parent_state, mut have_all_ancestors) = self
             .threads
@@ -279,20 +280,21 @@ impl Threads {
                 break 's NextLink::Unknown(parent.id);
             };
 
-            NextLink::Next(reply_note)
+            let Some(notekey) = reply_note.key() else {
+                break 's NextLink::Unknown(parent.id);
+            };
+
+            NextLink::Next(reply_note, notekey)
         };
 
         match next_link {
             NextLink::Unknown(parent) => {
                 unknown_ids.add_note_id_if_missing(ndb, txn, parent);
             }
-            NextLink::Next(next_note) => {
+            NextLink::Next(next_note, note_key) => {
                 UnknownIds::update_from_note(txn, ndb, unknown_ids, note_cache, &next_note);
 
-                let cached_note =
-                    note_cache.cached_note_or_insert_mut(next_note.key().unwrap(), &next_note); // TODO(kernelkind): handle unwrap
-
-                let depth = recur_depth + 1;
+                let cached_note = note_cache.cached_note_or_insert_mut(note_key, &next_note);
 
                 let next_reply = cached_note.reply;
                 if self.fill_reply_chain_recursive(
@@ -302,7 +304,6 @@ impl Threads {
                     ndb,
                     txn,
                     unknown_ids,
-                    depth,
                 ) {
                     have_all_ancestors = true;
                 }
@@ -349,7 +350,7 @@ impl Threads {
 
 enum NextLink<'a> {
     Unknown(&'a [u8; 32]),
-    Next(Note<'a>),
+    Next(Note<'a>, NoteKey),
     None,
 }
 

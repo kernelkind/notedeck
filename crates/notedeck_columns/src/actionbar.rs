@@ -284,7 +284,6 @@ impl NewNotes {
     }
 }
 
-// TODO(kernelkind): maybe this should hold Vec<NoteRef> instead of keys
 pub struct NewThreadNotes {
     pub selected_note_id: NoteId,
     pub notes: Vec<NoteKey>,

@@ -82,7 +82,7 @@ impl Route {
             Route::Timeline(timeline_kind) => timeline_kind.serialize_tokens(writer),
             Route::Thread(selection) => {
                 writer.write_token("thread");
-                writer.write_token(&NoteId::new(*selection.selected_or_root()).hex());
+                writer.write_token(&NoteId::new(*selection.root_id.bytes()).hex());
             }
             Route::Accounts(routes) => routes.serialize_tokens(writer),
             Route::AddColumn(routes) => routes.serialize_tokens(writer),
@@ -208,7 +208,6 @@ impl Route {
                     p.parse_all(|p| {
                         p.parse_token("thread")?;
                         Ok(Route::Thread(ThreadSelection::from_root_id(
-                            // TODO(kernelkind): this might introduce bugs if we're doing from_root_id
                             RootNoteIdBuf::new_unsafe(tokenator::parse_hex_id(p)?),
                         )))
                     })
@@ -477,5 +476,32 @@ impl<R: Clone> Default for SingletonRouter<R> {
             returning: false,
             navigating: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use enostr::NoteId;
+    use tokenator::{TokenParser, TokenWriter};
+
+    use crate::{timeline::ThreadSelection, Route};
+    use enostr::Pubkey;
+    use notedeck::RootNoteIdBuf;
+
+    #[test]
+    fn test_thread_route_serialize() {
+        let note_id_hex = "1c54e5b0c386425f7e017d9e068ddef8962eb2ce1bb08ed27e24b93411c12e60";
+        let note_id = NoteId::from_hex(note_id_hex).unwrap();
+        let data_str = format!("thread:{}", note_id_hex);
+        let data = &data_str.split(":").collect::<Vec<&str>>();
+        let mut token_writer = TokenWriter::default();
+        let mut parser = TokenParser::new(&data);
+        let parsed = Route::parse(&mut parser, &Pubkey::new(*note_id.bytes())).unwrap();
+        let expected = Route::Thread(ThreadSelection::from_root_id(RootNoteIdBuf::new_unsafe(
+            *note_id.bytes(),
+        )));
+        parsed.serialize_tokens(&mut token_writer);
+        assert_eq!(expected, parsed);
+        assert_eq!(token_writer.str(), data_str);
     }
 }

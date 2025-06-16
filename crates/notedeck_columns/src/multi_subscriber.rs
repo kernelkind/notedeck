@@ -168,7 +168,7 @@ pub struct Remote {
 
 impl std::fmt::Debug for Remote {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Remote2")
+        f.debug_struct("Remote")
             .field("subid", &self.subid)
             .field("dependers", &self.dependers)
             .finish()
@@ -182,6 +182,7 @@ pub struct ScopedSub {
 }
 
 impl ThreadSubs {
+    #[allow(clippy::too_many_arguments)]
     pub fn subscribe(
         &mut self,
         ndb: &mut Ndb,
@@ -233,8 +234,7 @@ impl ThreadSubs {
         };
 
         let Some(scope) = scopes.pop() else {
-            // panic!("Called unsubscribe but there aren't any scopes left"); // TODO(kernelkind): should probably remove this
-            tracing::error!("CALLED UNSUBSCRIBE BUT THERE AREN'T ANY SCOPES LEFT");
+            tracing::error!("called unsubscribe but there aren't any scopes left");
             return;
         };
         ndb_unsub(ndb, scope.sub, id);
@@ -244,7 +244,8 @@ impl ThreadSubs {
         }
 
         let Some(remote) = self.remotes.get_mut(&id.root_id.bytes()) else {
-            panic!("somehow we're unsubscribing but we don't have a remote");
+            tracing::error!("somehow we're unsubscribing but we don't have a remote");
+            return;
         };
 
         remote.dependers = remote.dependers.saturating_sub(1);
@@ -253,7 +254,7 @@ impl ThreadSubs {
             let remote = self
                 .remotes
                 .remove(&id.root_id.bytes())
-                .expect("know it exists previously");
+                .expect("code above should guarentee existence");
             tracing::info!("Remotely unsubscribed: {}", remote.subid);
             pool.unsubscribe(remote.subid);
         }
@@ -298,7 +299,7 @@ fn replace_local_sub(
     new_subs
 }
 
-fn ndb_sub(ndb: &Ndb, filter: &Vec<Filter>, id: impl std::fmt::Debug) -> Option<Subscription> {
+fn ndb_sub(ndb: &Ndb, filter: &[Filter], id: impl std::fmt::Debug) -> Option<Subscription> {
     match ndb.subscribe(filter) {
         Ok(s) => Some(s),
         Err(e) => {

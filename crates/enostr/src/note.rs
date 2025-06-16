@@ -144,7 +144,7 @@ impl<'de> Deserialize<'de> for NoteId {
     }
 }
 
-impl<'a> hashbrown::Equivalent<NoteId> for &'a [u8; 32] {
+impl hashbrown::Equivalent<NoteId> for &[u8; 32] {
     fn equivalent(&self, key: &NoteId) -> bool {
         self.as_slice() == key.bytes()
     }
