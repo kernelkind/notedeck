@@ -1,3 +1,8 @@
+use std::{
+    collections::{BTreeSet, HashSet},
+    hash::Hash,
+};
+
 use egui_virtual_list::VirtualList;
 use enostr::{NoteId, RelayPool};
 use hashbrown::{hash_map::RawEntryMut, HashMap};
@@ -13,7 +18,7 @@ use crate::{
 use super::ThreadSelection;
 
 pub struct ThreadNode {
-    pub replies: Vec<NoteRef>,
+    pub replies: HybridSet<NoteRef>,
     pub replies_state: RepliesState,
     pub prev: ParentState,
     pub have_all_ancestors: bool,
@@ -32,10 +37,66 @@ pub enum ParentState {
     Parent(NoteId),
 }
 
+/// Affords:
+/// - O(1) contains
+/// - O(log n) sorted insertion
+pub struct HybridSet<T> {
+    lookup: HashSet<T>,   // fast deduplication
+    ordered: BTreeSet<T>, // sorted iteration
+}
+
+impl<T> Default for HybridSet<T> {
+    fn default() -> Self {
+        Self {
+            lookup: Default::default(),
+            ordered: Default::default(),
+        }
+    }
+}
+
+pub enum InsertionResponse {
+    AlreadyExists,
+    Merged(MergeKind),
+}
+
+impl<T: Copy + Ord + Eq + Hash> HybridSet<T> {
+    pub fn insert(&mut self, val: T) -> InsertionResponse {
+        if !self.lookup.insert(val.clone()) {
+            return InsertionResponse::AlreadyExists;
+        }
+
+        let front_insertion = match self.ordered.iter().next() {
+            Some(first) => val < *first,
+            None => true,
+        };
+
+        self.ordered.insert(val); // O(log n)
+
+        InsertionResponse::Merged(if front_insertion {
+            MergeKind::FrontInsert
+        } else {
+            MergeKind::Spliced
+        })
+    }
+
+    pub fn contains(&self, val: &T) -> bool {
+        self.lookup.contains(val) // O(1)
+    }
+}
+
+impl<'a, T> IntoIterator for &'a HybridSet<T> {
+    type Item = &'a T;
+    type IntoIter = std::collections::btree_set::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.ordered.iter()
+    }
+}
+
 impl ThreadNode {
     pub fn new(parent: ParentState) -> Self {
         Self {
-            replies: Vec::default(),
+            replies: HybridSet::default(),
             replies_state: RepliesState::Fresh,
             prev: parent,
             have_all_ancestors: false,
@@ -45,32 +106,6 @@ impl ThreadNode {
 
     pub fn as_ref(&self) -> &Self {
         self
-    }
-
-    pub fn insert_replies(&mut self, new_replies: &[NoteRef]) {
-        if new_replies.is_empty() {
-            return;
-        }
-
-        let num_prev_items = self.replies.len();
-        let (notes, merge_kind) = crate::timeline::merge_sorted_vecs(&self.replies, &new_replies);
-
-        self.replies = notes;
-
-        let new_items = self.replies.len() - num_prev_items;
-
-        // TODO: technically items could have been added inbetween
-        if new_items > 0 {
-            // TODO(jb55): update egui_virtual_list to support spliced inserts
-            if let MergeKind::Spliced = merge_kind {
-                tracing::debug!(
-                    "spliced when inserting {} new notes, resetting virtual list",
-                    new_replies.len()
-                );
-                let list = &mut self.list;
-                list.reset();
-            }
-        }
     }
 }
 

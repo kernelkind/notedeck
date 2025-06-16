@@ -3,7 +3,9 @@ use crate::{
     nav::{RouterAction, RouterType},
     route::Route,
     timeline::{
-        thread::{selected_has_at_least_one_reply, NoteSeenFlags, ThreadNode, Threads},
+        thread::{
+            selected_has_at_least_one_reply, InsertionResponse, NoteSeenFlags, ThreadNode, Threads,
+        },
         ThreadSelection, TimelineCache, TimelineKind,
     },
 };
@@ -327,7 +329,8 @@ pub fn process_thread_notes(
         return;
     }
 
-    let mut new_replies = Vec::new();
+    let mut has_spliced_resp = false;
+    let mut num_new_notes = 0;
     for key in notes {
         let note = if let Ok(note) = ndb.get_note_by_key(txn, *key) {
             note
@@ -345,12 +348,18 @@ pub fn process_thread_notes(
             created_at,
         };
 
-        // TODO(kernelkind): this is a bad O(n), fix it
         if thread.replies.contains(&note_ref) {
             continue;
         }
 
-        new_replies.push(note_ref);
+        let insertion_resp = thread.replies.insert(note_ref);
+        if let InsertionResponse::Merged(crate::timeline::MergeKind::Spliced) = insertion_resp {
+            has_spliced_resp = true;
+        }
+
+        if matches!(insertion_resp, InsertionResponse::Merged(_)) {
+            num_new_notes += 1;
+        }
 
         if !seen_flags.contains(note.id()) {
             let cached_note = note_cache.cached_note_or_insert_mut(*key, &note);
@@ -367,5 +376,11 @@ pub fn process_thread_notes(
         }
     }
 
-    thread.insert_replies(&new_replies);
+    if has_spliced_resp {
+        tracing::debug!(
+            "spliced when inserting {} new notes, resetting virtual list",
+            num_new_notes
+        );
+        thread.list.reset();
+    }
 }

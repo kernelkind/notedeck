@@ -1,6 +1,7 @@
 use egui_virtual_list::VirtualList;
 use enostr::KeypairUnowned;
 use nostrdb::{Note, Transaction};
+use notedeck::note::root_note_id_from_selected_id;
 use notedeck::{MuteFun, NoteAction, NoteContext, UnknownIds};
 use notedeck_ui::jobs::JobsCache;
 use notedeck_ui::{NoteOptions, NoteView};
@@ -14,7 +15,7 @@ pub struct ThreadView<'a, 'd> {
     note_options: NoteOptions,
     col: usize,
     id_source: egui::Id,
-    is_muted: &'a MuteFun, // TODO(kernelkind): reintroduce muting stuff
+    is_muted: &'a MuteFun,
     note_context: &'a mut NoteContext<'d>,
     cur_acc: &'a Option<KeypairUnowned<'a>>,
     jobs: &'a mut JobsCache,
@@ -138,18 +139,17 @@ impl<'a, 'd> ThreadView<'a, 'd> {
                 .filter(|_| self.note_context.current_account_has_wallet)
                 .or(self.cur_acc.as_ref());
 
-            action = notedeck_ui::padding(8.0, ui, |ui| {
-                show_notes(
-                    ui,
-                    list,
-                    &notes,
-                    self.note_context,
-                    zapping_acc,
-                    self.note_options,
-                    self.jobs,
-                )
-            })
-            .inner;
+            action = show_notes(
+                ui,
+                list,
+                &notes,
+                self.note_context,
+                zapping_acc,
+                self.note_options,
+                self.jobs,
+                txn,
+                self.is_muted,
+            );
         } else {
             tracing::error!("Did not find selected note for thread"); // TODO: make this msg more verbose
         }
@@ -166,21 +166,39 @@ fn show_notes(
     zapping_acc: Option<&KeypairUnowned<'_>>,
     flags: NoteOptions,
     jobs: &mut JobsCache,
+    txn: &Transaction,
+    is_muted: &MuteFun,
 ) -> Option<NoteAction> {
     let mut action = None;
 
-    list.ui_custom_layout(ui, notes.len(), |ui, cur_index| {
+    list.ui_custom_layout(ui, notes.len(), |ui, cur_index| 's: {
         let note = &notes[cur_index];
+
+        // should we mute the thread? we might not have it!
+        let muted = root_note_id_from_selected_id(
+            note_context.ndb,
+            note_context.note_cache,
+            txn,
+            note.note.id(),
+        )
+        .ok()
+        .map_or(false, |root_id| is_muted(&note.note, root_id.bytes()));
+
+        if muted {
+            break 's 0;
+        }
+
         let options = note.options(flags);
 
         if note.unread_and_have_replies {
             ui.label("UNREAD");
         }
-        let resp = NoteView::new(note_context, zapping_acc, &note.note, options, jobs).show(ui);
-
-        if let Some(note_action) = resp.action {
-            action = Some(note_action);
-        }
+        notedeck_ui::padding(8.0, ui, |ui| {
+            let resp = NoteView::new(note_context, zapping_acc, &note.note, options, jobs).show(ui);
+            if let Some(note_action) = resp.action {
+                action = Some(note_action);
+            }
+        });
 
         notedeck_ui::hline(ui);
 
