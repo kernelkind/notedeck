@@ -51,6 +51,7 @@ fn execute_note_action(
     images: &mut Images,
     router_type: RouterType,
     ui: &mut egui::Ui,
+    col: usize,
 ) -> NoteActionResponse {
     let mut timeline_res = None;
     let mut router_action = None;
@@ -74,7 +75,7 @@ fn execute_note_action(
             };
 
             timeline_res = threads
-                .open(ndb, txn, pool, &thread_selection, preview)
+                .open(ndb, txn, pool, &thread_selection, preview, col)
                 .map(NotesOpenResult::Thread);
 
             let route = Route::Thread(thread_selection);
@@ -192,6 +193,7 @@ pub fn execute_and_process_note_action(
         images,
         router_type,
         ui,
+        col,
     );
 
     if let Some(br) = resp.timeline_res {

@@ -95,6 +95,7 @@ impl Threads {
         pool: &mut RelayPool,
         thread: &ThreadSelection,
         new_scope: bool,
+        col: usize,
     ) -> Option<NewThreadNotes> {
         tracing::info!("Opening thread: {:?}", thread);
         let local_sub_filter = if let Some(selected) = &thread.selected_note {
@@ -138,7 +139,7 @@ impl Threads {
         });
 
         self.subs
-            .subscribe(ndb, pool, thread, local_sub_filter, new_scope, || {
+            .subscribe(ndb, pool, col, thread, local_sub_filter, new_scope, || {
                 replies_filter_remote(thread)
             });
 
@@ -150,13 +151,19 @@ impl Threads {
         })
     }
 
-    pub fn close(&mut self, ndb: &mut Ndb, pool: &mut RelayPool, thread: &ThreadSelection) {
+    pub fn close(
+        &mut self,
+        ndb: &mut Ndb,
+        pool: &mut RelayPool,
+        thread: &ThreadSelection,
+        id: usize,
+    ) {
         tracing::info!("Closing thread: {:?}", thread);
         if let Some(thread_node) = self.threads.get_mut(&thread.selected_or_root()) {
             thread_node.replies_state = RepliesState::Stale;
         };
 
-        self.subs.unsubscribe(ndb, pool, thread);
+        self.subs.unsubscribe(ndb, pool, id, thread);
     }
 
     /// Responsible for making sure the chain and the direct replies are up to date
@@ -167,6 +174,7 @@ impl Threads {
         ndb: &Ndb,
         txn: &Transaction,
         unknown_ids: &mut UnknownIds,
+        col: usize,
     ) {
         let reply = note_cache
             .cached_note_or_insert_mut(selected.key().unwrap(), &selected)
@@ -175,7 +183,7 @@ impl Threads {
         self.fill_reply_chain_recursive(selected, &reply, note_cache, ndb, txn, unknown_ids, 0);
         let node = self.threads.get_mut(&selected.id()).unwrap(); //guarenteed to be created in previous method;
 
-        let Some(sub) = self.subs.get_local() else {
+        let Some(sub) = self.subs.get_local(col) else {
             tracing::error!("Was expecting to find local sub");
             return;
         };

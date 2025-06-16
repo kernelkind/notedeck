@@ -102,7 +102,7 @@ pub fn render_thread_route(
         &accounts.get_selected_account().map(|a| (&a.key).into()),
         jobs,
     )
-    .id_source(egui::Id::new(("threadscroll", col)))
+    .id_source(col)
     .ui(ui)
     .map(Into::into)
 }

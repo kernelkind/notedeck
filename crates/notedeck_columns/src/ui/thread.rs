@@ -12,6 +12,7 @@ pub struct ThreadView<'a, 'd> {
     unknown_ids: &'a mut UnknownIds,
     selected_note_id: &'a [u8; 32],
     note_options: NoteOptions,
+    col: usize,
     id_source: egui::Id,
     is_muted: &'a MuteFun, // TODO(kernelkind): reintroduce muting stuff
     note_context: &'a mut NoteContext<'d>,
@@ -42,11 +43,13 @@ impl<'a, 'd> ThreadView<'a, 'd> {
             note_context,
             cur_acc,
             jobs,
+            col: 0,
         }
     }
 
-    pub fn id_source(mut self, id: egui::Id) -> Self {
-        self.id_source = id;
+    pub fn id_source(mut self, col: usize) -> Self {
+        self.col = col;
+        self.id_source = egui::Id::new(("threadscroll", col));
         self
     }
 
@@ -88,6 +91,7 @@ impl<'a, 'd> ThreadView<'a, 'd> {
             self.note_context.ndb,
             txn,
             self.unknown_ids,
+            self.col,
         );
 
         let cur_node = self.threads.threads.get(&self.selected_note_id).unwrap();

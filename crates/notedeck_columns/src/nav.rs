@@ -214,7 +214,7 @@ fn process_nav_resp(
                 };
 
                 if let Some(Route::Thread(selection)) = &r {
-                    app.threads.close(ctx.ndb, ctx.pool, selection);
+                    app.threads.close(ctx.ndb, ctx.pool, selection, col);
                 }
 
                 switching_occured = true;

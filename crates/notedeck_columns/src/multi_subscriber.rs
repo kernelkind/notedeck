@@ -154,8 +154,11 @@ pub struct ThreadSubs {
     // each 'scope' represents a thread with the same root id. Navigating to a different root id means we need
     // a new scope so we can retain the old subscription. Navigating to a note within the same root id replaces the
     // local subscription in that scope
-    scopes: Vec<ScopedSub>,
+    scopes: HashMap<MetaId, Vec<ScopedSub>>,
 }
+
+// column id
+type MetaId = usize;
 
 pub struct Remote {
     pub filter: Vec<Filter>,
@@ -179,38 +182,22 @@ pub struct ScopedSub {
 }
 
 impl ThreadSubs {
-    fn local_sub_new_scope(
-        &mut self,
-        ndb: &mut Ndb,
-        id: &ThreadSelection,
-        local_sub_filter: Vec<Filter>,
-    ) -> isize {
-        let Some(sub) = ndb_sub(ndb, &local_sub_filter, id) else {
-            return 0;
-        };
-
-        self.scopes.push(ScopedSub {
-            selection: id.clone(),
-            sub,
-            filter: local_sub_filter,
-        });
-
-        1
-    }
-
     pub fn subscribe(
         &mut self,
         ndb: &mut Ndb,
         pool: &mut RelayPool,
+        meta_id: usize,
         id: &ThreadSelection,
         local_sub_filter: Vec<Filter>,
         new_scope: bool,
         remote_sub_filter: impl FnOnce() -> Vec<Filter>,
     ) {
-        let new_subs = if new_scope || self.scopes.is_empty() {
-            self.local_sub_new_scope(ndb, id, local_sub_filter)
+        let cur_scopes = self.scopes.entry(meta_id).or_default();
+
+        let new_subs = if new_scope || cur_scopes.is_empty() {
+            local_sub_new_scope(ndb, id, local_sub_filter, cur_scopes)
         } else {
-            let cur_scope = self.scopes.last_mut().expect("can't be empty");
+            let cur_scope = cur_scopes.last_mut().expect("can't be empty");
             replace_local_sub(ndb, id, local_sub_filter, cur_scope)
         };
 
@@ -234,13 +221,27 @@ impl ThreadSubs {
         );
     }
 
-    pub fn unsubscribe(&mut self, ndb: &mut Ndb, pool: &mut RelayPool, id: &ThreadSelection) {
-        let Some(scope) = self.scopes.pop() else {
+    pub fn unsubscribe(
+        &mut self,
+        ndb: &mut Ndb,
+        pool: &mut RelayPool,
+        meta_id: usize,
+        id: &ThreadSelection,
+    ) {
+        let Some(scopes) = self.scopes.get_mut(&meta_id) else {
+            return;
+        };
+
+        let Some(scope) = scopes.pop() else {
             // panic!("Called unsubscribe but there aren't any scopes left"); // TODO(kernelkind): should probably remove this
             tracing::error!("CALLED UNSUBSCRIBE BUT THERE AREN'T ANY SCOPES LEFT");
             return;
         };
         ndb_unsub(ndb, scope.sub, id);
+
+        if scopes.is_empty() {
+            self.scopes.remove(&meta_id);
+        }
 
         let Some(remote) = self.remotes.get_mut(&id.root_id.bytes()) else {
             panic!("somehow we're unsubscribing but we don't have a remote");
@@ -264,8 +265,8 @@ impl ThreadSubs {
         );
     }
 
-    pub fn get_local(&self) -> Option<&ScopedSub> {
-        self.scopes.last()
+    pub fn get_local(&self, meta_id: usize) -> Option<&ScopedSub> {
+        self.scopes.get(&meta_id).as_ref().and_then(|s| s.last())
     }
 }
 
@@ -337,4 +338,23 @@ fn sub_remote(
     pool.subscribe(subid, filter);
 
     remote
+}
+
+fn local_sub_new_scope(
+    ndb: &mut Ndb,
+    id: &ThreadSelection,
+    local_sub_filter: Vec<Filter>,
+    scopes: &mut Vec<ScopedSub>,
+) -> isize {
+    let Some(sub) = ndb_sub(ndb, &local_sub_filter, id) else {
+        return 0;
+    };
+
+    scopes.push(ScopedSub {
+        selection: id.clone(),
+        sub,
+        filter: local_sub_filter,
+    });
+
+    1
 }
