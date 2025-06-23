@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use enostr::{FullKeypair, Pubkey, RelayPool};
-use nostrdb::{Ndb, Note, NoteBuildOptions, NoteBuilder};
+use nostrdb::{Ndb, Note, NoteBuildOptions, NoteBuilder, Transaction};
 
+use notedeck::{Accounts, ContactState};
 use tracing::info;
 
 use crate::{nav::RouterAction, profile_state::ProfileState, route::Route};
@@ -64,6 +65,24 @@ impl ProfileAction {
             }
         }
     }
+
+    fn send_follow_user_event(
+        ndb: &Ndb,
+        pool: &mut RelayPool,
+        accounts: &Accounts,
+        target_key: &Pubkey,
+    ) {
+        send_kind_3_event(ndb, pool, accounts, FollowAction::Follow(target_key));
+    }
+
+    fn send_unfollow_user_event(
+        ndb: &Ndb,
+        pool: &mut RelayPool,
+        accounts: &Accounts,
+        target_key: &Pubkey,
+    ) {
+        send_kind_3_event(ndb, pool, accounts, FollowAction::Unfollow(target_key));
+    }
 }
 
 pub fn builder_from_note<F>(note: Note<'_>, skip_tag: Option<F>) -> NoteBuilder<'_>
@@ -94,4 +113,94 @@ where
     }
 
     builder
+}
+
+enum FollowAction<'a> {
+    Follow(&'a Pubkey),
+    Unfollow(&'a Pubkey),
+}
+
+fn send_kind_3_event(ndb: &Ndb, pool: &mut RelayPool, accounts: &Accounts, action: FollowAction) {
+    let Some(secretkey) = accounts.get_selected_account().keypair().secret_key else {
+        return;
+    };
+
+    let txn = Transaction::new(ndb).expect("txn");
+    let builder = match accounts.get_selected_account().data.contacts.get_state() {
+        ContactState::Unreceived(unknown_state) => match unknown_state {
+            notedeck::UnreceivedState::TallyEose(_) => {
+                return;
+            }
+            notedeck::UnreceivedState::NoContacts => match action {
+                FollowAction::Follow(pubkey) => NoteBuilder::new()
+                    .content("")
+                    .kind(3)
+                    .options(NoteBuildOptions::default())
+                    .start_tag()
+                    .tag_str("p")
+                    .tag_str(&pubkey.hex()),
+                FollowAction::Unfollow(_) => {
+                    return;
+                }
+            },
+        },
+        ContactState::Received {
+            contacts: _,
+            note_key,
+        } => {
+            let contact_note = match ndb.get_note_by_key(&txn, *note_key).ok() {
+                Some(n) => n,
+                None => {
+                    tracing::error!("Somehow we are in state ContactState::Received but the contact note key doesn't exist");
+                    return;
+                }
+            };
+
+            if contact_note.kind() != 3 {
+                tracing::error!("Something very wrong just occured. The key for the supposed contact note yielded a note which was not a contact...");
+                return;
+            }
+
+            match action {
+                FollowAction::Follow(pubkey) => {
+                    builder_from_note(contact_note, None::<fn(&nostrdb::Tag<'_>) -> bool>)
+                        .start_tag()
+                        .tag_str("p")
+                        .tag_str(&pubkey.hex())
+                }
+                FollowAction::Unfollow(pubkey) => builder_from_note(
+                    contact_note,
+                    Some(|tag: &nostrdb::Tag<'_>| {
+                        if tag.count() < 2 {
+                            return false;
+                        }
+
+                        let Some("p") = tag.get_str(0) else {
+                            return false;
+                        };
+
+                        let Some(cur_val) = tag.get_id(1) else {
+                            return false;
+                        };
+
+                        cur_val == pubkey.bytes()
+                    }),
+                ),
+            }
+        }
+    };
+
+    let note = builder
+        .sign(&secretkey.to_secret_bytes())
+        .build()
+        .expect("build note");
+
+    let raw_msg = format!("[\"EVENT\",{}]", note.json().unwrap());
+
+    let _ = ndb.process_event_with(
+        raw_msg.as_str(),
+        nostrdb::IngestMetadata::new().client(true),
+    );
+    info!("sending {}", raw_msg);
+    pool.send(&enostr::ClientMessage::raw(raw_msg));
 }
