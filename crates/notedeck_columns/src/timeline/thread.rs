@@ -8,7 +8,7 @@ use egui_virtual_list::VirtualList;
 use enostr::{NoteId, RelayPool};
 use hashbrown::{hash_map::RawEntryMut, HashMap};
 use nostrdb::{Filter, Ndb, Note, NoteKey, NoteReplyBuf, Transaction};
-use notedeck::{NoteCache, NoteRef, UnknownIds};
+use notedeck::{filter, NoteCache, NoteRef, UnknownIds};
 
 use crate::{
     actionbar::{process_thread_notes, NewThreadNotes},
@@ -74,6 +74,14 @@ impl<T: Copy + Ord + Eq + Hash> HybridSet<T> {
         } else {
             MergeKind::Spliced
         })
+    }
+
+    pub fn last(&self) -> Option<&T> {
+        if self.reversed {
+            self.ordered.last()
+        } else {
+            self.ordered.first()
+        }
     }
 }
 
@@ -170,16 +178,15 @@ impl Threads {
         self.seen_flags.mark_seen(selected_note_id);
 
         let filter = match self.threads.raw_entry_mut().from_key(&selected_note_id) {
-            RawEntryMut::Occupied(_entry) => {
-                // TODO(kernelkind): reenable this once the panic is fixed
-                //
-                // let node = entry.into_mut();
-                // if let Some(first) = node.replies.first() {
-                //     &filter::make_filters_since(&local_sub_filter, first.created_at + 1)
-                // } else {
-                //     &local_sub_filter
-                // }
-                &local_sub_filter
+            RawEntryMut::Occupied(entry) => {
+                let node = entry.into_mut();
+                if let Some(most_recent_note) = node.replies.last() {
+                    let since = most_recent_note.created_at + 1;
+                    tracing::info!("USING SINCE FILTER SINCE: {since}");
+                    &filter::make_filters_since(&local_sub_filter, since)
+                } else {
+                    &local_sub_filter
+                }
             }
             RawEntryMut::Vacant(entry) => {
                 let id = NoteId::new(*selected_note_id);
