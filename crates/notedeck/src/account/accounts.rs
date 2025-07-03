@@ -41,10 +41,7 @@ impl Accounts {
     ) -> Self {
         let (mut cache, unknown_id) = AccountCache::new(UserAccount::new(
             Keypair::only_pubkey(fallback),
-            AccountData {
-                relay: AccountRelayData::new(ndb, txn, fallback.bytes()),
-                muted: AccountMutedData::new(ndb, txn, fallback.bytes()),
-            },
+            AccountData::new(ndb, txn, fallback.bytes()),
         ));
 
         unknown_id.process_action(unknown_ids, ndb, txn);
@@ -131,10 +128,7 @@ impl Accounts {
             acc.key = kp.clone();
             AccType::Acc(&*acc)
         } else {
-            let new_account_data = AccountData {
-                relay: AccountRelayData::new(ndb, txn, kp.pubkey.bytes()),
-                muted: AccountMutedData::new(ndb, txn, kp.pubkey.bytes()),
-            };
+            let new_account_data = AccountData::new(ndb, txn, kp.pubkey.bytes());
             AccType::Entry(
                 self.cache
                     .add(UserAccount::new(kp.clone(), new_account_data)),
@@ -356,10 +350,7 @@ fn get_acc_from_storage(
     user_account_serializable: UserAccountSerializable,
 ) -> Option<UserAccount> {
     let keypair = user_account_serializable.key;
-    let new_account_data = AccountData {
-        relay: AccountRelayData::new(ndb, txn, keypair.pubkey.bytes()),
-        muted: AccountMutedData::new(ndb, txn, keypair.pubkey.bytes()),
-    };
+    let new_account_data = AccountData::new(ndb, txn, keypair.pubkey.bytes());
 
     let mut wallet = None;
     if let Some(wallet_s) = user_account_serializable.wallet {
@@ -385,6 +376,13 @@ pub struct AccountData {
 }
 
 impl AccountData {
+    pub fn new(ndb: &Ndb, txn: &Transaction, pubkey: &[u8; 32]) -> Self {
+        Self {
+            relay: AccountRelayData::new(ndb, txn, pubkey),
+            muted: AccountMutedData::new(ndb, txn, pubkey),
+        }
+    }
+
     pub(super) fn poll_for_updates(
         &mut self,
         ndb: &Ndb,
