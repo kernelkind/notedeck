@@ -255,6 +255,13 @@ impl Accounts {
             ),
             relay_url,
         );
+        pool.send_to(
+            &ClientMessage::req(
+                self.subs.contacts.remote.clone(),
+                vec![data.contacts.filter.clone()],
+            ),
+            relay_url,
+        );
     }
 
     pub fn update(&mut self, ndb: &mut Ndb, pool: &mut RelayPool, ctx: &egui::Context) {
