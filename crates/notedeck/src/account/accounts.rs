@@ -1,7 +1,7 @@
 use uuid::Uuid;
 
 use crate::account::cache::AccountCache;
-use crate::account::contacts::Contacts;
+use crate::account::contacts::{ContactState, Contacts, UnreceivedState};
 use crate::account::mute::AccountMutedData;
 use crate::account::relay::{
     modify_advertised_relays, update_relay_configuration, AccountRelayData, RelayAction,
@@ -316,6 +316,28 @@ impl Accounts {
 
     pub fn get_subs(&self) -> &AccountSubs {
         &self.subs
+    }
+
+    pub fn handle_eose_tally(&mut self, pool: &RelayPool, eose_relay: &str) {
+        let ContactState::Unreceived(unknown_state) =
+            &mut self.get_selected_account_mut().data.contacts.state
+        else {
+            return;
+        };
+
+        let UnreceivedState::TallyEose(eose_tally) = unknown_state else {
+            return;
+        };
+
+        eose_tally.eose_from.insert(eose_relay.to_owned());
+        tracing::info!(
+            "Inserted {} in EOSE tally. have eose's from {} of {} relays",
+            eose_relay,
+            eose_tally.eose_from.len(),
+            pool.urls().len()
+        );
+
+        unknown_state.process(pool);
     }
 }
 
