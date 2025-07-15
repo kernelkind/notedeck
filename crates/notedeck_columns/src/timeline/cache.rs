@@ -38,6 +38,15 @@ impl<'a, M> Vitality<'a, M> {
     }
 }
 
+impl<'a> IntoIterator for &'a mut TimelineCache {
+    type Item = (&'a TimelineKind, &'a mut Timeline);
+    type IntoIter = std::collections::hash_map::IterMut<'a, TimelineKind, Timeline>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.timelines.iter_mut()
+    }
+}
+
 impl TimelineCache {
     /// Pop a timeline from the timeline cache. This only removes the timeline
     /// if it has reached 0 subscribers, meaning it was the last one to be
