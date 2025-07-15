@@ -112,7 +112,9 @@ impl TimelineCache {
         // also use hashbrown?
 
         if self.timelines.contains_key(id) {
-            return Vitality::Stale(self.get_expected_mut(id));
+            let timeline = self.get_expected_mut(id);
+            timeline.subscription.increment();
+            return Vitality::Stale(timeline);
         }
 
         let notes = if let FilterState::Ready(filters) = id.filters(txn, ndb) {
