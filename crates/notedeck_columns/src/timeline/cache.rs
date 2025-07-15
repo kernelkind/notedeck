@@ -102,8 +102,14 @@ impl TimelineCache {
     }
 
     pub fn insert(&mut self, id: TimelineKind, mut timeline: Timeline) {
+        if self.timelines.contains_key(&id) {
+            let timeline = self.get_expected_mut(&id);
+            timeline.subscription.increment();
+            return;
+        }
+
         if matches!(timeline.subscription, TimelineSub::NoSub) {
-            timeline.subscription = TimelineSub::NeedsSub { new_dependers: 1 };
+            timeline.subscription.increment();
         }
         self.timelines.insert(id, timeline);
     }
@@ -213,6 +219,10 @@ impl TimelineCache {
 
     pub fn num_timelines(&self) -> usize {
         self.timelines.len()
+    }
+
+    pub fn contains(&self, id: &TimelineKind) -> bool {
+        self.timelines.contains_key(id)
     }
 }
 

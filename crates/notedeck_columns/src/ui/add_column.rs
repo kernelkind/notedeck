@@ -609,32 +609,36 @@ impl AddColumnResponse {
     pub fn process(self, ui: &mut egui::Ui, app: &mut Damus, ctx: &mut AppContext<'_>, col: usize) {
         match self {
             AddColumnResponse::Timeline(timeline_kind) => 'leave: {
-                let txn = Transaction::new(ctx.ndb).unwrap();
-                let mut timeline =
-                    if let Some(timeline) = timeline_kind.into_timeline(&txn, ctx.ndb) {
+                if let Some(cur_timeline) = app.timeline_cache.get_mut(&timeline_kind) {
+                    cur_timeline.increment_subscription();
+                } else {
+                    let txn = Transaction::new(ctx.ndb).unwrap();
+                    let mut timeline = if let Some(timeline) =
+                        timeline_kind.clone().into_timeline(&txn, ctx.ndb)
+                    {
                         timeline
                     } else {
                         error!("Could not convert column response to timeline");
                         break 'leave;
                     };
 
-                crate::timeline::setup_new_timeline(
-                    &mut timeline,
-                    ctx.ndb,
-                    &txn,
-                    &mut app.subscriptions,
-                    ctx.pool,
-                    ctx.note_cache,
-                    app.since_optimize,
-                    ctx.accounts,
-                );
+                    crate::timeline::setup_new_timeline(
+                        &mut timeline,
+                        ctx.ndb,
+                        &txn,
+                        &mut app.subscriptions,
+                        ctx.pool,
+                        ctx.note_cache,
+                        app.since_optimize,
+                        ctx.accounts,
+                    );
+                    app.timeline_cache.insert(timeline.kind.clone(), timeline);
+                }
 
                 app.columns_mut(ctx.accounts)
                     .column_mut(col)
                     .router_mut()
-                    .route_to_replaced(Route::timeline(timeline.kind.clone()));
-
-                app.timeline_cache.insert(timeline.kind.clone(), timeline);
+                    .route_to_replaced(Route::timeline(timeline_kind));
             }
 
             AddColumnResponse::Algo(algo_option) => match algo_option {

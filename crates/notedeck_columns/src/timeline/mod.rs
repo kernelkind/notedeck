@@ -417,6 +417,20 @@ impl Timeline {
 
         self.insert(&new_note_ids, ndb, txn, unknown_ids, note_cache, reversed)
     }
+
+    pub fn subscribe_or_increment(
+        &mut self,
+        cur_filters: &[Filter],
+        ndb: &Ndb,
+        pool: &mut RelayPool,
+    ) {
+        self.subscription
+            .subscribe_or_increment(cur_filters, ndb, pool);
+    }
+
+    pub fn increment_subscription(&mut self) {
+        self.subscription.increment();
+    }
 }
 
 pub enum MergeKind {

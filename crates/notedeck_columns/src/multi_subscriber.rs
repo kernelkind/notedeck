@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use egui_nav::ReturnType;
 use enostr::{Filter, NoteId, RelayPool};
 use hashbrown::HashMap;
@@ -257,7 +259,7 @@ fn local_sub_new_scope(
     1
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub enum TimelineSub {
     NoSub,
     NeedsSub {
@@ -274,6 +276,30 @@ pub enum TimelineSub {
     },
 }
 
+impl std::fmt::Debug for TimelineSub {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSub => write!(f, "NoSub"),
+            Self::NeedsSub { new_dependers } => f
+                .debug_struct("NeedsSub")
+                .field("new_dependers", new_dependers)
+                .finish(),
+            Self::Single { filters: _, state } => {
+                f.debug_struct("Single").field("state", state).finish()
+            }
+            Self::Multi {
+                filters: _,
+                state,
+                dependers,
+            } => f
+                .debug_struct("Multi")
+                .field("state", state)
+                .field("dependers", dependers)
+                .finish(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SubState {
     RemoteOnly { id: String },
@@ -283,6 +309,7 @@ pub enum SubState {
 
 impl TimelineSub {
     pub fn increment(&mut self) {
+        let before = self.clone();
         match self {
             TimelineSub::NoSub => {
                 *self = TimelineSub::NeedsSub { new_dependers: 1 };
@@ -301,6 +328,8 @@ impl TimelineSub {
                 dependers,
             } => *dependers += 1,
         }
+
+        tracing::info!("increment: {:?} -> {:?}", before, self);
     }
 
     pub fn decrement(&mut self) -> SubDecrementResponse {
@@ -374,6 +403,7 @@ impl TimelineSub {
     }
 
     pub fn add_local(&mut self, filters: &[Filter], local: Subscription) {
+        let before = self.clone();
         match self {
             TimelineSub::NoSub => {
                 *self = TimelineSub::Single {
@@ -384,12 +414,14 @@ impl TimelineSub {
             TimelineSub::NeedsSub { new_dependers } => {
                 *self = TimelineSub::Multi {
                     state: SubState::NeedsRemote(local),
-                    dependers: *new_dependers + 1,
+                    dependers: *new_dependers,
                     filters: filters.to_vec(),
                 };
             }
             _ => {}
         }
+
+        tracing::info!("add_local: {:?} -> {:?}", before, self);
     }
 
     /// TODO(kernelkind): If the provided filter is different from what is present,
@@ -400,6 +432,7 @@ impl TimelineSub {
         ndb: &Ndb,
         pool: &mut RelayPool,
     ) {
+        let before = self.clone();
         match self {
             TimelineSub::NoSub => {
                 let id = "SubState::NoSub";
@@ -459,9 +492,11 @@ impl TimelineSub {
                 }
             }
         }
+        tracing::info!("subscribe_or_increment: {:?} => {:?}", before, self);
     }
 
     pub fn unsubscribe_or_decrement(&mut self, ndb: &mut Ndb, pool: &mut RelayPool) {
+        let before = self.clone();
         match self {
             TimelineSub::NoSub => {}
             TimelineSub::NeedsSub { new_dependers } => {
@@ -488,6 +523,28 @@ impl TimelineSub {
                     *self = TimelineSub::NoSub;
                 }
             }
+        }
+        tracing::info!("unsubscribe_or_decrement: {:?} => {:?}", before, self);
+    }
+
+    pub fn needs_remote(&self) -> bool {
+        match self {
+            TimelineSub::NoSub => true,
+            TimelineSub::NeedsSub { new_dependers: _ } => true,
+            TimelineSub::Single { filters: _, state } => match state {
+                SubState::RemoteOnly { id: _ } => false,
+                SubState::NeedsRemote(_) => true,
+                SubState::Unified(_) => false,
+            },
+            TimelineSub::Multi {
+                filters: _,
+                state,
+                dependers: _,
+            } => match state {
+                SubState::RemoteOnly { id: _ } => false,
+                SubState::NeedsRemote(_) => true,
+                SubState::Unified(_) => false,
+            },
         }
     }
 }
