@@ -208,6 +208,10 @@ impl TimelineCache {
     pub fn get_mut(&mut self, id: &TimelineKind) -> Option<&mut Timeline> {
         self.timelines.get_mut(id)
     }
+
+    pub fn num_timelines(&self) -> usize {
+        self.timelines.len()
+    }
 }
 
 /// Look for new thread notes since our last fetch
