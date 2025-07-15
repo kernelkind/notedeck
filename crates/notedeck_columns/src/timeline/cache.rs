@@ -104,6 +104,15 @@ impl TimelineCache {
         self.timelines.insert(id, timeline);
     }
 
+    pub fn insert(&mut self, id: TimelineKind, timeline: Timeline) {
+        if let Some(cur_timeline) = self.timelines.get_mut(&id) {
+            cur_timeline.subscription.increment();
+            return;
+        };
+
+        self.timelines.insert(id, timeline);
+    }
+
     /// Get and/or update the notes associated with this timeline
     pub fn notes<'a>(
         &'a mut self,
