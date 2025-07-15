@@ -580,9 +580,8 @@ pub fn render_add_column_routes(
     ui: &mut egui::Ui,
     app: &mut Damus,
     ctx: &mut AppContext<'_>,
-    col: usize,
     route: &AddColumnRoute,
-) {
+) -> Option<AddColumnResponse> {
     let mut add_column_view = AddColumnView::new(
         &mut app.view_state.id_state_map,
         ctx.ndb,
@@ -603,8 +602,12 @@ pub fn render_add_column_routes(
         AddColumnRoute::ExternalIndividual => add_column_view.external_individual_ui(ui),
     };
 
-    if let Some(resp) = resp {
-        match resp {
+    resp
+}
+
+impl AddColumnResponse {
+    pub fn process(self, ui: &mut egui::Ui, app: &mut Damus, ctx: &mut AppContext<'_>, col: usize) {
+        match self {
             AddColumnResponse::Timeline(timeline_kind) => 'leave: {
                 let txn = Transaction::new(ctx.ndb).unwrap();
                 let mut timeline =

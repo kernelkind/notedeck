@@ -12,7 +12,7 @@ use crate::{
     },
     ui::{
         self,
-        add_column::render_add_column_routes,
+        add_column::{render_add_column_routes, AddColumnResponse},
         column::NavTitle,
         configure_deck::ConfigureDeckView,
         edit_deck::{EditDeckResponse, EditDeckView},
@@ -59,6 +59,7 @@ pub enum RenderNavAction {
     SwitchingAction(SwitchingAction),
     WalletAction(WalletAction),
     RelayAction(RelayAction),
+    AddColumnAction(AddColumnResponse),
 }
 
 pub enum SwitchingAction {
@@ -462,6 +463,10 @@ fn process_render_nav_action(
                 .process_relay_action(ui.ctx(), ctx.pool, action);
             None
         }
+        RenderNavAction::AddColumnAction(add_column_response) => {
+            add_column_response.process(ui, app, ctx, col);
+            None
+        }
     };
 
     if let Some(action) = router_action {
@@ -629,9 +634,7 @@ fn render_nav_body(
             post_response.action.map(Into::into)
         }
         Route::AddColumn(route) => {
-            render_add_column_routes(ui, app, ctx, col, route);
-
-            None
+            render_add_column_routes(ui, app, ctx, route).map(RenderNavAction::AddColumnAction)
         }
         Route::Support => {
             SupportView::new(&mut app.support).show(ui);
