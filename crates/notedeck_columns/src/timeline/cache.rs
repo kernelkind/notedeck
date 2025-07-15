@@ -193,6 +193,14 @@ impl TimelineCache {
 
         open_result
     }
+
+    pub fn get(&self, id: &TimelineKind) -> Option<&Timeline> {
+        self.timelines.get(id)
+    }
+
+    pub fn get_mut(&mut self, id: &TimelineKind) -> Option<&mut Timeline> {
+        self.timelines.get_mut(id)
+    }
 }
 
 /// Look for new thread notes since our last fetch
