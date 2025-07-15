@@ -419,23 +419,27 @@ impl TimelineSub {
                 *self = TimelineSub::Multi {
                     filters: cur_filters.to_owned(),
                     state: SubState::Unified(UnifiedSubscription { local, remote }),
-                    dependers: *new_dependers + 1,
+                    dependers: *new_dependers,
                 };
             }
             TimelineSub::Single { filters: _, state } => {
                 if let SubState::NeedsRemote(sub) = state {
                     let remote = sub_remote(pool, cur_filters.to_owned(), "Local only -> Unified");
-                    *state = SubState::Unified(UnifiedSubscription {
+                    let new_state = SubState::Unified(UnifiedSubscription {
                         local: *sub,
                         remote,
                     });
+                    *self = TimelineSub::Single {
+                        filters: cur_filters.to_owned(),
+                        state: new_state,
+                    };
+                } else {
+                    *self = TimelineSub::Multi {
+                        filters: cur_filters.to_owned(),
+                        state: state.clone(),
+                        dependers: 2,
+                    };
                 }
-
-                *self = TimelineSub::Multi {
-                    filters: cur_filters.to_owned(),
-                    state: state.clone(),
-                    dependers: 2,
-                };
             }
             TimelineSub::Multi {
                 filters,
@@ -450,9 +454,9 @@ impl TimelineSub {
                         local: *sub,
                         remote,
                     });
+                } else {
+                    *dependers += 1;
                 }
-
-                *dependers += 1;
             }
         }
     }

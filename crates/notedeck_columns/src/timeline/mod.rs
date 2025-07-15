@@ -198,7 +198,7 @@ pub struct Timeline {
     pub views: Vec<TimelineTab>,
     pub selected_view: usize,
 
-    pub subscription: TimelineSub,
+    subscription: TimelineSub,
 }
 
 impl Timeline {
@@ -300,7 +300,7 @@ impl Timeline {
 
     /// Initial insert of notes into a timeline. Subsequent inserts should
     /// just use the insert function
-    pub fn insert_new(
+    fn insert_new(
         &mut self,
         txn: &Transaction,
         ndb: &Ndb,
