@@ -634,9 +634,7 @@ impl AddColumnResponse {
                     .router_mut()
                     .route_to_replaced(Route::timeline(timeline.kind.clone()));
 
-                app.timeline_cache
-                    .timelines
-                    .insert(timeline.kind.clone(), timeline);
+                app.timeline_cache.insert(timeline.kind.clone(), timeline);
             }
 
             AddColumnResponse::Algo(algo_option) => match algo_option {
@@ -676,9 +674,7 @@ impl AddColumnResponse {
                             .router_mut()
                             .route_to_replaced(Route::timeline(timeline.kind.clone()));
 
-                        app.timeline_cache
-                            .timelines
-                            .insert(timeline.kind.clone(), timeline);
+                        app.timeline_cache.insert(timeline.kind.clone(), timeline);
                     } else {
                         // we couldn't fetch the timeline yet... let's let
                         // the user know ?

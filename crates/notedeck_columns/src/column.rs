@@ -106,9 +106,7 @@ impl Columns {
             .map(|r| match r {
                 IntermediaryRoute::Timeline(timeline) => {
                     let route = Route::timeline(timeline.kind.clone());
-                    timeline_cache
-                        .timelines
-                        .insert(timeline.kind.clone(), timeline);
+                    timeline_cache.insert(timeline.kind.clone(), timeline);
                     route
                 }
                 IntermediaryRoute::Route(route) => route,

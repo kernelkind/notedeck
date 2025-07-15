@@ -82,7 +82,7 @@ impl<'a, 'd> ProfileView<'a, 'd> {
                     action = Some(profile_view_action);
                 }
 
-                let timeline = if let Some(timeline) = timeline_cache.timelines.get(timeline_id) {
+                let timeline = if let Some(timeline) = timeline_cache.get(timeline_id) {
                     timeline
                 } else {
                     error!("tried to render timeline in column, but timeline was missing");

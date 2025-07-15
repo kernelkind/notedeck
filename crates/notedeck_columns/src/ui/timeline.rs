@@ -94,7 +94,7 @@ fn timeline_ui(
         timeline_id,
         timeline_cache,
         |ui, timeline_id, timeline_cache| {
-            let timeline = if let Some(timeline) = timeline_cache.timelines.get(timeline_id) {
+            let timeline = if let Some(timeline) = timeline_cache.get(timeline_id) {
                 timeline
             } else {
                 error!("tried to render timeline in column, but timeline was missing");
@@ -130,7 +130,7 @@ pub fn render_timeline_scrollable(
     render_timeline: impl FnOnce(&mut egui::Ui, &TimelineKind, &mut TimelineCache) -> Option<NoteAction>,
 ) -> Option<NoteAction> {
     let scroll_id = {
-        let timeline = if let Some(timeline) = timeline_cache.timelines.get_mut(timeline_id) {
+        let timeline = if let Some(timeline) = timeline_cache.get_mut(timeline_id) {
             timeline
         } else {
             error!("tried to render timeline in column, but timeline was missing");
