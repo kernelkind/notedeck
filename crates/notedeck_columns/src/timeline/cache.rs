@@ -92,6 +92,13 @@ impl TimelineCache {
         self.timelines.insert(id, timeline);
     }
 
+    pub fn insert(&mut self, id: TimelineKind, mut timeline: Timeline) {
+        if matches!(timeline.subscription, TimelineSub::NoSub) {
+            timeline.subscription = TimelineSub::NeedsSub { new_dependers: 1 };
+        }
+        self.timelines.insert(id, timeline);
+    }
+
     /// Get and/or update the notes associated with this timeline
     fn notes<'a>(
         &'a mut self,
