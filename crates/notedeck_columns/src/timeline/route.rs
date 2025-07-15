@@ -6,7 +6,7 @@ use crate::{
 };
 
 use enostr::Pubkey;
-use notedeck::{Accounts, MuteFun, NoteContext};
+use notedeck::{Accounts, NoteContext};
 use notedeck_ui::{jobs::JobsCache, NoteOptions};
 
 #[allow(clippy::too_many_arguments)]
@@ -14,7 +14,6 @@ pub fn render_timeline_route(
     timeline_cache: &mut TimelineCache,
     accounts: &mut Accounts,
     kind: &TimelineKind,
-    col: usize,
     note_options: NoteOptions,
     depth: usize,
     ui: &mut egui::Ui,
@@ -49,9 +48,7 @@ pub fn render_timeline_route(
                     pubkey,
                     accounts,
                     timeline_cache,
-                    col,
                     ui,
-                    &accounts.mutefun(),
                     note_options,
                     note_context,
                     jobs,
@@ -109,9 +106,7 @@ pub fn render_profile_route(
     pubkey: &Pubkey,
     accounts: &Accounts,
     timeline_cache: &mut TimelineCache,
-    col: usize,
     ui: &mut egui::Ui,
-    is_muted: &MuteFun,
     note_options: NoteOptions,
     note_context: &mut NoteContext,
     jobs: &mut JobsCache,
@@ -119,10 +114,8 @@ pub fn render_profile_route(
     let profile_view = ProfileView::new(
         pubkey,
         accounts,
-        col,
         timeline_cache,
         note_options,
-        is_muted,
         note_context,
         jobs,
     )

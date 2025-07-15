@@ -500,7 +500,6 @@ fn render_nav_body(
             &mut app.timeline_cache,
             ctx.accounts,
             kind,
-            col,
             app.note_options,
             depth,
             ui,

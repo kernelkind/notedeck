@@ -12,7 +12,7 @@ use crate::{
     ui::timeline::{render_timeline_scrollable, TimelineTabView},
 };
 use notedeck::{
-    name::get_display_name, profile::get_profile_url, Accounts, IsFollowing, MuteFun, NoteAction,
+    name::get_display_name, profile::get_profile_url, Accounts, IsFollowing, NoteAction,
     NoteContext, NotedeckTextStyle,
 };
 use notedeck_ui::{
@@ -25,10 +25,8 @@ use notedeck_ui::{
 pub struct ProfileView<'a, 'd> {
     pubkey: &'a Pubkey,
     accounts: &'a Accounts,
-    col_id: usize,
     timeline_cache: &'a mut TimelineCache,
     note_options: NoteOptions,
-    is_muted: &'a MuteFun,
     note_context: &'a mut NoteContext<'d>,
     jobs: &'a mut JobsCache,
 }
@@ -45,20 +43,16 @@ impl<'a, 'd> ProfileView<'a, 'd> {
     pub fn new(
         pubkey: &'a Pubkey,
         accounts: &'a Accounts,
-        col_id: usize,
         timeline_cache: &'a mut TimelineCache,
         note_options: NoteOptions,
-        is_muted: &'a MuteFun,
         note_context: &'a mut NoteContext<'d>,
         jobs: &'a mut JobsCache,
     ) -> Self {
         ProfileView {
             pubkey,
             accounts,
-            col_id,
             timeline_cache,
             note_options,
-            is_muted,
             note_context,
             jobs,
         }
@@ -105,7 +99,7 @@ impl<'a, 'd> ProfileView<'a, 'd> {
                     false,
                     self.note_options,
                     &txn,
-                    self.is_muted,
+                    &self.accounts.mutefun(),
                     self.note_context,
                     &self.accounts.get_selected_account().keypair(),
                     self.jobs,
