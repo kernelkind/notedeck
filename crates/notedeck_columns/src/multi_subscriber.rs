@@ -2,6 +2,7 @@ use egui_nav::ReturnType;
 use enostr::{Filter, NoteId, RelayPool};
 use hashbrown::HashMap;
 use nostrdb::{Ndb, Subscription};
+use notedeck::UnifiedSubscription;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -209,9 +210,14 @@ impl ThreadSubs {
         let remote = match self.remotes.raw_entry_mut().from_key(&id.root_id.bytes()) {
             hashbrown::hash_map::RawEntryMut::Occupied(entry) => entry.into_mut(),
             hashbrown::hash_map::RawEntryMut::Vacant(entry) => {
+                let filter = remote_sub_filter();
                 let (_, res) = entry.insert(
                     NoteId::new(*id.root_id.bytes()),
-                    sub_remote(pool, remote_sub_filter, id),
+                    Remote {
+                        filter: filter.clone(),
+                        subid: sub_remote(pool, filter, id),
+                        dependers: 0,
+                    },
                 );
 
                 res
@@ -361,26 +367,14 @@ fn ndb_unsub(ndb: &mut Ndb, sub: Subscription, id: impl std::fmt::Debug) -> bool
     }
 }
 
-fn sub_remote(
-    pool: &mut RelayPool,
-    remote_sub_filter: impl FnOnce() -> Vec<Filter>,
-    id: impl std::fmt::Debug,
-) -> Remote {
+fn sub_remote(pool: &mut RelayPool, filter: Vec<Filter>, id: impl std::fmt::Debug) -> String {
     let subid = Uuid::new_v4().to_string();
-
-    let filter = remote_sub_filter();
-
-    let remote = Remote {
-        filter: filter.clone(),
-        subid: subid.clone(),
-        dependers: 0,
-    };
 
     tracing::info!("Remote subscribe for {:?}", id);
 
-    pool.subscribe(subid, filter);
+    pool.subscribe(subid.clone(), filter);
 
-    remote
+    subid
 }
 
 fn local_sub_new_scope(
@@ -403,4 +397,254 @@ fn local_sub_new_scope(
     });
 
     1
+}
+
+#[derive(Debug)]
+pub enum TimelineSub {
+    NoSub,
+    NeedsSub {
+        new_dependers: usize,
+    },
+    Single {
+        filters: Vec<Filter>,
+        state: SubState,
+    },
+    Multi {
+        filters: Vec<Filter>,
+        state: SubState,
+        dependers: usize,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum SubState {
+    RemoteOnly { id: String },
+    NeedsRemote(Subscription),
+    Unified(UnifiedSubscription),
+}
+
+impl TimelineSub {
+    pub fn increment(&mut self) {
+        match self {
+            TimelineSub::NoSub => {
+                *self = TimelineSub::NeedsSub { new_dependers: 1 };
+            }
+            TimelineSub::NeedsSub { new_dependers } => *new_dependers += 1,
+            TimelineSub::Single { state, filters } => {
+                *self = TimelineSub::Multi {
+                    filters: filters.clone(),
+                    state: state.clone(),
+                    dependers: 2,
+                }
+            }
+            TimelineSub::Multi {
+                filters: _,
+                state: _,
+                dependers,
+            } => *dependers += 1,
+        }
+    }
+
+    pub fn decrement(&mut self) -> SubDecrementResponse {
+        let mut resp = None;
+        match self {
+            TimelineSub::NoSub => {}
+            TimelineSub::NeedsSub { new_dependers } => {
+                *self = if *new_dependers > 1 {
+                    TimelineSub::NeedsSub {
+                        new_dependers: *new_dependers - 1,
+                    }
+                } else {
+                    TimelineSub::NoSub
+                };
+            }
+            TimelineSub::Single {
+                state: unified_subscription,
+                filters: _,
+            } => {
+                resp = Some(unified_subscription.clone());
+                *self = TimelineSub::NoSub;
+            }
+            TimelineSub::Multi {
+                state,
+                dependers,
+                filters,
+            } => {
+                if *dependers > 1 {
+                    *dependers -= 1;
+                } else {
+                    *self = TimelineSub::Single {
+                        state: state.clone(),
+                        filters: filters.clone(),
+                    }
+                };
+            }
+        }
+
+        SubDecrementResponse {
+            need_unsubscribe: resp,
+        }
+    }
+
+    pub fn get_local(&self) -> Option<Subscription> {
+        match self {
+            TimelineSub::NoSub => None,
+            TimelineSub::NeedsSub { new_dependers: _ } => None,
+            TimelineSub::Single { state, filters: _ }
+            | TimelineSub::Multi {
+                filters: _,
+                state,
+                dependers: _,
+            } => match state {
+                SubState::RemoteOnly { id: _ } => None,
+                SubState::Unified(unified_subscription) => Some(unified_subscription.local),
+                SubState::NeedsRemote(subscription) => Some(*subscription),
+            },
+        }
+    }
+
+    pub fn get_filters(&self) -> Option<&Vec<Filter>> {
+        match self {
+            TimelineSub::Single { state: _, filters }
+            | TimelineSub::Multi {
+                filters,
+                state: _,
+                dependers: _,
+            } => Some(filters),
+            TimelineSub::NoSub | TimelineSub::NeedsSub { new_dependers: _ } => None,
+        }
+    }
+
+    pub fn add_local(&mut self, filters: &[Filter], local: Subscription) {
+        match self {
+            TimelineSub::NoSub => {
+                *self = TimelineSub::Single {
+                    state: SubState::NeedsRemote(local),
+                    filters: filters.to_vec(),
+                };
+            }
+            TimelineSub::NeedsSub { new_dependers } => {
+                *self = TimelineSub::Multi {
+                    state: SubState::NeedsRemote(local),
+                    dependers: *new_dependers + 1,
+                    filters: filters.to_vec(),
+                };
+            }
+            _ => {}
+        }
+    }
+
+    /// TODO(kernelkind): If the provided filter is different from what is present,
+    /// we will unsubscribe and resubscribe with the new filter.
+    pub fn subscribe_or_increment(
+        &mut self,
+        cur_filters: &[Filter],
+        ndb: &Ndb,
+        pool: &mut RelayPool,
+    ) {
+        match self {
+            TimelineSub::NoSub => {
+                let id = "SubState::NoSub";
+                let remote = sub_remote(pool, cur_filters.to_owned(), id);
+                let local = ndb_sub(ndb, cur_filters, id).expect("ndb sub");
+
+                *self = TimelineSub::Single {
+                    filters: cur_filters.to_owned(),
+                    state: SubState::Unified(UnifiedSubscription { local, remote }),
+                };
+            }
+            TimelineSub::NeedsSub { new_dependers } => {
+                let id = "SubState::NoSub";
+                let remote = sub_remote(pool, cur_filters.to_owned(), id);
+                let local = ndb_sub(ndb, cur_filters, id).expect("ndb sub");
+
+                *self = TimelineSub::Multi {
+                    filters: cur_filters.to_owned(),
+                    state: SubState::Unified(UnifiedSubscription { local, remote }),
+                    dependers: *new_dependers + 1,
+                };
+            }
+            TimelineSub::Single { filters: _, state } => {
+                if let SubState::NeedsRemote(sub) = state {
+                    let remote = sub_remote(pool, cur_filters.to_owned(), "Local only -> Unified");
+                    *state = SubState::Unified(UnifiedSubscription {
+                        local: *sub,
+                        remote,
+                    });
+                }
+
+                *self = TimelineSub::Multi {
+                    filters: cur_filters.to_owned(),
+                    state: state.clone(),
+                    dependers: 2,
+                };
+            }
+            TimelineSub::Multi {
+                filters,
+                state,
+                dependers,
+            } => {
+                *filters = cur_filters.to_owned();
+
+                if let SubState::NeedsRemote(sub) = state {
+                    let remote = sub_remote(pool, cur_filters.to_owned(), "Local only -> Unified");
+                    *state = SubState::Unified(UnifiedSubscription {
+                        local: *sub,
+                        remote,
+                    });
+                }
+
+                *dependers += 1;
+            }
+        }
+    }
+
+    pub fn unsubscribe_or_decrement(&mut self, ndb: &mut Ndb, pool: &mut RelayPool) {
+        match self {
+            TimelineSub::NoSub => {}
+            TimelineSub::NeedsSub { new_dependers } => {
+                if *new_dependers > 1 {
+                    *new_dependers -= 1;
+                } else {
+                    *self = TimelineSub::NoSub;
+                }
+            }
+            TimelineSub::Single { filters: _, state } => {
+                unsub(state, ndb, pool);
+                *self = TimelineSub::NoSub;
+            }
+            TimelineSub::Multi {
+                filters: _,
+                state,
+                dependers,
+            } => {
+                unsub(state, ndb, pool);
+                if *dependers > 1 {
+                    *dependers -= 1;
+                } else {
+                    unsub(state, ndb, pool);
+                    *self = TimelineSub::NoSub;
+                }
+            }
+        }
+    }
+}
+
+fn unsub(sub_state: &SubState, ndb: &mut Ndb, pool: &mut RelayPool) {
+    match sub_state {
+        SubState::RemoteOnly { id } => {
+            pool.unsubscribe(id.to_owned());
+        }
+        SubState::NeedsRemote(subscription) => {
+            ndb_unsub(ndb, *subscription, "SubTypeState::NeedsRemote");
+        }
+        SubState::Unified(unified_subscription) => {
+            ndb_unsub(ndb, unified_subscription.local, "SubTypeState::NeedsRemote");
+            pool.unsubscribe(unified_subscription.remote.clone());
+        }
+    }
+}
+
+pub struct SubDecrementResponse {
+    pub need_unsubscribe: Option<SubState>,
 }
