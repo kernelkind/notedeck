@@ -1,5 +1,5 @@
 use egui::containers::scroll_area::ScrollBarVisibility;
-use egui::{vec2, Direction, Layout, Pos2, Stroke};
+use egui::{vec2, Direction, Layout, Pos2, ScrollArea, Stroke};
 use egui_tabs::TabColor;
 use enostr::KeypairUnowned;
 use nostrdb::Transaction;
@@ -89,6 +89,46 @@ fn timeline_ui(
 
     */
 
+    render_timeline_scrollable(
+        ui,
+        timeline_id,
+        timeline_cache,
+        |ui, timeline_id, timeline_cache| {
+            let timeline = if let Some(timeline) = timeline_cache.timelines.get(timeline_id) {
+                timeline
+            } else {
+                error!("tried to render timeline in column, but timeline was missing");
+                // TODO (jb55): render error when timeline is missing?
+                // this shouldn't happen...
+                //
+                // NOTE (jb55): it can easily happen if you add a timeline column without calling
+                // add_new_timeline_column, since that sets up the initial subs, etc
+                return None;
+            };
+
+            let txn = Transaction::new(note_context.ndb).expect("failed to create txn");
+
+            TimelineTabView::new(
+                timeline.current_view(),
+                reversed,
+                note_options,
+                &txn,
+                is_muted,
+                note_context,
+                cur_acc,
+                jobs,
+            )
+            .show(ui)
+        },
+    )
+}
+
+pub fn render_timeline_scrollable(
+    ui: &mut egui::Ui,
+    timeline_id: &TimelineKind,
+    timeline_cache: &mut TimelineCache,
+    render_timeline: impl FnOnce(&mut egui::Ui, &TimelineKind, &mut TimelineCache) -> Option<NoteAction>,
+) -> Option<NoteAction> {
     let scroll_id = {
         let timeline = if let Some(timeline) = timeline_cache.timelines.get_mut(timeline_id) {
             timeline
@@ -127,11 +167,7 @@ fn timeline_ui(
         None
     };
 
-    let mut scroll_area = egui::ScrollArea::vertical()
-        .id_salt(scroll_id)
-        .animated(false)
-        .auto_shrink([false, false])
-        .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible);
+    let mut scroll_area = timeline_scroll_area(scroll_id);
 
     let offset_id = scroll_id.with("timeline_scroll_offset");
 
@@ -147,33 +183,7 @@ fn timeline_ui(
         }
     }
 
-    let scroll_output = scroll_area.show(ui, |ui| {
-        let timeline = if let Some(timeline) = timeline_cache.timelines.get(timeline_id) {
-            timeline
-        } else {
-            error!("tried to render timeline in column, but timeline was missing");
-            // TODO (jb55): render error when timeline is missing?
-            // this shouldn't happen...
-            //
-            // NOTE (jb55): it can easily happen if you add a timeline column without calling
-            // add_new_timeline_column, since that sets up the initial subs, etc
-            return None;
-        };
-
-        let txn = Transaction::new(note_context.ndb).expect("failed to create txn");
-
-        TimelineTabView::new(
-            timeline.current_view(),
-            reversed,
-            note_options,
-            &txn,
-            is_muted,
-            note_context,
-            cur_acc,
-            jobs,
-        )
-        .show(ui)
-    });
+    let scroll_output = scroll_area.show(ui, |ui| render_timeline(ui, timeline_id, timeline_cache));
 
     ui.data_mut(|d| d.insert_temp(offset_id, scroll_output.state.offset.y));
 
@@ -202,6 +212,14 @@ fn timeline_ui(
             None
         }
     })
+}
+
+pub fn timeline_scroll_area(id: egui::Id) -> ScrollArea {
+    egui::ScrollArea::vertical()
+        .id_salt(id)
+        .animated(false)
+        .auto_shrink([false, false])
+        .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
 }
 
 fn goto_top_button(center: Pos2) -> impl egui::Widget {

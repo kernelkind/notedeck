@@ -1,7 +1,7 @@
 pub mod edit;
 
 pub use edit::EditProfileView;
-use egui::{vec2, Color32, CornerRadius, Layout, Rect, RichText, ScrollArea, Sense, Stroke};
+use egui::{vec2, Color32, CornerRadius, Layout, Rect, RichText, Sense, Stroke};
 use enostr::Pubkey;
 use nostrdb::{ProfileRecord, Transaction};
 use notedeck_ui::profile::follow_button;
@@ -9,7 +9,7 @@ use tracing::error;
 
 use crate::{
     timeline::{TimelineCache, TimelineKind},
-    ui::timeline::{tabs_ui, TimelineTabView},
+    ui::timeline::{render_timeline_scrollable, TimelineTabView},
 };
 use notedeck::{
     name::get_display_name, profile::get_profile_url, Accounts, IsFollowing, MuteFun, NoteAction,
@@ -65,191 +65,175 @@ impl<'a, 'd> ProfileView<'a, 'd> {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<ProfileViewAction> {
-        let scroll_id = egui::Id::new(("profile_scroll", self.col_id, self.pubkey));
-        let offset_id = scroll_id.with("scroll_offset");
-
-        let mut scroll_area = ScrollArea::vertical().id_salt(scroll_id);
-
-        if let Some(offset) = ui.data(|i| i.get_temp::<f32>(offset_id)) {
-            scroll_area = scroll_area.vertical_scroll_offset(offset);
-        }
-
-        let output = scroll_area.show(ui, |ui| {
-            let mut action = None;
-            let txn = Transaction::new(self.note_context.ndb).expect("txn");
-            let profile = self
-                .note_context
-                .ndb
-                .get_profile_by_pubkey(&txn, self.pubkey.bytes())
-                .ok();
-
-            if let Some(profile_view_action) = self.profile_body(ui, profile.as_ref()) {
-                action = Some(profile_view_action);
-            }
-            let profile_timeline = self
-                .timeline_cache
-                .notes(
-                    self.note_context.ndb,
-                    self.note_context.note_cache,
-                    &txn,
-                    &TimelineKind::Profile(*self.pubkey),
-                )
-                .get_ptr();
-
-            profile_timeline.selected_view =
-                tabs_ui(ui, profile_timeline.selected_view, &profile_timeline.views);
-
-            let reversed = false;
-            // poll for new notes and insert them into our existing notes
-            if let Err(e) = profile_timeline.poll_notes_into_view(
-                self.note_context.ndb,
-                &txn,
-                self.note_context.unknown_ids,
-                self.note_context.note_cache,
-                reversed,
-            ) {
-                error!("Profile::poll_notes_into_view: {e}");
-            }
-
-            if let Some(note_action) = TimelineTabView::new(
-                profile_timeline.current_view(),
-                reversed,
-                self.note_options,
-                &txn,
-                self.is_muted,
-                self.note_context,
-                &(&self.accounts.get_selected_account().key).into(),
-                self.jobs,
-            )
-            .show(ui)
-            {
-                action = Some(ProfileViewAction::Note(note_action));
-            }
-
-            action
-        });
-
-        ui.data_mut(|d| d.insert_temp(offset_id, output.state.offset.y));
-
-        output.inner
-    }
-
-    fn profile_body(
-        &mut self,
-        ui: &mut egui::Ui,
-        profile: Option<&ProfileRecord<'_>>,
-    ) -> Option<ProfileViewAction> {
         let mut action = None;
-        ui.vertical(|ui| {
-            banner(
-                ui,
-                profile
-                    .map(|p| p.record().profile())
-                    .and_then(|p| p.and_then(|p| p.banner())),
-                120.0,
-            );
+        let note_action = render_timeline_scrollable(
+            ui,
+            &TimelineKind::Profile(*self.pubkey),
+            self.timeline_cache,
+            |ui, timeline_id, timeline_cache| {
+                let txn = Transaction::new(self.note_context.ndb).expect("txn");
+                let profile = self
+                    .note_context
+                    .ndb
+                    .get_profile_by_pubkey(&txn, self.pubkey.bytes())
+                    .ok();
 
-            let padding = 12.0;
-            notedeck_ui::padding(padding, ui, |ui| {
-                let mut pfp_rect = ui.available_rect_before_wrap();
-                let size = 80.0;
-                pfp_rect.set_width(size);
-                pfp_rect.set_height(size);
-                let pfp_rect = pfp_rect.translate(egui::vec2(0.0, -(padding + 2.0 + (size / 2.0))));
+                if let Some(profile_view_action) = profile_body(
+                    ui,
+                    self.pubkey,
+                    self.accounts,
+                    self.note_context,
+                    profile.as_ref(),
+                ) {
+                    action = Some(profile_view_action);
+                }
 
-                ui.horizontal(|ui| {
-                    ui.put(
-                        pfp_rect,
-                        &mut ProfilePic::new(self.note_context.img_cache, get_profile_url(profile))
-                            .size(size)
-                            .border(ProfilePic::border_stroke(ui)),
-                    );
+                let timeline = if let Some(timeline) = timeline_cache.timelines.get(timeline_id) {
+                    timeline
+                } else {
+                    error!("tried to render timeline in column, but timeline was missing");
+                    // TODO (jb55): render error when timeline is missing?
+                    // this shouldn't happen...
+                    //
+                    // NOTE (jb55): it can easily happen if you add a timeline column without calling
+                    // add_new_timeline_column, since that sets up the initial subs, etc
+                    return None;
+                };
 
-                    if ui.add(copy_key_widget(&pfp_rect)).clicked() {
-                        let to_copy = if let Some(bech) = self.pubkey.npub() {
-                            bech
-                        } else {
-                            error!("Could not convert Pubkey to bech");
-                            String::new()
-                        };
-                        ui.ctx().copy_text(to_copy)
-                    }
+                TimelineTabView::new(
+                    timeline.current_view(),
+                    false,
+                    self.note_options,
+                    &txn,
+                    self.is_muted,
+                    self.note_context,
+                    &self.accounts.get_selected_account().keypair(),
+                    self.jobs,
+                )
+                .show(ui)
+            },
+        );
 
-                    ui.with_layout(Layout::right_to_left(egui::Align::RIGHT), |ui| {
-                        ui.add_space(24.0);
+        action.or(note_action.map(ProfileViewAction::Note))
+    }
+}
 
-                        let target_key = self.pubkey;
-                        let selected = self.accounts.get_selected_account();
+fn profile_body(
+    ui: &mut egui::Ui,
+    pubkey: &Pubkey,
+    accounts: &Accounts,
+    note_context: &mut NoteContext,
+    profile: Option<&ProfileRecord<'_>>,
+) -> Option<ProfileViewAction> {
+    let mut action = None;
+    ui.vertical(|ui| {
+        banner(
+            ui,
+            profile
+                .map(|p| p.record().profile())
+                .and_then(|p| p.and_then(|p| p.banner())),
+            120.0,
+        );
 
-                        let profile_type = if selected.key.secret_key.is_none() {
-                            ProfileType::ReadOnly
-                        } else if &selected.key.pubkey == self.pubkey {
-                            ProfileType::MyProfile
-                        } else {
-                            ProfileType::Followable(selected.is_following(target_key))
-                        };
+        let padding = 12.0;
+        notedeck_ui::padding(padding, ui, |ui| {
+            let mut pfp_rect = ui.available_rect_before_wrap();
+            let size = 80.0;
+            pfp_rect.set_width(size);
+            pfp_rect.set_height(size);
+            let pfp_rect = pfp_rect.translate(egui::vec2(0.0, -(padding + 2.0 + (size / 2.0))));
 
-                        match profile_type {
-                            ProfileType::MyProfile => {
-                                if ui.add(edit_profile_button()).clicked() {
-                                    action = Some(ProfileViewAction::EditProfile);
-                                }
+            ui.horizontal(|ui| {
+                ui.put(
+                    pfp_rect,
+                    &mut ProfilePic::new(note_context.img_cache, get_profile_url(profile))
+                        .size(size)
+                        .border(ProfilePic::border_stroke(ui)),
+                );
+
+                if ui.add(copy_key_widget(&pfp_rect)).clicked() {
+                    let to_copy = if let Some(bech) = pubkey.npub() {
+                        bech
+                    } else {
+                        error!("Could not convert Pubkey to bech");
+                        String::new()
+                    };
+                    ui.ctx().copy_text(to_copy)
+                }
+
+                ui.with_layout(Layout::right_to_left(egui::Align::RIGHT), |ui| {
+                    ui.add_space(24.0);
+
+                    let selected = accounts.get_selected_account();
+
+                    let profile_type = if selected.key.secret_key.is_none() {
+                        ProfileType::ReadOnly
+                    } else if &selected.key.pubkey == pubkey {
+                        ProfileType::MyProfile
+                    } else {
+                        ProfileType::Followable(selected.is_following(pubkey))
+                    };
+
+                    match profile_type {
+                        ProfileType::MyProfile => {
+                            if ui.add(edit_profile_button()).clicked() {
+                                action = Some(ProfileViewAction::EditProfile);
                             }
-                            ProfileType::Followable(is_following) => {
-                                let follow_button = ui.add(follow_button(is_following));
-
-                                if follow_button.clicked() {
-                                    action = match is_following {
-                                        IsFollowing::Unknown => {
-                                            // don't do anything, we don't have contact list
-                                            None
-                                        }
-
-                                        IsFollowing::Yes => {
-                                            Some(ProfileViewAction::Unfollow(target_key.to_owned()))
-                                        }
-
-                                        IsFollowing::No => {
-                                            Some(ProfileViewAction::Follow(target_key.to_owned()))
-                                        }
-                                    };
-                                }
-                            }
-                            ProfileType::ReadOnly => {}
                         }
-                    });
-                });
+                        ProfileType::Followable(is_following) => {
+                            let follow_button = ui.add(follow_button(is_following));
 
-                ui.add_space(18.0);
+                            if follow_button.clicked() {
+                                action = match is_following {
+                                    IsFollowing::Unknown => {
+                                        // don't do anything, we don't have contact list
+                                        None
+                                    }
 
-                ui.add(display_name_widget(&get_display_name(profile), false));
+                                    IsFollowing::Yes => {
+                                        Some(ProfileViewAction::Unfollow(pubkey.to_owned()))
+                                    }
 
-                ui.add_space(8.0);
-
-                ui.add(about_section_widget(profile));
-
-                ui.horizontal_wrapped(|ui| {
-                    if let Some(website_url) = profile
-                        .as_ref()
-                        .map(|p| p.record().profile())
-                        .and_then(|p| p.and_then(|p| p.website()).filter(|s| !s.is_empty()))
-                    {
-                        handle_link(ui, website_url);
-                    }
-
-                    if let Some(lud16) = profile
-                        .as_ref()
-                        .map(|p| p.record().profile())
-                        .and_then(|p| p.and_then(|p| p.lud16()).filter(|s| !s.is_empty()))
-                    {
-                        handle_lud16(ui, lud16);
+                                    IsFollowing::No => {
+                                        Some(ProfileViewAction::Follow(pubkey.to_owned()))
+                                    }
+                                };
+                            }
+                        }
+                        ProfileType::ReadOnly => {}
                     }
                 });
             });
-        });
 
-        action
-    }
+            ui.add_space(18.0);
+
+            ui.add(display_name_widget(&get_display_name(profile), false));
+
+            ui.add_space(8.0);
+
+            ui.add(about_section_widget(profile));
+
+            ui.horizontal_wrapped(|ui| {
+                if let Some(website_url) = profile
+                    .as_ref()
+                    .map(|p| p.record().profile())
+                    .and_then(|p| p.and_then(|p| p.website()).filter(|s| !s.is_empty()))
+                {
+                    handle_link(ui, website_url);
+                }
+
+                if let Some(lud16) = profile
+                    .as_ref()
+                    .map(|p| p.record().profile())
+                    .and_then(|p| p.and_then(|p| p.lud16()).filter(|s| !s.is_empty()))
+                {
+                    handle_lud16(ui, lud16);
+                }
+            });
+        });
+    });
+
+    action
 }
 
 enum ProfileType {
