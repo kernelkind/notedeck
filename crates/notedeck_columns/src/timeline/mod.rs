@@ -615,6 +615,8 @@ fn setup_initial_timeline(
         timeline.subscription.try_add_local(ndb, filters);
     }
 
+    timeline.subscription.increment();
+
     debug!(
         "querying nostrdb sub {:?} {:?}",
         timeline.subscription, timeline.filter

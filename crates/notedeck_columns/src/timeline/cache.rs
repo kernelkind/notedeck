@@ -1,7 +1,6 @@
 use crate::{
     actionbar::TimelineOpenResult,
     error::Error,
-    //subscriptions::SubRefs,
     timeline::{Timeline, TimelineKind},
 };
 
@@ -199,13 +198,14 @@ impl TimelineCache {
             timeline.subscription.try_add_local(ndb, filter);
             timeline.subscription.try_add_remote(pool, filter);
         } else {
-            timeline.subscription.increment();
             // This should never happen reasoning, self.notes would have
             // failed above if the filter wasn't ready
             error!(
                 "open: filter not ready, so could not setup subscription. this should never happen"
             );
         };
+
+        timeline.subscription.increment();
 
         open_result
     }
