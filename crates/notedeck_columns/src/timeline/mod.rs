@@ -567,9 +567,9 @@ pub fn send_initial_timeline_filter(
             let sub_id = subscriptions::new_sub_id();
             subs.subs.insert(sub_id.clone(), SubKind::Initial);
 
-            if let Err(err) = relay.subscribe(sub_id, new_filters) {
-                error!("error subscribing: {err}");
-            }
+            timeline
+                .subscription
+                .try_add_remote_single(relay, &new_filters);
         }
 
         // we need some data first
@@ -756,8 +756,7 @@ pub fn is_timeline_ready(
 
             //let ck = &timeline.kind;
             //let subid = damus.gen_subid(&SubKind::Column(ck.clone()));
-            let subid = subscriptions::new_sub_id();
-            pool.subscribe(subid, filter);
+            timeline.subscription.try_add_remote(pool, &filter);
             true
         }
     }
