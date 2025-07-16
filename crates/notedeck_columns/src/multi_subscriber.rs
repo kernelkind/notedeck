@@ -270,7 +270,7 @@ pub struct TimelineSub {
     state: SubState,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum SubState {
     NoSub {
         dependers: usize,
@@ -300,6 +300,7 @@ impl Default for TimelineSub {
 
 impl TimelineSub {
     pub fn try_add_local(&mut self, ndb: &Ndb, filter: &[Filter]) {
+        let before = self.state.clone();
         match &mut self.state {
             SubState::NoSub { dependers } => {
                 let Some(sub) = ndb_sub(ndb, filter, "") else {
@@ -333,20 +334,38 @@ impl TimelineSub {
                 dependers: _,
             } => {}
         }
+        tracing::info!(
+            "TimelineSub::try_add_local: {:?} => {:?}",
+            before,
+            self.state
+        );
     }
 
     pub fn try_add_remote_single(&mut self, pool: &mut PoolRelay, filter: &Vec<Filter>) {
+        let before = self.state.clone();
         self.try_add_remote_internal(filter, |subid, filter| {
             if let Err(e) = pool.subscribe(subid, filter) {
                 tracing::error!("Error subscribing to PoolRelay: {e}");
             }
         });
+
+        tracing::info!(
+            "TimelineSub::try_add_remote_single: {:?} => {:?}",
+            before,
+            self.state
+        );
     }
 
     pub fn try_add_remote(&mut self, pool: &mut RelayPool, filter: &Vec<Filter>) {
+        let before = self.state.clone();
         self.try_add_remote_internal(filter, |subid, filter| {
             pool.subscribe(subid, filter);
         });
+        tracing::info!(
+            "TimelineSub::try_add_remote: {:?} => {:?}",
+            before,
+            self.state
+        );
     }
 
     fn try_add_remote_internal(
@@ -388,6 +407,7 @@ impl TimelineSub {
     }
 
     pub fn increment(&mut self) {
+        let before = self.state.clone();
         match &mut self.state {
             SubState::NoSub { dependers } => {
                 *dependers += 1;
@@ -411,6 +431,8 @@ impl TimelineSub {
                 *dependers += 1;
             }
         }
+
+        tracing::info!("TimelineSub::increment: {:?} => {:?}", before, self.state);
     }
 
     pub fn get_local(&self) -> Option<Subscription> {
@@ -432,54 +454,60 @@ impl TimelineSub {
     }
 
     pub fn unsubscribe_or_decrement(&mut self, ndb: &mut Ndb, pool: &mut RelayPool) {
-        match &mut self.state {
-            SubState::NoSub { dependers } => {
-                *dependers -= 1;
-            }
-            SubState::LocalOnly { local, dependers } => {
-                if *dependers > 1 {
+        let before = self.state.clone();
+        's: {
+            match &mut self.state {
+                SubState::NoSub { dependers } => {
                     *dependers -= 1;
-                    return;
                 }
-
-                if let Err(e) = ndb.unsubscribe(*local) {
-                    tracing::error!("Could not unsub ndb: {e}");
-                    return;
-                }
-
-                self.state = SubState::NoSub { dependers: 0 };
-            }
-            SubState::RemoteOnly { remote, dependers } => {
-                if *dependers > 1 {
-                    *dependers -= 1;
-                    return;
-                }
-
-                pool.unsubscribe(remote.to_owned());
-
-                self.state = SubState::NoSub { dependers: 0 };
-            }
-            SubState::Unified { unified, dependers } => {
-                if *dependers > 1 {
-                    *dependers -= 1;
-                    return;
-                }
-
-                pool.unsubscribe(unified.remote.to_owned());
-
-                if let Err(e) = ndb.unsubscribe(unified.local) {
-                    tracing::error!("could not unsub ndb: {e}");
-                    self.state = SubState::LocalOnly {
-                        local: unified.local,
-                        dependers: *dependers,
+                SubState::LocalOnly { local, dependers } => {
+                    if *dependers > 1 {
+                        *dependers -= 1;
+                        break 's;
                     }
-                } else {
-                    self.state = SubState::NoSub {
-                        dependers: *dependers,
-                    };
+
+                    if let Err(e) = ndb.unsubscribe(*local) {
+                        tracing::error!("Could not unsub ndb: {e}");
+                        break 's;
+                    }
+
+                    self.state = SubState::NoSub { dependers: 0 };
+                }
+                SubState::RemoteOnly { remote, dependers } => {
+                    if *dependers > 1 {
+                        *dependers -= 1;
+                        break 's;
+                    }
+
+                    pool.unsubscribe(remote.to_owned());
+
+                    self.state = SubState::NoSub { dependers: 0 };
+                }
+                SubState::Unified { unified, dependers } => {
+                    if *dependers > 1 {
+                        *dependers -= 1;
+                        break 's;
+                    }
+
+                    pool.unsubscribe(unified.remote.to_owned());
+
+                    if let Err(e) = ndb.unsubscribe(unified.local) {
+                        tracing::error!("could not unsub ndb: {e}");
+                        self.state = SubState::LocalOnly {
+                            local: unified.local,
+                            dependers: *dependers,
+                        }
+                    } else {
+                        self.state = SubState::NoSub { dependers: 0 };
+                    }
                 }
             }
         }
+        tracing::info!(
+            "TimelineSub::unsubscribe_or_decrement: {:?} => {:?}",
+            before,
+            self.state
+        );
     }
 
     pub fn get_filter(&self) -> Option<&Vec<Filter>> {
