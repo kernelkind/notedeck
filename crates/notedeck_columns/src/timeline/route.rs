@@ -2,7 +2,7 @@ use crate::{
     nav::RenderNavAction,
     profile::ProfileAction,
     timeline::{thread::Threads, ThreadSelection, TimelineCache, TimelineKind},
-    ui::{self, ProfileView},
+    ui::{self, timeline::ScrollResponse, ProfileView},
 };
 
 use enostr::Pubkey;
@@ -20,7 +20,7 @@ pub fn render_timeline_route(
     note_context: &mut NoteContext,
     jobs: &mut JobsCache,
     scroll_to_top: bool,
-) -> Option<RenderNavAction> {
+) -> Option<ScrollResponse<RenderNavAction>> {
     match kind {
         TimelineKind::List(_)
         | TimelineKind::Search(_)
@@ -29,17 +29,17 @@ pub fn render_timeline_route(
         | TimelineKind::Universe
         | TimelineKind::Hashtag(_)
         | TimelineKind::Generic(_) => {
-            let note_action =
+            let resp =
                 ui::TimelineView::new(kind, timeline_cache, note_context, note_options, jobs, col)
                     .scroll_to_top(scroll_to_top)
                     .ui(ui);
 
-            note_action.map(RenderNavAction::NoteAction)
+            resp.map(|r| r.convert())
         }
 
         TimelineKind::Profile(pubkey) => {
             if depth > 1 {
-                render_profile_route(
+                Some(render_profile_route(
                     pubkey,
                     timeline_cache,
                     col,
@@ -47,7 +47,7 @@ pub fn render_timeline_route(
                     note_options,
                     note_context,
                     jobs,
-                )
+                ))
             } else {
                 // we render profiles like timelines if they are at the root
                 let note_action = ui::TimelineView::new(
@@ -61,7 +61,7 @@ pub fn render_timeline_route(
                 .scroll_to_top(scroll_to_top)
                 .ui(ui);
 
-                note_action.map(RenderNavAction::NoteAction)
+                note_action.map(ScrollResponse::convert)
             }
         }
     }
@@ -76,7 +76,7 @@ pub fn render_thread_route(
     ui: &mut egui::Ui,
     note_context: &mut NoteContext,
     jobs: &mut JobsCache,
-) -> Option<RenderNavAction> {
+) -> ScrollResponse<RenderNavAction> {
     // don't truncate thread notes for now, since they are
     // default truncated everywher eelse
     note_options.set(NoteOptions::Truncate, false);
@@ -90,7 +90,7 @@ pub fn render_thread_route(
     )
     .id_source(col)
     .ui(ui)
-    .map(Into::into)
+    .convert()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -102,7 +102,7 @@ pub fn render_profile_route(
     note_options: NoteOptions,
     note_context: &mut NoteContext,
     jobs: &mut JobsCache,
-) -> Option<RenderNavAction> {
+) -> ScrollResponse<RenderNavAction> {
     let profile_view = ProfileView::new(
         pubkey,
         col,
@@ -113,7 +113,7 @@ pub fn render_profile_route(
     )
     .ui(ui);
 
-    if let Some(action) = profile_view {
+    let action = if let Some(action) = profile_view.action {
         match action {
             ui::profile::ProfileViewAction::EditProfile => note_context
                 .accounts
@@ -131,5 +131,10 @@ pub fn render_profile_route(
         }
     } else {
         None
+    };
+
+    ScrollResponse {
+        action,
+        scroll_id: profile_view.scroll_id,
     }
 }

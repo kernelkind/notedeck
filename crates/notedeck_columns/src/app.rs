@@ -3,7 +3,7 @@ use crate::{
     column::Columns,
     decks::{Decks, DecksCache},
     draft::Drafts,
-    nav::{self, ProcessNavResult},
+    nav::{self, DragConductor, ProcessNavResult},
     options::AppOptions,
     route::Route,
     storage,
@@ -54,6 +54,7 @@ pub struct Damus {
     pub note_options: NoteOptions,
 
     pub unrecognized_args: BTreeSet<String>,
+    pub drag: DragConductor,
 }
 
 fn handle_key_events(input: &egui::InputState, columns: &mut Columns) {
@@ -485,6 +486,7 @@ impl Damus {
             unrecognized_args,
             jobs,
             threads,
+            drag: DragConductor::default(),
         }
     }
 
@@ -534,6 +536,7 @@ impl Damus {
             unrecognized_args: BTreeSet::default(),
             jobs: JobsCache::default(),
             threads: Threads::default(),
+            drag: DragConductor::default(),
         }
     }
 

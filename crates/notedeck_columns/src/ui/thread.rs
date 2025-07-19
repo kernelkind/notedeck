@@ -8,6 +8,7 @@ use notedeck_ui::note::NoteResponse;
 use notedeck_ui::{NoteOptions, NoteView};
 
 use crate::timeline::thread::{NoteSeenFlags, ParentState, Threads};
+use crate::ui::timeline::ScrollResponse;
 
 pub struct ThreadView<'a, 'd> {
     threads: &'a mut Threads,
@@ -46,7 +47,7 @@ impl<'a, 'd> ThreadView<'a, 'd> {
         self
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<NoteAction> {
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> ScrollResponse<NoteAction> {
         let txn = Transaction::new(self.note_context.ndb).expect("txn");
 
         let mut scroll_area = egui::ScrollArea::vertical()
@@ -67,7 +68,10 @@ impl<'a, 'd> ThreadView<'a, 'd> {
 
         ui.data_mut(|d| d.insert_temp(offset_id, output.state.offset.y));
 
-        output.inner
+        ScrollResponse {
+            action: output.inner,
+            scroll_id: self.id_source,
+        }
     }
 
     fn notes(&mut self, ui: &mut egui::Ui, txn: &Transaction) -> Option<NoteAction> {

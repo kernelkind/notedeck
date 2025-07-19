@@ -21,6 +21,7 @@ use crate::{
         profile::EditProfileView,
         search::{FocusState, SearchView},
         support::SupportView,
+        timeline::ScrollResponse,
         wallet::{get_default_zap_state, WalletAction, WalletState, WalletView},
         RelayView,
     },
@@ -476,6 +477,11 @@ fn process_render_nav_action(
     }
 }
 
+enum RenderNavBodyResponse {
+    Scroll(ScrollResponse<RenderNavAction>),
+    Action(RenderNavAction),
+}
+
 fn render_nav_body(
     ui: &mut egui::Ui,
     app: &mut Damus,
@@ -484,7 +490,7 @@ fn render_nav_body(
     depth: usize,
     col: usize,
     inner_rect: egui::Rect,
-) -> Option<RenderNavAction> {
+) -> Option<RenderNavBodyResponse> {
     let current_account_has_wallet = get_current_wallet(ctx.accounts, ctx.global_wallet).is_some();
     let mut note_context = NoteContext {
         ndb: ctx.ndb,
@@ -524,9 +530,9 @@ fn render_nav_body(
                 app.options.remove(AppOptions::ScrollToTop);
             }
 
-            nav_action
+            nav_action.map(RenderNavBodyResponse::Scroll)
         }
-        Route::Thread(selection) => render_thread_route(
+        Route::Thread(selection) => Some(RenderNavBodyResponse::Scroll(render_thread_route(
             &mut app.threads,
             selection,
             col,
@@ -534,7 +540,7 @@ fn render_nav_body(
             ui,
             &mut note_context,
             &mut app.jobs,
-        ),
+        ))),
         Route::Accounts(amr) => {
             let mut action = render_accounts_route(
                 ui,
@@ -550,10 +556,12 @@ fn render_nav_body(
             action
                 .accounts_action
                 .map(|f| RenderNavAction::SwitchingAction(SwitchingAction::Accounts(f)))
+                .map(RenderNavBodyResponse::Action)
         }
         Route::Relays => RelayView::new(ctx.pool, &mut app.view_state.id_string_map)
             .ui(ui)
-            .map(RenderNavAction::RelayAction),
+            .map(RenderNavAction::RelayAction)
+            .map(RenderNavBodyResponse::Action),
         Route::Reply(id) => {
             let txn = if let Ok(txn) = Transaction::new(ctx.ndb) {
                 txn
@@ -594,7 +602,7 @@ fn render_nav_body(
                 response.action
             };
 
-            action.map(Into::into)
+            action.map(Into::into).map(RenderNavBodyResponse::Action)
         }
         Route::Quote(id) => {
             let txn = Transaction::new(ctx.ndb).expect("txn");
@@ -627,7 +635,10 @@ fn render_nav_body(
                 })
                 .inner;
 
-            response.action.map(Into::into)
+            response
+                .action
+                .map(Into::into)
+                .map(RenderNavBodyResponse::Action)
         }
         Route::ComposeNote => {
             let kp = ctx.accounts.get_selected_account().key.to_full()?;
@@ -645,7 +656,10 @@ fn render_nav_body(
             )
             .ui(&txn, ui);
 
-            post_response.action.map(Into::into)
+            post_response
+                .action
+                .map(Into::into)
+                .map(RenderNavBodyResponse::Action)
         }
         Route::AddColumn(route) => {
             render_add_column_routes(ui, app, ctx, col, route);
@@ -683,6 +697,7 @@ fn render_nav_body(
             )
             .show(ui)
             .map(RenderNavAction::NoteAction)
+            .map(RenderNavBodyResponse::Action)
         }
         Route::NewDeck => {
             let id = ui.id().with("new-deck");
@@ -707,7 +722,7 @@ fn render_nav_body(
                     .get_first_router()
                     .go_back();
             }
-            resp
+            resp.map(RenderNavBodyResponse::Action)
         }
         Route::EditDeck(index) => {
             let mut action = None;
@@ -739,7 +754,7 @@ fn render_nav_body(
                     .go_back();
             }
 
-            action
+            action.map(RenderNavBodyResponse::Action)
         }
         Route::EditProfile(pubkey) => {
             let mut action = None;
@@ -752,7 +767,7 @@ fn render_nav_body(
                 tracing::error!(
                     "No profile state when navigating to EditProfile... was handle_navigating_edit_profile not called?"
                 );
-                return action;
+                return None;
             };
 
             if EditProfileView::new(state, ctx.img_cache).ui(ui) {
@@ -763,7 +778,7 @@ fn render_nav_body(
                 }
             }
 
-            action
+            action.map(RenderNavBodyResponse::Action)
         }
         Route::Wallet(wallet_type) => {
             let state = match wallet_type {
@@ -813,6 +828,7 @@ fn render_nav_body(
             WalletView::new(state)
                 .ui(ui)
                 .map(RenderNavAction::WalletAction)
+                .map(RenderNavBodyResponse::Action)
         }
         Route::CustomizeZapAmount(target) => {
             let txn = Transaction::new(ctx.ndb).expect("txn");
@@ -830,11 +846,11 @@ fn render_nav_body(
                     .column_mut(col)
                     .router_mut()
                     .go_back();
-                RenderNavAction::NoteAction(NoteAction::Zap(notedeck::ZapAction::Send(
-                    notedeck::note::ZapTargetAmount {
+                RenderNavBodyResponse::Action(RenderNavAction::NoteAction(NoteAction::Zap(
+                    notedeck::ZapAction::Send(notedeck::note::ZapTargetAmount {
                         target: target.clone(),
                         specified_msats: Some(msats),
-                    },
+                    }),
                 )))
             })
         }
@@ -888,13 +904,22 @@ pub fn render_nav(
                     .show_move_button(!narrow)
                     .show_delete_button(!narrow)
                     .show(ui),
-                    NavUiType::Body => render_nav_body(ui, app, ctx, route, 1, col, inner_rect),
+                    NavUiType::Body => render_nav_body(ui, app, ctx, route, 1, col, inner_rect)
+                        .and_then(|a| match a {
+                            RenderNavBodyResponse::Scroll(scroll_response) => {
+                                scroll_response.action
+                            }
+                            RenderNavBodyResponse::Action(render_nav_action) => {
+                                Some(render_nav_action)
+                            }
+                        }),
                 });
 
             return RenderNavResponse::new(col, NotedeckNavResponse::Popup(Box::new(resp)));
         }
     };
 
+    let mut scroll_id = None;
     let nav_response = Nav::new(
         &app.columns(ctx.accounts)
             .column(col)
@@ -929,12 +954,134 @@ pub fn render_nav(
 
         NavUiType::Body => {
             if let Some(top) = nav.routes().last() {
-                render_nav_body(ui, app, ctx, top, nav.routes().len(), col, inner_rect)
+                render_nav_body(ui, app, ctx, top, nav.routes().len(), col, inner_rect).and_then(
+                    |a| match a {
+                        RenderNavBodyResponse::Scroll(scroll_response) => {
+                            scroll_id = Some(scroll_response.scroll_id);
+                            scroll_response.action
+                        }
+                        RenderNavBodyResponse::Action(render_nav_action) => Some(render_nav_action),
+                    },
+                )
             } else {
                 None
             }
         }
     });
 
+    if let Some(scroll_id) = scroll_id {
+        if let Some(drag_id) = nav_response.drag_id {
+            app.drag.update(drag_id, scroll_id.with("area"), ui.ctx());
+        } else {
+            tracing::info!("no drag id");
+        }
+    } else {
+        tracing::info!("No scroll id");
+    }
+
     RenderNavResponse::new(col, NotedeckNavResponse::Nav(Box::new(nav_response)))
+}
+
+#[derive(Default)]
+pub struct DragConductor {
+    state: Option<DragState>,
+}
+
+struct DragState {
+    start_pos: egui::Pos2,
+    cur_direction: Direction,
+}
+
+#[derive(Debug, PartialEq)]
+enum Direction {
+    Horizontal,
+    Vertical,
+}
+
+impl DragConductor {
+    pub fn update(&mut self, horizontal: egui::Id, vertical: egui::Id, ctx: &egui::Context) {
+        let horiz_being_dragged = ctx.is_being_dragged(horizontal);
+        let vert_being_dragged = ctx.is_being_dragged(vertical);
+        tracing::info!(
+            "dragging horiz: {horiz_being_dragged}, dragging vert: {vert_being_dragged}"
+        );
+        // tracing::info!("drag started: {:?}", ctx.drag_started_id());
+        // tracing::info!("dragged: {:?}", ctx.dragged_id());
+
+        // if ctx.drag_stopped_id().is_some() {
+        //     self.start_pos = None;
+        //     return;
+        // }
+
+        if !ctx.input(|i| i.pointer.primary_down()) {
+            tracing::info!("Primary not down, returning");
+            return;
+        }
+
+        if let Some(drag_id) = ctx.drag_started_id() {
+            let Some(cur_pos) = ctx.pointer_interact_pos() else {
+                tracing::info!("no pointer");
+                return;
+            };
+
+            let cur_direction = if drag_id == horizontal {
+                Direction::Horizontal
+            } else {
+                Direction::Vertical
+            };
+
+            self.state = Some(DragState {
+                start_pos: cur_pos,
+                cur_direction,
+            });
+
+            tracing::info!("just got drag");
+            return;
+        }
+
+        let Some(state) = &mut self.state else {
+            tracing::info!("no state");
+            return;
+        };
+
+        let Some(cur_pos) = ctx.pointer_interact_pos() else {
+            tracing::info!("no pointer 2");
+            return;
+        };
+
+        // if !horiz_being_dragged && !vert_being_dragged {
+        //     return;
+        // }
+
+        let dx = (state.start_pos.x - cur_pos.x).abs();
+        let dy = (state.start_pos.y - cur_pos.y).abs();
+
+        tracing::info!(
+            "start pos: {:?}, cur pos: {:?}, dx: {dx}, dy: {dy}",
+            state.start_pos,
+            cur_pos
+        );
+
+        let new_direction = if dx > dy {
+            Direction::Horizontal
+        } else {
+            Direction::Vertical
+        };
+
+        if new_direction == Direction::Horizontal && state.cur_direction == Direction::Vertical {
+            // drag is occuring mostly in the horizontal direction
+            ctx.set_dragged_id(horizontal);
+            let new_dir = Direction::Horizontal;
+            tracing::info!("Set new direction: {:?}", new_dir);
+            state.cur_direction = new_dir;
+        } else if new_direction == Direction::Vertical
+            && state.cur_direction == Direction::Horizontal
+        {
+            // drag is occuring mostly in the vertical direction
+            let new_dir = Direction::Vertical;
+            tracing::info!("Set new direction: {:?}", new_dir);
+            state.cur_direction = new_dir;
+            ctx.set_dragged_id(vertical);
+        }
+    }
 }

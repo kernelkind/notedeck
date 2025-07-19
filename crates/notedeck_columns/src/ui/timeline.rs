@@ -49,7 +49,7 @@ impl<'a, 'd> TimelineView<'a, 'd> {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<NoteAction> {
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<ScrollResponse<NoteAction>> {
         timeline_ui(
             ui,
             self.timeline_id,
@@ -74,6 +74,23 @@ impl<'a, 'd> TimelineView<'a, 'd> {
     }
 }
 
+pub struct ScrollResponse<T> {
+    pub action: Option<T>,
+    pub scroll_id: egui::Id,
+}
+
+impl<T> ScrollResponse<T> {
+    pub fn convert<U>(self) -> ScrollResponse<U>
+    where
+        T: Into<U>,
+    {
+        ScrollResponse {
+            action: self.action.map(Into::into),
+            scroll_id: self.scroll_id,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn timeline_ui(
     ui: &mut egui::Ui,
@@ -85,7 +102,7 @@ fn timeline_ui(
     jobs: &mut JobsCache,
     col: usize,
     scroll_to_top: bool,
-) -> Option<NoteAction> {
+) -> Option<ScrollResponse<NoteAction>> {
     //padding(4.0, ui, |ui| ui.heading("Notifications"));
     /*
     let font_id = egui::TextStyle::Body.resolve(ui.style());
@@ -194,7 +211,7 @@ fn timeline_ui(
             .data_mut(|d| d.insert_temp(show_top_button_id, true));
     }
 
-    scroll_output.inner.or_else(|| {
+    let action = scroll_output.inner.or_else(|| {
         // if we're scrolling, return that as a response. We need this
         // for auto-closing the side menu
 
@@ -205,6 +222,11 @@ fn timeline_ui(
         } else {
             None
         }
+    });
+
+    Some(ScrollResponse {
+        action,
+        scroll_id: scroll_output.id,
     })
 }
 

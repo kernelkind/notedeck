@@ -9,7 +9,7 @@ use tracing::error;
 
 use crate::{
     timeline::{TimelineCache, TimelineKind},
-    ui::timeline::{tabs_ui, TimelineTabView},
+    ui::timeline::{tabs_ui, ScrollResponse, TimelineTabView},
 };
 use notedeck::{
     name::get_display_name, profile::get_profile_url, IsFollowing, NoteAction, NoteContext,
@@ -58,7 +58,7 @@ impl<'a, 'd> ProfileView<'a, 'd> {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<ProfileViewAction> {
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> ScrollResponse<ProfileViewAction> {
         let scroll_id = egui::Id::new(("profile_scroll", self.col_id, self.pubkey));
         let offset_id = scroll_id.with("scroll_offset");
 
@@ -123,7 +123,10 @@ impl<'a, 'd> ProfileView<'a, 'd> {
 
         ui.data_mut(|d| d.insert_temp(offset_id, output.state.offset.y));
 
-        output.inner
+        ScrollResponse {
+            action: output.inner,
+            scroll_id: scroll_id,
+        }
     }
 
     fn profile_body(
