@@ -128,6 +128,8 @@ fn timeline_ui(
         egui::Id::new(("tlscroll", timeline.view_id(col)))
     };
 
+    let tmp_scroll = ui.id().with(scroll_id).with("area");
+
     let show_top_button_id = ui.id().with((scroll_id, "at_top"));
 
     let show_top_button = ui
@@ -226,7 +228,7 @@ fn timeline_ui(
 
     Some(ScrollResponse {
         action,
-        scroll_id: scroll_output.id,
+        scroll_id: tmp_scroll,
     })
 }
 

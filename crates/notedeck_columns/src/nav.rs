@@ -927,6 +927,7 @@ pub fn render_nav(
             .routes()
             .clone(),
     )
+    .with_conductor(&app.drag.clone())
     .navigating(
         app.columns_mut(ctx.accounts)
             .column_mut(col)
@@ -969,119 +970,9 @@ pub fn render_nav(
         }
     });
 
-    if let Some(scroll_id) = scroll_id {
-        if let Some(drag_id) = nav_response.drag_id {
-            app.drag.update(drag_id, scroll_id.with("area"), ui.ctx());
-        } else {
-            tracing::info!("no drag id");
-        }
-    } else {
-        tracing::info!("No scroll id");
+    if let Some(conductor) = &nav_response.conductor {
+        app.drag = conductor.clone();
     }
 
     RenderNavResponse::new(col, NotedeckNavResponse::Nav(Box::new(nav_response)))
-}
-
-#[derive(Default)]
-pub struct DragConductor {
-    state: Option<DragState>,
-}
-
-struct DragState {
-    start_pos: egui::Pos2,
-    cur_direction: Direction,
-}
-
-#[derive(Debug, PartialEq)]
-enum Direction {
-    Horizontal,
-    Vertical,
-}
-
-impl DragConductor {
-    pub fn update(&mut self, horizontal: egui::Id, vertical: egui::Id, ctx: &egui::Context) {
-        let horiz_being_dragged = ctx.is_being_dragged(horizontal);
-        let vert_being_dragged = ctx.is_being_dragged(vertical);
-        tracing::info!(
-            "dragging horiz: {horiz_being_dragged}, dragging vert: {vert_being_dragged}"
-        );
-        // tracing::info!("drag started: {:?}", ctx.drag_started_id());
-        // tracing::info!("dragged: {:?}", ctx.dragged_id());
-
-        // if ctx.drag_stopped_id().is_some() {
-        //     self.start_pos = None;
-        //     return;
-        // }
-
-        if !ctx.input(|i| i.pointer.primary_down()) {
-            tracing::info!("Primary not down, returning");
-            return;
-        }
-
-        if let Some(drag_id) = ctx.drag_started_id() {
-            let Some(cur_pos) = ctx.pointer_interact_pos() else {
-                tracing::info!("no pointer");
-                return;
-            };
-
-            let cur_direction = if drag_id == horizontal {
-                Direction::Horizontal
-            } else {
-                Direction::Vertical
-            };
-
-            self.state = Some(DragState {
-                start_pos: cur_pos,
-                cur_direction,
-            });
-
-            tracing::info!("just got drag");
-            return;
-        }
-
-        let Some(state) = &mut self.state else {
-            tracing::info!("no state");
-            return;
-        };
-
-        let Some(cur_pos) = ctx.pointer_interact_pos() else {
-            tracing::info!("no pointer 2");
-            return;
-        };
-
-        // if !horiz_being_dragged && !vert_being_dragged {
-        //     return;
-        // }
-
-        let dx = (state.start_pos.x - cur_pos.x).abs();
-        let dy = (state.start_pos.y - cur_pos.y).abs();
-
-        tracing::info!(
-            "start pos: {:?}, cur pos: {:?}, dx: {dx}, dy: {dy}",
-            state.start_pos,
-            cur_pos
-        );
-
-        let new_direction = if dx > dy {
-            Direction::Horizontal
-        } else {
-            Direction::Vertical
-        };
-
-        if new_direction == Direction::Horizontal && state.cur_direction == Direction::Vertical {
-            // drag is occuring mostly in the horizontal direction
-            ctx.set_dragged_id(horizontal);
-            let new_dir = Direction::Horizontal;
-            tracing::info!("Set new direction: {:?}", new_dir);
-            state.cur_direction = new_dir;
-        } else if new_direction == Direction::Vertical
-            && state.cur_direction == Direction::Horizontal
-        {
-            // drag is occuring mostly in the vertical direction
-            let new_dir = Direction::Vertical;
-            tracing::info!("Set new direction: {:?}", new_dir);
-            state.cur_direction = new_dir;
-            ctx.set_dragged_id(vertical);
-        }
-    }
 }

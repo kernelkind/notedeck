@@ -56,6 +56,8 @@ impl<'a, 'd> ThreadView<'a, 'd> {
             .auto_shrink([false, false])
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible);
 
+        let tmp_scroll_id = ui.id().with(self.id_source).with("area");
+
         let offset_id = self
             .id_source
             .with(("scroll_offset", self.selected_note_id));
@@ -70,7 +72,7 @@ impl<'a, 'd> ThreadView<'a, 'd> {
 
         ScrollResponse {
             action: output.inner,
-            scroll_id: self.id_source,
+            scroll_id: tmp_scroll_id,
         }
     }
 

@@ -3,7 +3,7 @@ use crate::{
     column::Columns,
     decks::{Decks, DecksCache},
     draft::Drafts,
-    nav::{self, DragConductor, ProcessNavResult},
+    nav::{self, ProcessNavResult},
     options::AppOptions,
     route::Route,
     storage,
@@ -16,6 +16,7 @@ use crate::{
 };
 
 use egui_extras::{Size, StripBuilder};
+use egui_nav::DragConductor;
 use enostr::{ClientMessage, PoolRelay, Pubkey, RelayEvent, RelayMessage, RelayPool};
 use nostrdb::Transaction;
 use notedeck::{
