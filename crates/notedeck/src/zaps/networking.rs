@@ -1,5 +1,5 @@
-use crate::{zaps::ZapTargetOwned, ZapError};
-use enostr::NoteId;
+use crate::{error::EndpointError, zaps::ZapTargetOwned, ZapError};
+use enostr::{NoteId, Pubkey};
 use nostrdb::NoteBuilder;
 use poll_promise::Promise;
 use serde::Deserialize;
@@ -119,6 +119,58 @@ pub struct LNUrlPayResponseRaw {
     #[allow(dead_code)]
     #[serde(rename = "maxSendable")]
     max_sendable: u64,
+}
+
+impl From<LNUrlPayResponseRaw> for LNUrlPayResponse {
+    fn from(value: LNUrlPayResponseRaw) -> Self {
+        let nostr_pubkey = match Pubkey::from_hex(&value.nostr_pubkey) {
+            Ok(pk) => PubkeyWrapper::Pubkey(pk),
+            Err(_) => PubkeyWrapper::DecodeFailed(value.nostr_pubkey),
+        };
+
+        let callback_url = match Url::parse(&value.callback_url) {
+            Ok(url) => UrlWrapper::Url(url),
+            Err(e) => UrlWrapper::DecodeFailed {
+                raw: value.callback_url,
+                error: EndpointError(format!("invalid callback url from endpoint: {e}")),
+            },
+        };
+
+        Self {
+            allow_nostr: value.allow_nostr,
+            nostr_pubkey,
+            callback_url,
+            min_sendable: value.min_sendable,
+            max_sendable: value.max_sendable,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LNUrlPayResponse {
+    pub allow_nostr: bool,
+    pub nostr_pubkey: PubkeyWrapper,
+    pub callback_url: UrlWrapper,
+    pub min_sendable: u64,
+    pub max_sendable: u64,
+}
+
+#[derive(Clone, Debug)]
+pub enum PubkeyWrapper {
+    Pubkey(Pubkey),
+    DecodeFailed(String),
+}
+
+#[derive(Clone, Debug)]
+pub enum UrlWrapper {
+    Url(Url),
+    DecodeFailed { raw: String, error: EndpointError },
+}
+
+#[derive(Clone, Debug)]
+pub struct PayEntry {
+    pub url: Url,
+    pub response: LNUrlPayResponse,
 }
 
 #[derive(Debug, Deserialize)]
