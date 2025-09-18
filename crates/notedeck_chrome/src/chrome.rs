@@ -382,6 +382,9 @@ impl notedeck::App for Chrome {
         if let Some(action) = self.show(ctx, ui) {
             action.process(ctx, self, ui);
         }
+
+        ctx.drag.update(ui.ctx());
+
         // TODO: unify this constant with the columns side panel width. ui crate?
         None
     }

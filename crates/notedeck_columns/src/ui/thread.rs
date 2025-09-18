@@ -60,6 +60,10 @@ impl<'a, 'd> ThreadView<'a, 'd> {
 
         let output = scroll_area.show(ui, |ui| self.notes(ui, &txn));
 
+        self.note_context
+            .drag
+            .register_highest_vertical_scroll(&output);
+
         let mut resp = output.inner;
 
         if let Some(NoteAction::Note {

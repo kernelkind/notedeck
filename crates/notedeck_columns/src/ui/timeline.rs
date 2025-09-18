@@ -6,7 +6,7 @@ use nostrdb::{Note, ProfileRecord, Transaction};
 use notedeck::fonts::get_font_size;
 use notedeck::name::get_display_name;
 use notedeck::ui::is_narrow;
-use notedeck::{tr_plural, JobsCache, Muted, NotedeckTextStyle};
+use notedeck::{tr_plural, IdType, JobsCache, Muted, NotedeckTextStyle};
 use notedeck_ui::app_images::{like_image, repost_image};
 use notedeck_ui::{ProfilePic, ProfilePreview};
 use std::f32::consts::PI;
@@ -190,6 +190,12 @@ fn timeline_ui(
         )
         .show(ui)
     });
+
+    note_context.drag.register_id(
+        IdType::ScrollArea(&scroll_output),
+        notedeck::DragDirection::Vertical,
+        notedeck::DragPriority::Medium, // can contain other objects which could take vertical scroll position (like threads)
+    );
 
     let at_top_after_scroll = scroll_output.state.offset.y == 0.0;
     let cur_show_top_button = ui.ctx().data(|d| d.get_temp::<bool>(show_top_button_id));
