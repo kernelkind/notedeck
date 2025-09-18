@@ -15,19 +15,17 @@ use crate::{
     },
     ui::{
         self,
-        add_column::{render_add_column_routes, AddColumnView},
+        add_column::render_add_column_routes,
         column::NavTitle,
         configure_deck::ConfigureDeckView,
         edit_deck::{EditDeckResponse, EditDeckView},
-        note::{custom_zap::CustomZapView, NewPostAction, PostAction, PostType, QuoteRepostView},
-        onboarding::FollowPackOnboardingView,
+        note::{custom_zap::CustomZapView, NewPostAction, PostAction, PostType},
         profile::EditProfileView,
         search::{FocusState, SearchView},
         settings::SettingsAction,
         support::SupportView,
         wallet::{get_default_zap_state, WalletAction, WalletState, WalletView},
-        AccountsView, PostReplyView, PostView, ProfileView, RelayView, SettingsView, ThreadView,
-        TimelineView,
+        RelayView, SettingsView,
     },
     Damus,
 };
@@ -1032,83 +1030,4 @@ pub fn render_nav(
         });
 
     RenderNavResponse::new(col, NotedeckNavResponse::Nav(Box::new(nav_response)))
-}
-
-fn get_scroll_id(
-    top: &Route,
-    depth: usize,
-    timeline_cache: &TimelineCache,
-    col: usize,
-) -> Option<egui::Id> {
-    match top {
-        Route::Timeline(timeline_kind) => match timeline_kind {
-            TimelineKind::List(_)
-            | TimelineKind::Search(_)
-            | TimelineKind::Algo(_)
-            | TimelineKind::Notifications(_)
-            | TimelineKind::Universe
-            | TimelineKind::Hashtag(_)
-            | TimelineKind::Generic(_) => {
-                TimelineView::scroll_id(timeline_cache, timeline_kind, col)
-            }
-            TimelineKind::Profile(pubkey) => {
-                if depth > 1 {
-                    Some(ProfileView::scroll_id(col, pubkey))
-                } else {
-                    TimelineView::scroll_id(timeline_cache, timeline_kind, col)
-                }
-            }
-        },
-        Route::Thread(thread_selection) => Some(ThreadView::scroll_id(
-            thread_selection.selected_or_root(),
-            col,
-        )),
-        Route::Accounts(accounts_route) => match accounts_route {
-            crate::accounts::AccountsRoute::Accounts => Some(AccountsView::scroll_id()),
-            crate::accounts::AccountsRoute::AddAccount => None,
-            crate::accounts::AccountsRoute::Onboarding => {
-                Some(FollowPackOnboardingView::scroll_id())
-            }
-        },
-        Route::Reply(note_id) => Some(PostReplyView::scroll_id(col, note_id.bytes())),
-        Route::Quote(note_id) => Some(QuoteRepostView::scroll_id(col, note_id.bytes())),
-        Route::Relays => Some(RelayView::scroll_id()),
-        Route::ComposeNote => Some(PostView::scroll_id()),
-        Route::AddColumn(add_column_route) => Some(AddColumnView::scroll_id(add_column_route)),
-        Route::EditProfile(_) => Some(EditProfileView::scroll_id()),
-        Route::Support => None,
-        Route::NewDeck => Some(ConfigureDeckView::scroll_id()),
-        Route::Search => Some(SearchView::scroll_id()),
-        Route::EditDeck(_) => None,
-        Route::Wallet(_) => None,
-        Route::CustomizeZapAmount(_) => None,
-        Route::Settings => None,
-    }
-}
-
-/// Does the corresponding View for the route use a egui::Frame to wrap the ScrollArea?
-/// TODO(kernelkind): this is quite hacky...
-fn route_uses_frame(route: &Route) -> bool {
-    match route {
-        Route::Accounts(accounts_route) => match accounts_route {
-            crate::accounts::AccountsRoute::Accounts => true,
-            crate::accounts::AccountsRoute::AddAccount => false,
-            crate::accounts::AccountsRoute::Onboarding => false,
-        },
-        Route::Relays => true,
-        Route::Timeline(_) => false,
-        Route::Thread(_) => false,
-        Route::Reply(_) => false,
-        Route::Quote(_) => false,
-        Route::Settings => false,
-        Route::ComposeNote => false,
-        Route::AddColumn(_) => false,
-        Route::EditProfile(_) => false,
-        Route::Support => false,
-        Route::NewDeck => false,
-        Route::Search => false,
-        Route::EditDeck(_) => false,
-        Route::Wallet(_) => false,
-        Route::CustomizeZapAmount(_) => false,
-    }
 }
