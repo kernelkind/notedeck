@@ -545,6 +545,7 @@ fn render_nav_body(
         clipboard: ctx.clipboard,
         i18n: ctx.i18n,
         global_wallet: ctx.global_wallet,
+        drag: ctx.drag,
     };
     match top {
         Route::Timeline(kind) => {

@@ -4,6 +4,7 @@ mod context;
 pub use action::{NoteAction, ScrollInfo, ZapAction, ZapTargetAmount};
 pub use context::{BroadcastContext, ContextSelection, NoteContextSelection};
 
+use crate::drag::Drag;
 use crate::Accounts;
 use crate::GlobalWallet;
 use crate::JobPool;
@@ -30,6 +31,7 @@ pub struct NoteContext<'d> {
     pub job_pool: &'d mut JobPool,
     pub unknown_ids: &'d mut UnknownIds,
     pub clipboard: &'d mut egui_winit::clipboard::Clipboard,
+    pub drag: &'d mut Drag,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
