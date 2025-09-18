@@ -2,7 +2,7 @@ use std::mem;
 
 use egui::{Layout, ScrollArea};
 use nostrdb::Ndb;
-use notedeck::{tr, Images, JobPool, JobsCache, Localization};
+use notedeck::{tr, Drag, Images, JobPool, JobsCache, Localization};
 use notedeck_ui::{
     colors,
     nip51_set::{Nip51SetUiCache, Nip51SetWidget, Nip51SetWidgetAction, Nip51SetWidgetFlags},
@@ -19,6 +19,7 @@ pub struct FollowPackOnboardingView<'a> {
     loc: &'a mut Localization,
     job_pool: &'a mut JobPool,
     jobs: &'a mut JobsCache,
+    drag: &'a mut Drag,
 }
 
 pub enum OnboardingResponse {
@@ -32,6 +33,7 @@ pub enum FollowPacksResponse {
 }
 
 impl<'a> FollowPackOnboardingView<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         onboarding: &'a mut Onboarding,
         ui_state: &'a mut Nip51SetUiCache,
@@ -40,6 +42,7 @@ impl<'a> FollowPackOnboardingView<'a> {
         loc: &'a mut Localization,
         job_pool: &'a mut JobPool,
         jobs: &'a mut JobsCache,
+        drag: &'a mut Drag,
     ) -> Self {
         Self {
             onboarding,
@@ -49,6 +52,7 @@ impl<'a> FollowPackOnboardingView<'a> {
             loc,
             job_pool,
             jobs,
+            drag,
         }
     }
 
@@ -66,7 +70,7 @@ impl<'a> FollowPackOnboardingView<'a> {
         let max_height = ui.available_height() - 48.0;
 
         let mut action = None;
-        ScrollArea::vertical()
+        let out = ScrollArea::vertical()
             .id_salt(Self::scroll_id())
             .max_height(max_height)
             .show(ui, |ui| {
@@ -104,6 +108,8 @@ impl<'a> FollowPackOnboardingView<'a> {
                     );
                 })
             });
+
+        self.drag.register_highest_vertical_scroll(&out);
 
         ui.with_layout(Layout::top_down(egui::Align::Center), |ui| {
             ui.add_space(4.0);

@@ -644,7 +644,7 @@ impl<'a> SettingsView<'a> {
         Frame::default()
             .inner_margin(Margin::symmetric(10, 10))
             .show(ui, |ui| {
-                ScrollArea::vertical().show(ui, |ui| {
+                let out = ScrollArea::vertical().show(ui, |ui| {
                     if let Some(new_action) = self.appearance_section(ui) {
                         action = Some(new_action);
                     }
@@ -671,6 +671,10 @@ impl<'a> SettingsView<'a> {
                         action = Some(new_action);
                     }
                 });
+
+                self.note_context
+                    .drag
+                    .register_highest_vertical_scroll(&out);
             });
 
         action

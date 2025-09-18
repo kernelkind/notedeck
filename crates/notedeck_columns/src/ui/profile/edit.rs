@@ -3,6 +3,7 @@ use core::f32;
 use egui::{vec2, Button, CornerRadius, Layout, Margin, RichText, ScrollArea, TextEdit};
 use egui_winit::clipboard::Clipboard;
 use enostr::ProfileState;
+use notedeck::Drag;
 use notedeck::{profile::unwrap_profile_url, tr, Images, Localization, NotedeckTextStyle};
 use notedeck_ui::context_menu::{input_context, PasteBehavior};
 use notedeck_ui::{profile::banner, ProfilePic};
@@ -12,6 +13,7 @@ pub struct EditProfileView<'a> {
     clipboard: &'a mut Clipboard,
     img_cache: &'a mut Images,
     i18n: &'a mut Localization,
+    drag: &'a mut Drag,
 }
 
 impl<'a> EditProfileView<'a> {
@@ -20,12 +22,14 @@ impl<'a> EditProfileView<'a> {
         state: &'a mut ProfileState,
         img_cache: &'a mut Images,
         clipboard: &'a mut Clipboard,
+        drag: &'a mut Drag,
     ) -> Self {
         Self {
             i18n,
             state,
             img_cache,
             clipboard,
+            drag,
         }
     }
 
@@ -35,7 +39,7 @@ impl<'a> EditProfileView<'a> {
 
     // return true to save
     pub fn ui(&mut self, ui: &mut egui::Ui) -> bool {
-        ScrollArea::vertical()
+        let out = ScrollArea::vertical()
             .id_salt(EditProfileView::scroll_id())
             .stick_to_bottom(true)
             .show(ui, |ui| {
@@ -72,8 +76,11 @@ impl<'a> EditProfileView<'a> {
                 });
 
                 save
-            })
-            .inner
+            });
+
+        self.drag.register_highest_vertical_scroll(&out);
+
+        out.inner
     }
 
     fn inner(&mut self, ui: &mut egui::Ui, padding: f32) {

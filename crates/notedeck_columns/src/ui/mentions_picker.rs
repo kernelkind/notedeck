@@ -1,7 +1,7 @@
 use egui::{vec2, FontId, Layout, Pos2, Rect, ScrollArea, UiBuilder, Vec2b};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
 use notedeck::{
-    fonts::get_font_size, name::get_display_name, profile::get_profile_url, Images,
+    fonts::get_font_size, name::get_display_name, profile::get_profile_url, Drag, Images,
     NotedeckTextStyle,
 };
 use notedeck_ui::{
@@ -18,6 +18,7 @@ pub struct MentionPickerView<'a> {
     txn: &'a Transaction,
     img_cache: &'a mut Images,
     results: &'a Vec<&'a [u8; 32]>,
+    drag: &'a mut Drag,
 }
 
 pub enum MentionPickerResponse {
@@ -29,6 +30,7 @@ impl<'a> MentionPickerView<'a> {
     pub fn new(
         img_cache: &'a mut Images,
         ndb: &'a Ndb,
+        drag: &'a mut Drag,
         txn: &'a Transaction,
         results: &'a Vec<&'a [u8; 32]>,
     ) -> Self {
@@ -37,6 +39,7 @@ impl<'a> MentionPickerView<'a> {
             txn,
             img_cache,
             results,
+            drag,
         }
     }
 
@@ -104,6 +107,8 @@ impl<'a> MentionPickerView<'a> {
                             .auto_shrink(Vec2b::FALSE)
                             .show(ui, |ui| self.show(ui, width));
                         ui.advance_cursor_after_rect(rect);
+
+                        self.drag.register_highest_vertical_scroll(&scroll_resp);
 
                         if close_button_resp {
                             MentionPickerResponse::DeleteMention

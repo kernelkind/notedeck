@@ -53,10 +53,15 @@ impl<'a, 'd> QuoteRepostView<'a, 'd> {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) -> PostResponse {
-        ScrollArea::vertical()
+        let out = ScrollArea::vertical()
             .id_salt(self.scroll_id)
-            .show(ui, |ui| self.show_internal(ui))
-            .inner
+            .show(ui, |ui| self.show_internal(ui));
+
+        self.note_context
+            .drag
+            .register_highest_vertical_scroll(&out);
+
+        out.inner
     }
 
     fn show_internal(&mut self, ui: &mut egui::Ui) -> PostResponse {

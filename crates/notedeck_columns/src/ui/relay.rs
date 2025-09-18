@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::ui::{Preview, PreviewConfig};
 use egui::{Align, Button, CornerRadius, Frame, Id, Layout, Margin, Rgba, RichText, Ui, Vec2};
 use enostr::{RelayPool, RelayStatus};
-use notedeck::{tr, Localization, NotedeckTextStyle, RelayAction};
+use notedeck::{tr, Drag, Localization, NotedeckTextStyle, RelayAction};
 use notedeck_ui::app_images;
 use notedeck_ui::{colors::PINK, padding};
 use tracing::debug;
@@ -14,6 +14,7 @@ pub struct RelayView<'a> {
     pool: &'a RelayPool,
     id_string_map: &'a mut HashMap<Id, String>,
     i18n: &'a mut Localization,
+    drag: &'a mut Drag,
 }
 
 impl RelayView<'_> {
@@ -35,7 +36,7 @@ impl RelayView<'_> {
 
                 ui.add_space(8.0);
 
-                egui::ScrollArea::vertical()
+                let out = egui::ScrollArea::vertical()
                     .id_salt(RelayView::scroll_id())
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .auto_shrink([false; 2])
@@ -48,6 +49,8 @@ impl RelayView<'_> {
                             action = Some(RelayAction::Add(relay_to_add));
                         }
                     });
+
+                self.drag.register_highest_vertical_scroll(&out);
             });
 
         action
@@ -63,11 +66,13 @@ impl<'a> RelayView<'a> {
         pool: &'a RelayPool,
         id_string_map: &'a mut HashMap<Id, String>,
         i18n: &'a mut Localization,
+        drag: &'a mut Drag,
     ) -> Self {
         RelayView {
             pool,
             id_string_map,
             i18n,
+            drag,
         }
     }
 
@@ -307,7 +312,7 @@ mod preview {
         fn update(&mut self, app: &mut AppContext<'_>, ui: &mut egui::Ui) -> Option<AppAction> {
             self.pool.try_recv();
             let mut id_string_map = HashMap::new();
-            RelayView::new(app.pool, &mut id_string_map, app.i18n).ui(ui);
+            RelayView::new(app.pool, &mut id_string_map, app.i18n, app.drag).ui(ui);
             None
         }
     }

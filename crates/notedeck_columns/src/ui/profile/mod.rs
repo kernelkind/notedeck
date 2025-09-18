@@ -132,6 +132,10 @@ impl<'a, 'd> ProfileView<'a, 'd> {
         // only allow front insert when the profile body is fully obstructed
         profile_timeline.enable_front_insert = output.inner.body_end_pos < ui.clip_rect().top();
 
+        self.note_context
+            .drag
+            .register_highest_vertical_scroll(&output);
+
         output.inner.action
     }
 }

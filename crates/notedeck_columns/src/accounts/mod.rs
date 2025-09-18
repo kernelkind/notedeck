@@ -88,6 +88,7 @@ pub fn render_accounts_route(
             app_ctx.accounts,
             app_ctx.img_cache,
             app_ctx.i18n,
+            app_ctx.drag,
         )
         .ui(ui)
         .inner
@@ -108,6 +109,7 @@ pub fn render_accounts_route(
             app_ctx.i18n,
             app_ctx.job_pool,
             jobs,
+            app_ctx.drag,
         )
         .ui(ui)
         .map(|r| match r {

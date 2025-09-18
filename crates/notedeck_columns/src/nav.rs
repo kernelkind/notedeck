@@ -4,7 +4,6 @@ use crate::{
     column::ColumnsAction,
     deck_state::DeckState,
     decks::{Deck, DecksAction, DecksCache},
-    drag::{get_drag_id, get_drag_id_through_frame},
     options::AppOptions,
     profile::{ProfileAction, SaveProfileChanges},
     route::{Route, Router, SingletonRouter},
@@ -614,9 +613,14 @@ fn render_nav_body(
                 }
             }
         }
-        Route::Relays => RelayView::new(ctx.pool, &mut app.view_state.id_string_map, ctx.i18n)
-            .ui(ui)
-            .map(RenderNavAction::RelayAction),
+        Route::Relays => RelayView::new(
+            ctx.pool,
+            &mut app.view_state.id_string_map,
+            ctx.i18n,
+            ctx.drag,
+        )
+        .ui(ui)
+        .map(RenderNavAction::RelayAction),
 
         Route::Settings => SettingsView::new(
             ctx.settings.get_settings_mut(),
@@ -833,7 +837,8 @@ fn render_nav_body(
                 return action;
             };
 
-            if EditProfileView::new(ctx.i18n, state, ctx.img_cache, ctx.clipboard).ui(ui) {
+            if EditProfileView::new(ctx.i18n, state, ctx.img_cache, ctx.clipboard, ctx.drag).ui(ui)
+            {
                 if let Some(state) = app.view_state.pubkey_to_profile_state.get(kp.pubkey) {
                     action = Some(RenderNavAction::ProfileAction(ProfileAction::SaveChanges(
                         SaveProfileChanges::new(kp.to_full(), state.clone()),

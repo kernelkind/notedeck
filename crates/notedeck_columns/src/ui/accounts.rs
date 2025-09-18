@@ -3,7 +3,7 @@ use egui::{
 };
 use enostr::Pubkey;
 use nostrdb::{Ndb, Transaction};
-use notedeck::{tr, Accounts, Images, Localization};
+use notedeck::{tr, Accounts, Drag, Images, Localization};
 use notedeck_ui::colors::PINK;
 use notedeck_ui::profile::preview::SimpleProfilePreview;
 
@@ -14,6 +14,7 @@ pub struct AccountsView<'a> {
     accounts: &'a Accounts,
     img_cache: &'a mut Images,
     i18n: &'a mut Localization,
+    drag: &'a mut Drag,
 }
 
 #[derive(Clone, Debug)]
@@ -35,12 +36,14 @@ impl<'a> AccountsView<'a> {
         accounts: &'a Accounts,
         img_cache: &'a mut Images,
         i18n: &'a mut Localization,
+        drag: &'a mut Drag,
     ) -> Self {
         AccountsView {
             ndb,
             accounts,
             img_cache,
             i18n,
+            drag,
         }
     }
 
@@ -51,12 +54,15 @@ impl<'a> AccountsView<'a> {
             }
 
             ui.add_space(8.0);
-            scroll_area()
+            let out = scroll_area()
                 .id_salt(AccountsView::scroll_id())
                 .show(ui, |ui| {
                     Self::show_accounts(ui, self.accounts, self.ndb, self.img_cache, self.i18n)
-                })
-                .inner
+                });
+
+            self.drag.register_highest_vertical_scroll(&out);
+
+            out.inner
         })
     }
 

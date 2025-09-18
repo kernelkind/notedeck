@@ -292,6 +292,7 @@ impl<'a, 'd> PostView<'a, 'd> {
         let resp = MentionPickerView::new(
             self.note_context.img_cache,
             self.note_context.ndb,
+            self.note_context.drag,
             txn,
             &res,
         )
@@ -342,10 +343,15 @@ impl<'a, 'd> PostView<'a, 'd> {
     }
 
     pub fn ui(&mut self, txn: &Transaction, ui: &mut egui::Ui) -> PostResponse {
-        ScrollArea::vertical()
+        let out = ScrollArea::vertical()
             .id_salt(PostView::scroll_id())
-            .show(ui, |ui| self.ui_no_scroll(txn, ui))
-            .inner
+            .show(ui, |ui| self.ui_no_scroll(txn, ui));
+
+        self.note_context
+            .drag
+            .register_highest_vertical_scroll(&out);
+
+        out.inner
     }
 
     pub fn ui_no_scroll(&mut self, txn: &Transaction, ui: &mut egui::Ui) -> PostResponse {
