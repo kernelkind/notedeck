@@ -1,5 +1,5 @@
 use crate::{
-    account::accounts::Accounts, frame_history::FrameHistory, i18n::Localization,
+    account::accounts::Accounts, drag::Drag, frame_history::FrameHistory, i18n::Localization,
     wallet::GlobalWallet, zaps::Zaps, Args, DataPath, Images, JobPool, NoteCache, SettingsHandler,
     UnknownIds,
 };
@@ -29,6 +29,7 @@ pub struct AppContext<'a> {
     pub frame_history: &'a mut FrameHistory,
     pub job_pool: &'a mut JobPool,
     pub i18n: &'a mut Localization,
+    pub drag: &'a mut Drag,
 
     #[cfg(target_os = "android")]
     pub android: AndroidApp,

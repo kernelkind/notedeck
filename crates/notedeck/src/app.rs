@@ -1,4 +1,5 @@
 use crate::account::FALLBACK_PUBKEY;
+use crate::drag::Drag;
 use crate::i18n::Localization;
 use crate::persist::{AppSizeHandler, SettingsHandler};
 use crate::wallet::GlobalWallet;
@@ -54,6 +55,7 @@ pub struct Notedeck {
     frame_history: FrameHistory,
     job_pool: JobPool,
     i18n: Localization,
+    drag: Drag,
 
     #[cfg(target_os = "android")]
     android_app: Option<AndroidApp>,
@@ -285,6 +287,7 @@ impl Notedeck {
             i18n,
             #[cfg(target_os = "android")]
             android_app: None,
+            drag: Drag::default(),
         }
     }
 
@@ -348,6 +351,7 @@ impl Notedeck {
             frame_history: &mut self.frame_history,
             job_pool: &mut self.job_pool,
             i18n: &mut self.i18n,
+            drag: &mut self.drag,
             #[cfg(target_os = "android")]
             android: self.android_app.as_ref().unwrap().clone(),
         }
