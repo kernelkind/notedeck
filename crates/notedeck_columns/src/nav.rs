@@ -982,40 +982,40 @@ pub fn render_nav(
         .clone();
     let nav = Nav::new(&routes).id_source(egui::Id::new(("nav", col)));
 
-    let drag_ids = 's: {
-        let Some(top_route) = &routes.last().cloned() else {
-            break 's None;
-        };
+    // let drag_ids = 's: {
+    //     let Some(top_route) = &routes.last().cloned() else {
+    //         break 's None;
+    //     };
 
-        let Some(scroll_id) = get_scroll_id(
-            top_route,
-            app.columns(ctx.accounts)
-                .column(col)
-                .router()
-                .routes()
-                .len(),
-            &app.timeline_cache,
-            col,
-        ) else {
-            break 's None;
-        };
+    //     let Some(scroll_id) = get_scroll_id(
+    //         top_route,
+    //         app.columns(ctx.accounts)
+    //             .column(col)
+    //             .router()
+    //             .routes()
+    //             .len(),
+    //         &app.timeline_cache,
+    //         col,
+    //     ) else {
+    //         break 's None;
+    //     };
 
-        let vertical_drag_id = if route_uses_frame(top_route) {
-            get_drag_id_through_frame(ui, scroll_id)
-        } else {
-            get_drag_id(ui, scroll_id)
-        };
+    //     let vertical_drag_id = if route_uses_frame(top_route) {
+    //         get_drag_id_through_frame(ui, scroll_id)
+    //     } else {
+    //         get_drag_id(ui, scroll_id)
+    //     };
 
-        let horizontal_drag_id = nav.drag_id(ui);
+    //     let horizontal_drag_id = nav.drag_id(ui);
 
-        let drag = &mut get_active_columns_mut(ctx.i18n, ctx.accounts, &mut app.decks_cache)
-            .column_mut(col)
-            .drag;
+    //     let drag = &mut get_active_columns_mut(ctx.i18n, ctx.accounts, &mut app.decks_cache)
+    //         .column_mut(col)
+    //         .drag;
 
-        drag.update(horizontal_drag_id, vertical_drag_id, ui.ctx());
+    //     drag.update(horizontal_drag_id, vertical_drag_id, ui.ctx());
 
-        Some((horizontal_drag_id, vertical_drag_id))
-    };
+    //     Some((horizontal_drag_id, vertical_drag_id))
+    // };
 
     let nav_response = nav
         .navigating(
@@ -1052,12 +1052,12 @@ pub fn render_nav(
             }
         });
 
-    if let Some((horizontal_drag_id, vertical_drag_id)) = drag_ids {
-        let drag = &mut get_active_columns_mut(ctx.i18n, ctx.accounts, &mut app.decks_cache)
-            .column_mut(col)
-            .drag;
-        drag.check_for_drag_start(ui.ctx(), horizontal_drag_id, vertical_drag_id);
-    }
+    // if let Some((horizontal_drag_id, vertical_drag_id)) = drag_ids {
+    //     let drag = &mut get_active_columns_mut(ctx.i18n, ctx.accounts, &mut app.decks_cache)
+    //         .column_mut(col)
+    //         .drag;
+    //     drag.check_for_drag_start(ui.ctx(), horizontal_drag_id, vertical_drag_id);
+    // }
 
     RenderNavResponse::new(col, NotedeckNavResponse::Nav(Box::new(nav_response)))
 }
