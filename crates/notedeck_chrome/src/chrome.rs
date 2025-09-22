@@ -9,6 +9,7 @@ use egui::{
     vec2, Button, Color32, CornerRadius, Label, Layout, Rect, RichText, ThemePreference, Widget,
 };
 use egui_extras::{Size, StripBuilder};
+use egui_nav::RouteResponse;
 use egui_nav::{NavAction, NavDrawer};
 use nostrdb::{ProfileRecord, Transaction};
 use notedeck::AppResponse;
@@ -223,17 +224,29 @@ impl Chrome {
                     } else {
                         SidebarOptions::default()
                     };
-                    bottomup_sidebar(self, app_ctx, ui, options)
+                    let response = bottomup_sidebar(self, app_ctx, ui, options);
+
+                    RouteResponse {
+                        response,
+                        uses_drag: None,
+                    }
                 })
                 .inner
             }
             ChromeRoute::App => 's: {
-                let Some(action) = self.apps[self.active as usize].update(app_ctx, ui).action
-                else {
-                    break 's None;
+                let resp = self.apps[self.active as usize].update(app_ctx, ui);
+
+                let route_resp = RouteResponse {
+                    response: None,
+                    uses_drag: resp.drag_in_use,
                 };
+                let Some(action) = resp.action else {
+                    break 's route_resp;
+                };
+
                 chrome_handle_app_action(self, app_ctx, action, ui);
-                None
+
+                route_resp
             }
         });
 
