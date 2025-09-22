@@ -3521,6 +3521,7 @@ dependencies = [
  "egui",
  "egui-winit",
  "egui_extras",
+ "egui_nav",
  "ehttp",
  "enostr",
  "fluent",

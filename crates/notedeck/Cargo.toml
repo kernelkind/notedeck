@@ -15,6 +15,7 @@ dirs = { workspace = true }
 enostr = { workspace = true }
 nostr = { workspace = true }
 egui = { workspace = true }
+egui_nav = {workspace = true }
 egui_extras = { workspace = true }
 eframe = { workspace = true }
 image = { workspace = true }
