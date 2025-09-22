@@ -34,6 +34,7 @@ use crate::{
 
 use egui_nav::{
     DragDirection, Nav, NavAction, NavResponse, NavUiType, Percent, PopupResponse, PopupSheet,
+    RouteResponse,
 };
 use enostr::ProfileState;
 use nostrdb::{Filter, Ndb, Transaction};
@@ -991,6 +992,7 @@ pub fn render_nav(
         .router()
         .routes()
         .clone();
+    let uses_drag = routes.len() > 1;
     let nav = Nav::new(&routes).id_source(egui::Id::new(("nav", col)));
 
     // let drag_ids = 's: {
@@ -1041,25 +1043,35 @@ pub fn render_nav(
                 .router_mut()
                 .returning,
         )
-        .show_mut(ui, |ui, render_type, nav| match render_type {
-            NavUiType::Title => NavTitle::new(
-                ctx.ndb,
-                ctx.img_cache,
-                get_active_columns_mut(ctx.i18n, ctx.accounts, &mut app.decks_cache),
-                nav.routes(),
-                col,
-                ctx.i18n,
-            )
-            .show_move_button(!narrow)
-            .show_delete_button(!narrow)
-            .show(ui),
+        .show_mut(ui, |ui, render_type, nav| {
+            let response = match render_type {
+                NavUiType::Title => NavTitle::new(
+                    ctx.ndb,
+                    ctx.img_cache,
+                    get_active_columns_mut(ctx.i18n, ctx.accounts, &mut app.decks_cache),
+                    nav.routes(),
+                    col,
+                    ctx.i18n,
+                )
+                .show_move_button(!narrow)
+                .show_delete_button(!narrow)
+                .show(ui),
 
-            NavUiType::Body => {
-                if let Some(top) = nav.routes().last() {
-                    render_nav_body(ui, app, ctx, top, nav.routes().len(), col, inner_rect)
+                NavUiType::Body => {
+                    if let Some(top) = nav.routes().last() {
+                        render_nav_body(ui, app, ctx, top, nav.routes().len(), col, inner_rect)
+                    } else {
+                        None
+                    }
+                }
+            };
+            RouteResponse {
+                response,
+                uses_drag: if uses_drag {
+                    Some(DragDirection::LeftToRight)
                 } else {
                     None
-                }
+                },
             }
         });
 
