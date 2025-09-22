@@ -4,7 +4,6 @@ use crate::{
     column::ColumnsAction,
     deck_state::DeckState,
     decks::{Deck, DecksAction, DecksCache},
-    drag::{get_drag_id, get_drag_id_through_frame},
     options::AppOptions,
     profile::{ProfileAction, SaveProfileChanges},
     route::{Route, Router, SingletonRouter},
@@ -33,7 +32,9 @@ use crate::{
     Damus,
 };
 
-use egui_nav::{Nav, NavAction, NavResponse, NavUiType, Percent, PopupResponse, PopupSheet};
+use egui_nav::{
+    DragDirection, Nav, NavAction, NavResponse, NavUiType, Percent, PopupResponse, PopupSheet,
+};
 use enostr::ProfileState;
 use nostrdb::{Filter, Ndb, Transaction};
 use notedeck::{
@@ -191,13 +192,23 @@ enum NotedeckNavResponse {
 
 pub struct RenderNavResponse {
     column: usize,
+    pub drag_in_use: Option<DragDirection>,
     response: NotedeckNavResponse,
 }
 
 impl RenderNavResponse {
     #[allow(private_interfaces)]
     pub fn new(column: usize, response: NotedeckNavResponse) -> Self {
-        RenderNavResponse { column, response }
+        RenderNavResponse {
+            column,
+            response,
+            drag_in_use: None,
+        }
+    }
+
+    pub fn drag(mut self, drag: DragDirection) -> Self {
+        self.drag_in_use = Some(drag);
+        self
     }
 
     #[must_use = "Make sure to save columns if result is true"]
@@ -1059,7 +1070,12 @@ pub fn render_nav(
     //     drag.check_for_drag_start(ui.ctx(), horizontal_drag_id, vertical_drag_id);
     // }
 
-    RenderNavResponse::new(col, NotedeckNavResponse::Nav(Box::new(nav_response)))
+    let mut resp = RenderNavResponse::new(col, NotedeckNavResponse::Nav(Box::new(nav_response)));
+
+    if routes.len() > 1 {
+        resp = resp.drag(DragDirection::LeftToRight);
+    }
+    resp
 }
 
 fn get_scroll_id(

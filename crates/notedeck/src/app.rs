@@ -12,6 +12,7 @@ use crate::{
 };
 use egui::Margin;
 use egui::ThemePreference;
+use egui_nav::DragDirection;
 use egui_winit::clipboard::Clipboard;
 use enostr::RelayPool;
 use nostrdb::{Config, Ndb, Transaction};
@@ -31,7 +32,31 @@ pub enum AppAction {
 }
 
 pub trait App {
-    fn update(&mut self, ctx: &mut AppContext<'_>, ui: &mut egui::Ui) -> Option<AppAction>;
+    fn update(&mut self, ctx: &mut AppContext<'_>, ui: &mut egui::Ui) -> AppResponse;
+}
+
+#[derive(Default)]
+pub struct AppResponse {
+    pub action: Option<AppAction>,
+    pub drag_in_use: Option<DragDirection>,
+}
+
+impl AppResponse {
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    pub fn action(action: Option<AppAction>) -> Self {
+        Self {
+            action,
+            drag_in_use: None,
+        }
+    }
+
+    pub fn drag(mut self, drag: Option<DragDirection>) -> Self {
+        self.drag_in_use = drag;
+        self
+    }
 }
 
 /// Main notedeck app framework
