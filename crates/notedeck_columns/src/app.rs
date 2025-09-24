@@ -640,7 +640,7 @@ fn render_damus_mobile(
 ) -> AppResponse {
     //let routes = app.timelines[0].routes.clone();
 
-    let mut can_take_drag_from = None;
+    let mut can_take_drag_from = Vec::new();
     let active_col = app.columns_mut(app_ctx.i18n, app_ctx.accounts).selected as usize;
     let mut app_action: Option<AppAction> = None;
     // don't show toolbar if soft keyboard is open
@@ -669,9 +669,7 @@ fn render_damus_mobile(
                         ui,
                     );
 
-                    if let Some(drag) = &resp.can_take_drag_from() {
-                        can_take_drag_from = Some(*drag);
-                    }
+                    can_take_drag_from.extend(resp.can_take_drag_from());
 
                     let r = resp.process_render_nav_response(app, app_ctx, ui);
                     if let Some(r) = &r {
@@ -830,7 +828,7 @@ fn timelines_view(
     let mut side_panel_action: Option<nav::SwitchingAction> = None;
     let mut responses = Vec::with_capacity(num_cols);
 
-    let mut can_take_drag_from = None;
+    let mut can_take_drag_from = Vec::new();
 
     StripBuilder::new(ui)
         .size(Size::exact(ui::side_panel::SIDE_PANEL_WIDTH))
@@ -888,9 +886,7 @@ fn timelines_view(
                         inner
                     };
                     let resp = nav::render_nav(col_index, inner_rect, app, ctx, ui);
-                    if let Some(drag) = resp.can_take_drag_from() {
-                        can_take_drag_from = Some(drag);
-                    }
+                    can_take_drag_from.extend(resp.can_take_drag_from());
                     responses.push(resp);
 
                     // vertical line
@@ -945,10 +941,7 @@ fn timelines_view(
         storage::save_decks_cache(ctx.path, &app.decks_cache);
     }
 
-    AppResponse {
-        action: app_action,
-        can_take_drag_from,
-    }
+    AppResponse::action(app_action).drag(can_take_drag_from)
 }
 
 impl notedeck::App for Damus {

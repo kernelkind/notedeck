@@ -4,7 +4,7 @@ use crate::{
     column::ColumnsAction,
     deck_state::DeckState,
     decks::{Deck, DecksAction, DecksCache},
-    drag::get_drag_id,
+    drag::{get_drag_id, get_drag_id_through_frame},
     options::AppOptions,
     profile::{ProfileAction, SaveProfileChanges},
     route::{Route, Router, SingletonRouter},
@@ -203,10 +203,10 @@ impl RenderNavResponse {
         RenderNavResponse { column, response }
     }
 
-    pub fn can_take_drag_from(&self) -> Option<egui::Id> {
+    pub fn can_take_drag_from(&self) -> Vec<egui::Id> {
         match &self.response {
-            NotedeckNavResponse::Popup(_) => None,
-            NotedeckNavResponse::Nav(nav_response) => nav_response.can_take_drag_from,
+            NotedeckNavResponse::Popup(_) => Vec::new(), // TODO(kernelkind): fix
+            NotedeckNavResponse::Nav(nav_response) => nav_response.can_take_drag_from.clone(),
         }
     }
 
@@ -1063,19 +1063,23 @@ pub fn render_nav(
                 }
             };
             let can_take_drag_from = || -> Option<egui::Id> {
-                Some(get_drag_id(
-                    ui,
-                    get_scroll_id(
-                        nav.routes().last()?,
-                        nav.routes().len(),
-                        &app.timeline_cache,
-                        col,
-                    )?,
-                ))
+                let last_route = nav.routes().last()?;
+                let scroll_id =
+                    get_scroll_id(last_route, nav.routes().len(), &app.timeline_cache, col)?;
+                Some(if route_uses_frame(last_route) {
+                    get_drag_id_through_frame(ui, scroll_id)
+                } else {
+                    get_drag_id(ui, scroll_id)
+                })
+            };
+            let can_take_drag_from = if let Some(drag_id) = can_take_drag_from() {
+                vec![drag_id]
+            } else {
+                Vec::new()
             };
             RouteResponse {
                 response,
-                can_take_drag_from: can_take_drag_from(),
+                can_take_drag_from,
             }
         });
 

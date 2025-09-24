@@ -228,7 +228,7 @@ impl Chrome {
 
                     RouteResponse {
                         response,
-                        can_take_drag_from: None,
+                        can_take_drag_from: Vec::new(),
                     }
                 })
                 .inner
