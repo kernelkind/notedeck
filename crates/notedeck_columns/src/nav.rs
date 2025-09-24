@@ -4,6 +4,7 @@ use crate::{
     column::ColumnsAction,
     deck_state::DeckState,
     decks::{Deck, DecksAction, DecksCache},
+    drag::get_drag_id,
     options::AppOptions,
     profile::{ProfileAction, SaveProfileChanges},
     route::{Route, Router, SingletonRouter},
@@ -193,23 +194,20 @@ enum NotedeckNavResponse {
 
 pub struct RenderNavResponse {
     column: usize,
-    pub drag_in_use: Option<DragDirection>,
     response: NotedeckNavResponse,
 }
 
 impl RenderNavResponse {
     #[allow(private_interfaces)]
     pub fn new(column: usize, response: NotedeckNavResponse) -> Self {
-        RenderNavResponse {
-            column,
-            response,
-            drag_in_use: None,
-        }
+        RenderNavResponse { column, response }
     }
 
-    pub fn drag(mut self, drag: DragDirection) -> Self {
-        self.drag_in_use = Some(drag);
-        self
+    pub fn can_take_drag_from(&self) -> Option<egui::Id> {
+        match &self.response {
+            NotedeckNavResponse::Popup(_) => None,
+            NotedeckNavResponse::Nav(nav_response) => nav_response.can_take_drag_from,
+        }
     }
 
     #[must_use = "Make sure to save columns if result is true"]
@@ -992,7 +990,6 @@ pub fn render_nav(
         .router()
         .routes()
         .clone();
-    let uses_drag = routes.len() > 1;
     let nav = Nav::new(&routes).id_source(egui::Id::new(("nav", col)));
 
     // let drag_ids = 's: {
@@ -1065,13 +1062,20 @@ pub fn render_nav(
                     }
                 }
             };
+            let can_take_drag_from = || -> Option<egui::Id> {
+                Some(get_drag_id(
+                    ui,
+                    get_scroll_id(
+                        nav.routes().last()?,
+                        nav.routes().len(),
+                        &app.timeline_cache,
+                        col,
+                    )?,
+                ))
+            };
             RouteResponse {
                 response,
-                uses_drag: if uses_drag {
-                    Some(DragDirection::LeftToRight)
-                } else {
-                    None
-                },
+                can_take_drag_from: can_take_drag_from(),
             }
         });
 
@@ -1082,12 +1086,7 @@ pub fn render_nav(
     //     drag.check_for_drag_start(ui.ctx(), horizontal_drag_id, vertical_drag_id);
     // }
 
-    let mut resp = RenderNavResponse::new(col, NotedeckNavResponse::Nav(Box::new(nav_response)));
-
-    if routes.len() > 1 {
-        resp = resp.drag(DragDirection::LeftToRight);
-    }
-    resp
+    RenderNavResponse::new(col, NotedeckNavResponse::Nav(Box::new(nav_response)))
 }
 
 fn get_scroll_id(

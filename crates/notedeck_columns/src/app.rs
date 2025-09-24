@@ -640,7 +640,7 @@ fn render_damus_mobile(
 ) -> AppResponse {
     //let routes = app.timelines[0].routes.clone();
 
-    let mut drag_in_use = None;
+    let mut can_take_drag_from = None;
     let active_col = app.columns_mut(app_ctx.i18n, app_ctx.accounts).selected as usize;
     let mut app_action: Option<AppAction> = None;
     // don't show toolbar if soft keyboard is open
@@ -669,8 +669,8 @@ fn render_damus_mobile(
                         ui,
                     );
 
-                    if let Some(drag) = &resp.drag_in_use {
-                        drag_in_use = Some(*drag);
+                    if let Some(drag) = &resp.can_take_drag_from() {
+                        can_take_drag_from = Some(*drag);
                     }
 
                     let r = resp.process_render_nav_response(app, app_ctx, ui);
@@ -712,7 +712,7 @@ fn render_damus_mobile(
             });
         });
 
-    AppResponse::action(app_action).drag(drag_in_use)
+    AppResponse::action(app_action).drag(can_take_drag_from)
 }
 
 fn hovering_post_button(
@@ -830,7 +830,7 @@ fn timelines_view(
     let mut side_panel_action: Option<nav::SwitchingAction> = None;
     let mut responses = Vec::with_capacity(num_cols);
 
-    let mut drag_in_use = None;
+    let mut can_take_drag_from = None;
 
     StripBuilder::new(ui)
         .size(Size::exact(ui::side_panel::SIDE_PANEL_WIDTH))
@@ -888,8 +888,8 @@ fn timelines_view(
                         inner
                     };
                     let resp = nav::render_nav(col_index, inner_rect, app, ctx, ui);
-                    if let Some(drag) = resp.drag_in_use {
-                        drag_in_use = Some(drag);
+                    if let Some(drag) = resp.can_take_drag_from() {
+                        can_take_drag_from = Some(drag);
                     }
                     responses.push(resp);
 
@@ -947,7 +947,7 @@ fn timelines_view(
 
     AppResponse {
         action: app_action,
-        drag_in_use,
+        can_take_drag_from,
     }
 }
 

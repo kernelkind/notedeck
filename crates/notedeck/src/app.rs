@@ -38,7 +38,7 @@ pub trait App {
 #[derive(Default)]
 pub struct AppResponse {
     pub action: Option<AppAction>,
-    pub drag_in_use: Option<DragDirection>,
+    pub can_take_drag_from: Option<egui::Id>,
 }
 
 impl AppResponse {
@@ -49,12 +49,12 @@ impl AppResponse {
     pub fn action(action: Option<AppAction>) -> Self {
         Self {
             action,
-            drag_in_use: None,
+            can_take_drag_from: None,
         }
     }
 
-    pub fn drag(mut self, drag: Option<DragDirection>) -> Self {
-        self.drag_in_use = drag;
+    pub fn drag(mut self, can_take_drag_from: Option<egui::Id>) -> Self {
+        self.can_take_drag_from = can_take_drag_from;
         self
     }
 }

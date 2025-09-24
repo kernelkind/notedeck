@@ -228,7 +228,7 @@ impl Chrome {
 
                     RouteResponse {
                         response,
-                        uses_drag: None,
+                        can_take_drag_from: None,
                     }
                 })
                 .inner
@@ -238,7 +238,7 @@ impl Chrome {
 
                 let route_resp = RouteResponse {
                     response: None,
-                    uses_drag: resp.drag_in_use,
+                    can_take_drag_from: resp.can_take_drag_from,
                 };
                 let Some(action) = resp.action else {
                     break 's route_resp;
