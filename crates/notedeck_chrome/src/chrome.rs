@@ -371,6 +371,7 @@ impl Chrome {
 
             if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 self.active = i as i32;
+                self.nav.close();
             }
         }
     }
