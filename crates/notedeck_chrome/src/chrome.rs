@@ -380,6 +380,7 @@ impl notedeck::App for Chrome {
     fn update(&mut self, ctx: &mut notedeck::AppContext, ui: &mut egui::Ui) -> AppResponse {
         if let Some(action) = self.show(ctx, ui) {
             action.process(ctx, self, ui);
+            self.nav.close();
         }
         // TODO: unify this constant with the columns side panel width. ui crate?
         AppResponse::none()

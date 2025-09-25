@@ -33,6 +33,7 @@ use crate::{
     Damus,
 };
 
+use egui::scroll_area::ScrollAreaOutput;
 use egui_nav::{
     DragDirection, Nav, NavAction, NavResponse, NavUiType, Percent, PopupResponse, PopupSheet,
     RouteResponse,
@@ -542,7 +543,7 @@ fn render_nav_body(
     depth: usize,
     col: usize,
     inner_rect: egui::Rect,
-) -> Option<RenderNavAction> {
+) -> BodyResponse<RenderNavAction> {
     let mut note_context = NoteContext {
         ndb: ctx.ndb,
         accounts: ctx.accounts,
@@ -565,7 +566,7 @@ fn render_nav_body(
                 .is_some_and(|ind| ind == col)
                 && app.options.contains(AppOptions::ScrollToTop);
 
-            let nav_action = render_timeline_route(
+            let resp = render_timeline_route(
                 &mut app.timeline_cache,
                 kind,
                 col,
@@ -584,7 +585,7 @@ fn render_nav_body(
                 app.options.remove(AppOptions::ScrollToTop);
             }
 
-            nav_action
+            resp
         }
         Route::Thread(selection) => render_thread_route(
             &mut app.threads,
@@ -596,7 +597,7 @@ fn render_nav_body(
             &mut app.jobs,
         ),
         Route::Accounts(amr) => 's: {
-            let Some(action) = render_accounts_route(
+            let resp = render_accounts_route(
                 ui,
                 ctx,
                 &mut app.jobs,
@@ -604,11 +605,9 @@ fn render_nav_body(
                 &mut app.onboarding,
                 &mut app.view_state.follow_packs,
                 *amr,
-            ) else {
-                break 's None;
-            };
+            );
 
-            match action {
+            resp.map_output_maybe(|action| match action {
                 AccountsResponse::ViewProfile(pubkey) => {
                     Some(RenderNavAction::NoteAction(NoteAction::Profile(pubkey)))
                 }
@@ -621,11 +620,11 @@ fn render_nav_body(
                         .accounts_action
                         .map(|f| RenderNavAction::SwitchingAction(SwitchingAction::Accounts(f)))
                 }
-            }
+            })
         }
         Route::Relays => RelayView::new(ctx.pool, &mut app.view_state.id_string_map, ctx.i18n)
             .ui(ui)
-            .map(RenderNavAction::RelayAction),
+            .map_output(RenderNavAction::RelayAction),
 
         Route::Settings => SettingsView::new(
             ctx.settings.get_settings_mut(),
@@ -634,7 +633,7 @@ fn render_nav_body(
             &mut app.jobs,
         )
         .ui(ui)
-        .map(RenderNavAction::SettingsAction),
+        .map_output(RenderNavAction::SettingsAction),
 
         Route::Reply(id) => {
             let txn = if let Ok(txn) = Transaction::new(ctx.ndb) {
@@ -645,7 +644,7 @@ fn render_nav_body(
                     "Reply to unknown note",
                     "Error message when reply note cannot be found"
                 ));
-                return None;
+                return BodyResponse::none();
             };
 
             let note = if let Ok(note) = ctx.ndb.get_note_by_id(&txn, id.bytes()) {
@@ -656,18 +655,20 @@ fn render_nav_body(
                     "Reply to unknown note",
                     "Error message when reply note cannot be found"
                 ));
-                return None;
+                return BodyResponse::none();
             };
 
-            let poster = ctx.accounts.selected_filled()?;
+            let Some(poster) = ctx.accounts.selected_filled() else {
+                return BodyResponse::none();
+            };
 
-            let action = {
+            let resp = {
                 let draft = app.drafts.reply_mut(note.id());
 
                 let mut options = app.note_options;
                 options.set(NoteOptions::Wide, false);
 
-                let response = ui::PostReplyView::new(
+                ui::PostReplyView::new(
                     &mut note_context,
                     poster,
                     draft,
@@ -677,12 +678,10 @@ fn render_nav_body(
                     &mut app.jobs,
                     col,
                 )
-                .show(ui);
-
-                response.action
+                .show(ui)
             };
 
-            action.map(Into::into)
+            resp.map_output_maybe(|o| Some(o.action?.into()))
         }
         Route::Quote(id) => {
             let txn = Transaction::new(ctx.ndb).expect("txn");
@@ -695,10 +694,13 @@ fn render_nav_body(
                     "Quote of unknown note",
                     "Error message when quote note cannot be found"
                 ));
-                return None;
+                return BodyResponse::none();
             };
 
-            let poster = ctx.accounts.selected_filled()?;
+            let Some(poster) = ctx.accounts.selected_filled() else {
+                return BodyResponse::none();
+            };
+
             let draft = app.drafts.quote_mut(note.id());
 
             let response = crate::ui::note::QuoteRepostView::new(
@@ -713,10 +715,12 @@ fn render_nav_body(
             )
             .show(ui);
 
-            response.action.map(Into::into)
+            response.map_output_maybe(|o| Some(o.action?.into()))
         }
         Route::ComposeNote => {
-            let kp = ctx.accounts.get_selected_account().key.to_full()?;
+            let Some(kp) = ctx.accounts.get_selected_account().key.to_full() else {
+                return BodyResponse::none();
+            };
             let draft = app.drafts.compose_mut();
 
             let txn = Transaction::new(ctx.ndb).expect("txn");
@@ -731,16 +735,16 @@ fn render_nav_body(
             )
             .ui(&txn, ui);
 
-            post_response.action.map(Into::into)
+            post_response.map_output_maybe(|o| Some(o.action?.into()))
         }
         Route::AddColumn(route) => {
             render_add_column_routes(ui, app, ctx, col, route);
 
-            None
+            BodyResponse::none()
         }
         Route::Support => {
             SupportView::new(&mut app.support, ctx.i18n).show(ui);
-            None
+            BodyResponse::none()
         }
         Route::Search => {
             let id = ui.id().with(("search", depth, col));
@@ -769,7 +773,7 @@ fn render_nav_body(
                 &mut app.jobs,
             )
             .show(ui)
-            .map(RenderNavAction::NoteAction)
+            .map_output(RenderNavAction::NoteAction)
         }
         Route::NewDeck => {
             let id = ui.id().with("new-deck");
@@ -794,7 +798,8 @@ fn render_nav_body(
                     .get_selected_router()
                     .go_back();
             }
-            resp
+
+            BodyResponse::output(resp)
         }
         Route::EditDeck(index) => {
             let mut action = None;
@@ -826,31 +831,32 @@ fn render_nav_body(
                     .go_back();
             }
 
-            action
+            BodyResponse::output(action)
         }
         Route::EditProfile(pubkey) => {
-            let mut action = None;
             let Some(kp) = ctx.accounts.get_full(pubkey) else {
                 error!("Pubkey in EditProfile route did not have an nsec attached in Accounts");
-                return None;
+                return BodyResponse::none();
             };
 
             let Some(state) = app.view_state.pubkey_to_profile_state.get_mut(kp.pubkey) else {
                 tracing::error!(
                     "No profile state when navigating to EditProfile... was handle_navigating_edit_profile not called?"
                 );
-                return action;
+                return BodyResponse::none();
             };
 
-            if EditProfileView::new(ctx.i18n, state, ctx.img_cache, ctx.clipboard).ui(ui) {
-                if let Some(state) = app.view_state.pubkey_to_profile_state.get(kp.pubkey) {
-                    action = Some(RenderNavAction::ProfileAction(ProfileAction::SaveChanges(
-                        SaveProfileChanges::new(kp.to_full(), state.clone()),
-                    )))
-                }
-            }
-
-            action
+            EditProfileView::new(ctx.i18n, state, ctx.img_cache, ctx.clipboard)
+                .ui(ui)
+                .map_output_maybe(|o| {
+                    if let Some(state) = app.view_state.pubkey_to_profile_state.get(kp.pubkey) {
+                        Some(RenderNavAction::ProfileAction(ProfileAction::SaveChanges(
+                            SaveProfileChanges::new(kp.to_full(), state.clone()),
+                        )))
+                    } else {
+                        None
+                    }
+                })
         }
         Route::Wallet(wallet_type) => {
             let state = match wallet_type {
@@ -897,23 +903,24 @@ fn render_nav_body(
                 }
             };
 
-            WalletView::new(state, ctx.i18n, ctx.clipboard)
-                .ui(ui)
-                .map(RenderNavAction::WalletAction)
+            BodyResponse::output(WalletView::new(state, ctx.i18n, ctx.clipboard).ui(ui))
+                .map_output(RenderNavAction::WalletAction)
         }
         Route::CustomizeZapAmount(target) => {
             let txn = Transaction::new(ctx.ndb).expect("txn");
             let default_msats = get_current_default_msats(ctx.accounts, ctx.global_wallet);
-            CustomZapView::new(
-                ctx.i18n,
-                ctx.img_cache,
-                ctx.ndb,
-                &txn,
-                &target.zap_recipient,
-                default_msats,
+            BodyResponse::output(
+                CustomZapView::new(
+                    ctx.i18n,
+                    ctx.img_cache,
+                    ctx.ndb,
+                    &txn,
+                    &target.zap_recipient,
+                    default_msats,
+                )
+                .ui(ui),
             )
-            .ui(ui)
-            .map(|msats| {
+            .map_output(|msats| {
                 get_active_columns_mut(ctx.i18n, ctx.accounts, &mut app.decks_cache)
                     .column_mut(col)
                     .router_mut()
@@ -925,6 +932,95 @@ fn render_nav_body(
                     },
                 )))
             })
+        }
+    }
+}
+
+pub struct BodyResponse<R> {
+    pub drag_id: Option<egui::Id>, // the id which was used for dragging.
+    pub output: Option<R>,
+}
+
+impl<R> BodyResponse<R> {
+    pub fn none() -> Self {
+        Self {
+            drag_id: None,
+            output: None,
+        }
+    }
+
+    pub fn scroll(output: ScrollAreaOutput<Option<R>>) -> Self {
+        Self {
+            drag_id: Some(Self::scroll_output_to_drag_id(output.id)),
+            output: output.inner,
+        }
+    }
+
+    pub fn set_scroll_id(&mut self, output: &ScrollAreaOutput<Option<R>>) {
+        self.drag_id = Some(Self::scroll_output_to_drag_id(output.id));
+    }
+
+    pub fn output(output: Option<R>) -> Self {
+        Self {
+            drag_id: None,
+            output,
+        }
+    }
+
+    pub fn set_output(&mut self, output: R) {
+        self.output = Some(output);
+    }
+
+    /// The id of an `egui::ScrollAreaOutput`
+    /// Should use `Self::scroll` when possible
+    pub fn scroll_raw(mut self, id: egui::Id) -> Self {
+        self.drag_id = Some(Self::scroll_output_to_drag_id(id));
+        self
+    }
+
+    /// The id which is directly used for dragging
+    pub fn set_drag_id_raw(&mut self, id: egui::Id) {
+        self.drag_id = Some(id);
+    }
+
+    fn scroll_output_to_drag_id(id: egui::Id) -> egui::Id {
+        id.with("area")
+    }
+
+    pub fn map_output<S>(self, f: impl FnOnce(R) -> S) -> BodyResponse<S> {
+        BodyResponse {
+            drag_id: self.drag_id,
+            output: if let Some(out) = self.output {
+                Some(f(out))
+            } else {
+                None
+            },
+        }
+    }
+
+    pub fn map_output_maybe<S>(self, f: impl FnOnce(R) -> Option<S>) -> BodyResponse<S> {
+        BodyResponse {
+            drag_id: self.drag_id,
+            output: if let Some(out) = self.output {
+                f(out)
+            } else {
+                None
+            },
+        }
+    }
+
+    pub fn maybe_map_output<S>(self, f: impl FnOnce(Option<R>) -> S) -> BodyResponse<S> {
+        BodyResponse {
+            drag_id: self.drag_id,
+            output: Some(f(self.output)),
+        }
+    }
+
+    /// insert the contents of the new BodyResponse if they are empty in Self
+    pub fn insert(&mut self, body: BodyResponse<R>) {
+        self.drag_id = self.drag_id.or(body.drag_id);
+        if self.output.is_none() {
+            self.output = body.output;
         }
     }
 }
@@ -977,7 +1073,10 @@ pub fn render_nav(
                     .show_move_button(!narrow)
                     .show_delete_button(!narrow)
                     .show(ui),
-                    NavUiType::Body => render_nav_body(ui, app, ctx, route, 1, col, inner_rect),
+                    NavUiType::Body => {
+                        render_nav_body(ui, app, ctx, route, 1, col, inner_rect).output
+                        //TODO(kernelkind): fix
+                    }
                 });
 
             return RenderNavResponse::new(col, NotedeckNavResponse::Popup(Box::new(resp)));
@@ -1042,43 +1141,35 @@ pub fn render_nav(
         )
         .show_mut(ui, |ui, render_type, nav| {
             let response = match render_type {
-                NavUiType::Title => NavTitle::new(
-                    ctx.ndb,
-                    ctx.img_cache,
-                    get_active_columns_mut(ctx.i18n, ctx.accounts, &mut app.decks_cache),
-                    nav.routes(),
-                    col,
-                    ctx.i18n,
-                )
-                .show_move_button(!narrow)
-                .show_delete_button(!narrow)
-                .show(ui),
+                NavUiType::Title => BodyResponse::output(
+                    NavTitle::new(
+                        ctx.ndb,
+                        ctx.img_cache,
+                        get_active_columns_mut(ctx.i18n, ctx.accounts, &mut app.decks_cache),
+                        nav.routes(),
+                        col,
+                        ctx.i18n,
+                    )
+                    .show_move_button(!narrow)
+                    .show_delete_button(!narrow)
+                    .show(ui),
+                ),
 
                 NavUiType::Body => {
                     if let Some(top) = nav.routes().last() {
                         render_nav_body(ui, app, ctx, top, nav.routes().len(), col, inner_rect)
                     } else {
-                        None
+                        BodyResponse::none()
                     }
                 }
             };
-            let can_take_drag_from = || -> Option<egui::Id> {
-                let last_route = nav.routes().last()?;
-                let scroll_id =
-                    get_scroll_id(last_route, nav.routes().len(), &app.timeline_cache, col)?;
-                Some(if route_uses_frame(last_route) {
-                    get_drag_id_through_frame(ui, scroll_id)
-                } else {
-                    get_drag_id(ui, scroll_id)
-                })
-            };
-            let can_take_drag_from = if let Some(drag_id) = can_take_drag_from() {
+            let can_take_drag_from = if let Some(drag_id) = response.drag_id {
                 vec![drag_id]
             } else {
                 Vec::new()
             };
             RouteResponse {
-                response,
+                response: response.output,
                 can_take_drag_from,
             }
         });
