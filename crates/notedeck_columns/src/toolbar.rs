@@ -21,8 +21,12 @@ pub fn unseen_notification(
 
     let freshness = &mut tl.current_view_mut().freshness;
     freshness.update(|timestamp_last_viewed| {
-        let filter = crate::timeline::kind::notifications_filter(&current_pk)
-            .since_mut(timestamp_last_viewed);
+        let filter = enostr::Filter::new_with_capacity(1)
+            .pubkeys([current_pk.bytes()])
+            .kinds(crate::timeline::kind::notification_kinds())
+            .limit(1)
+            .since(timestamp_last_viewed)
+            .build();
         let txn = Transaction::new(ndb).expect("txn");
 
         let Some(res) = ndb.query(&txn, &[filter], 1).ok() else {
