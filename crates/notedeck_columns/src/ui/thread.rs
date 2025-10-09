@@ -53,27 +53,37 @@ impl<'a, 'd> ThreadView<'a, 'd> {
             .auto_shrink([false, false])
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible);
 
+        let mut action = None;
         if let Some(thread) = self.threads.threads.get_mut(&self.selected_note_id) {
             if let Some(new_offset) = thread.set_scroll_offset.take() {
                 scroll_area = scroll_area.vertical_scroll_offset(new_offset);
+            }
+
+            if thread.replies.len() == 1 {
+                let reply = thread.replies.values().next().unwrap();
+                if let Ok(note) = self.note_context.ndb.get_note_by_key(&txn, reply.key) {
+                    action = Some(NoteAction::ThreadAutoUnfold {
+                        note_id: enostr::NoteId::new(*note.id()),
+                    });
+                }
             }
         }
 
         let output = scroll_area.show(ui, |ui| self.notes(ui, &txn));
 
         let out_id = output.id;
-        let mut resp = output.inner;
+        action = output.inner.or(action);
 
         if let Some(NoteAction::Note {
             note_id: _,
             preview: _,
             scroll_offset,
-        }) = &mut resp
+        }) = &mut action
         {
             *scroll_offset = output.state.offset.y;
         }
 
-        BodyResponse::output(resp).scroll_raw(out_id)
+        BodyResponse::output(action).scroll_raw(out_id)
     }
 
     fn notes(&mut self, ui: &mut egui::Ui, txn: &Transaction) -> Option<NoteAction> {
