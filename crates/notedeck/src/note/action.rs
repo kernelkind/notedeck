@@ -30,6 +30,10 @@ pub enum NoteAction {
         scroll_offset: f32,
     },
 
+    ThreadAutoUnfold {
+        note_id: NoteId,
+    },
+
     /// User has selected some context option
     Context(ContextSelection),
 

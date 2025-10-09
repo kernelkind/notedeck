@@ -192,6 +192,20 @@ fn execute_note_action(
 
             media_action.process_default_media_actions(images)
         }
+        NoteAction::ThreadAutoUnfold { note_id } => 's: {
+            let Ok(thread_selection) = ThreadSelection::from_note_id(ndb, note_cache, txn, note_id)
+            else {
+                tracing::error!("No thread selection for {}?", hex::encode(note_id.bytes()));
+                break 's;
+            };
+            timeline_res = threads
+                .open(ndb, txn, pool, &thread_selection, false, col, 0.0)
+                .map(NotesOpenResult::Thread);
+
+            router_action = Some(RouterAction::RouteInstantly(Route::Thread(
+                thread_selection,
+            )));
+        }
     }
 
     NoteActionResponse {
