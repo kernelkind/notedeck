@@ -48,6 +48,7 @@ pub struct Threads {
     pub subs: ThreadSubs,
 
     pub seen_flags: NoteSeenFlags,
+    pub scroll_to: Option<NoteId>,
 }
 
 impl Threads {
@@ -60,9 +61,14 @@ impl Threads {
         txn: &Transaction,
         pool: &mut RelayPool,
         thread: &ThreadSelection,
+        scroll_to: Option<NoteId>,
         new_scope: bool,
         col: usize,
     ) -> Option<NewThreadNotes> {
+        if let Some(scroll_to) = scroll_to {
+            self.scroll_to = Some(scroll_to);
+        }
+
         tracing::info!("Opening thread: {:?}", thread);
         let local_sub_filter = if let Some(selected) = &thread.selected_note {
             vec![direct_replies_filter_non_root(
