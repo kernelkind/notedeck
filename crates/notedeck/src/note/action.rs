@@ -27,11 +27,7 @@ pub enum NoteAction {
     Profile(Pubkey),
 
     /// User has clicked a note link
-    Note {
-        note_id: NoteId,
-        preview: bool,
-        scroll_offset: f32,
-    },
+    Note { note_id: NoteId, preview: bool },
 
     /// User has selected some context option
     Context(ContextSelection),
@@ -51,7 +47,6 @@ impl NoteAction {
         NoteAction::Note {
             note_id: id,
             preview: false,
-            scroll_offset: 0.0,
         }
     }
 }
