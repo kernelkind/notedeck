@@ -1,16 +1,11 @@
-use std::{
-    future::Future,
-    sync::{
-        mpsc::{self, Sender},
-        Arc, Mutex,
-    },
-};
+use crossbeam::queue::SegQueue;
+use std::{future::Future, sync::Arc};
 use tokio::sync::oneshot;
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
 pub struct JobPool {
-    tx: Sender<Job>,
+    tx: Arc<SegQueue<Job>>,
 }
 
 impl Default for JobPool {
@@ -21,29 +16,22 @@ impl Default for JobPool {
 
 impl JobPool {
     pub fn new(num_threads: usize) -> Self {
-        let (tx, rx) = mpsc::channel::<Job>();
-
-        // TODO(jb55) why not mpmc here !???
-        let arc_rx = Arc::new(Mutex::new(rx));
+        let queue = SegQueue::<Job>::new();
+        let arc_queue = Arc::new(queue);
         for _ in 0..num_threads {
-            let arc_rx_clone = arc_rx.clone();
+            let queue_ref = arc_queue.clone();
             std::thread::spawn(move || loop {
-                let job = {
-                    let Ok(unlocked) = arc_rx_clone.lock() else {
-                        continue;
-                    };
-                    let Ok(job) = unlocked.recv() else {
-                        continue;
-                    };
-
-                    job
+                let Some(job) = queue_ref.pop() else {
+                    continue;
                 };
 
                 job();
             });
         }
 
-        Self { tx }
+        Self {
+            tx: arc_queue.clone(),
+        }
     }
 
     pub fn schedule<F, T>(&self, job: F) -> impl Future<Output = T>
@@ -58,9 +46,7 @@ impl JobPool {
             let _ = tx_result.send(output);
         });
 
-        self.tx
-            .send(job)
-            .expect("receiver should not be deallocated");
+        self.tx.push(job);
 
         async move {
             rx_result.await.unwrap_or_else(|_| {
