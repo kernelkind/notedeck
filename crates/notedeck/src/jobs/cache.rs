@@ -1,5 +1,5 @@
 use hashbrown::{hash_map::RawEntryMut, HashMap};
-use poll_promise::Promise;
+use tokio::sync::oneshot::Receiver;
 
 use crate::jobs::{
     types::{Job, JobId, JobIdOwned, JobParams, JobParamsOwned},
@@ -12,7 +12,7 @@ pub struct JobsCache {
 }
 
 pub enum JobState {
-    Pending(Promise<Option<Result<Job, JobError>>>),
+    Pending(Receiver<Result<Job, JobError>>),
     Error(JobError),
     Completed(Job),
 }
@@ -40,12 +40,7 @@ impl JobsCache {
                     break 's state;
                 };
 
-                let Some(res) = promise.ready_mut() else {
-                    break 's state;
-                };
-
-                let Some(res) = res.take() else {
-                    tracing::error!("Failed to take the promise for job: {:?}", jobid);
+                let Some(res) = promise.try_recv().ok() else {
                     break 's state;
                 };
 
@@ -58,12 +53,12 @@ impl JobsCache {
             }
             RawEntryMut::Vacant(entry) => {
                 let owned_params = params.map(JobParams::into);
-                let wrapped: Box<dyn FnOnce() -> Option<Result<Job, JobError>> + Send + 'static> =
-                    Box::new(move || Some(run_job(owned_params)));
+                let wrapped: Box<dyn FnOnce() -> Result<Job, JobError> + Send + 'static> =
+                    Box::new(move || run_job(owned_params));
 
-                let promise = Promise::spawn_async(job_pool.schedule(wrapped));
+                let receiver = job_pool.schedule_receivable(wrapped);
 
-                let (_, state) = entry.insert(jobid.into(), JobState::Pending(promise));
+                let (_, state) = entry.insert(jobid.into(), JobState::Pending(receiver));
 
                 state
             }
