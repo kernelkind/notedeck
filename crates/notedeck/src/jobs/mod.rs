@@ -1,7 +1,7 @@
 mod cache;
 mod job_pool;
+mod types;
 
-pub use cache::{
-    BlurhashParams, Job, JobError, JobId, JobParams, JobParamsOwned, JobState, JobsCache,
-};
+pub use cache::{JobError, JobState, JobsCache};
 pub use job_pool::JobPool;
+pub use types::{BlurhashParams, Job, JobId, JobParams, JobParamsOwned};
