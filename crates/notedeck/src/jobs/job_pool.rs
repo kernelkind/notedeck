@@ -1,6 +1,6 @@
 use crossbeam::queue::SegQueue;
 use std::{future::Future, sync::Arc};
-use tokio::sync::oneshot;
+use tokio::sync::oneshot::{self, Receiver};
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
@@ -39,6 +39,19 @@ impl JobPool {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
+        let rx_result = self.schedule_receivable(job);
+        async move {
+            rx_result.await.unwrap_or_else(|_| {
+                panic!("Worker thread or channel dropped before returning the result.")
+            })
+        }
+    }
+
+    pub fn schedule_receivable<F, T>(&self, job: F) -> Receiver<T>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
         let (tx_result, rx_result) = oneshot::channel::<T>();
 
         let job = Box::new(move || {
@@ -48,11 +61,7 @@ impl JobPool {
 
         self.tx.push(job);
 
-        async move {
-            rx_result.await.unwrap_or_else(|_| {
-                panic!("Worker thread or channel dropped before returning the result.")
-            })
-        }
+        rx_result
     }
 }
 
