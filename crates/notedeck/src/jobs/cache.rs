@@ -69,3 +69,27 @@ impl JobsCache {
         self.jobs.get(jobid)
     }
 }
+
+pub struct Jobs<'a> {
+    cache: &'a mut JobsCache,
+    pool: &'a mut JobPool,
+}
+
+impl<'a> Jobs<'a> {
+    pub fn new(cache: &'a mut JobsCache, pool: &'a mut JobPool) -> Self {
+        Self { cache, pool }
+    }
+
+    pub fn run<F>(
+        &'a mut self,
+        jobid: &JobId,
+        params: Option<JobParams>,
+        run_job: F,
+    ) -> &'a mut JobState
+    where
+        F: FnOnce(Option<JobParams>) -> Result<Job, JobError> + Send + 'static,
+    {
+        self.cache
+            .get_or_insert_with(self.pool, jobid, params, run_job)
+    }
+}
