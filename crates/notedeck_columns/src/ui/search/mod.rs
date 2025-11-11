@@ -9,7 +9,7 @@ use crate::{
 };
 use egui_winit::clipboard::Clipboard;
 use nostrdb::{Filter, Ndb, Transaction};
-use notedeck::{tr, tr_plural, JobsCache, Localization, NoteAction, NoteContext, NoteRef};
+use notedeck::{tr, tr_plural, Localization, NoteAction, NoteContext, NoteRef};
 
 use notedeck_ui::{
     context_menu::{input_context, PasteBehavior},
@@ -30,7 +30,6 @@ pub struct SearchView<'a, 'd> {
     note_options: NoteOptions,
     txn: &'a Transaction,
     note_context: &'a mut NoteContext<'d>,
-    jobs: &'a mut JobsCache,
 }
 
 impl<'a, 'd> SearchView<'a, 'd> {
@@ -39,14 +38,12 @@ impl<'a, 'd> SearchView<'a, 'd> {
         note_options: NoteOptions,
         query: &'a mut SearchQueryState,
         note_context: &'a mut NoteContext<'d>,
-        jobs: &'a mut JobsCache,
     ) -> Self {
         Self {
             txn,
             query,
             note_options,
             note_context,
-            jobs,
         }
     }
 
@@ -85,6 +82,7 @@ impl<'a, 'd> SearchView<'a, 'd> {
                     self.note_context.ndb,
                     self.txn,
                     &results,
+                    self.note_context.jobs,
                 )
                 .show_in_rect(ui.available_rect_before_wrap(), ui);
 
@@ -166,7 +164,6 @@ impl<'a, 'd> SearchView<'a, 'd> {
                     self.note_options,
                     self.txn,
                     self.note_context,
-                    self.jobs,
                 )
                 .show(ui)
             });

@@ -1,17 +1,23 @@
 pub mod action;
 pub mod blur;
 pub mod gif;
+pub mod http;
 pub mod images;
 pub mod imeta;
+pub mod latest;
 pub mod renderable;
+pub mod static_imgs;
 
 pub use action::{MediaAction, MediaInfo, ViewMediaInfo};
 pub use blur::{
-    compute_blurhash, update_imeta_blurhashes, ImageMetadata, ObfuscationType, PixelDimensions,
+    update_imeta_blurhashes, BlurCache, BlurState, ImageMetadata, ObfuscationType, PixelDimensions,
     PointDimensions,
 };
 use egui::{ColorImage, TextureHandle};
 pub use images::ImageType;
+pub use latest::{
+    NoLoadingLatestTex, MediaRenderState, TrustedMediaLatestTex, UntrustedMediaLatestTex,
+};
 pub use renderable::RenderableMedia;
 
 #[derive(Copy, Clone, Debug)]

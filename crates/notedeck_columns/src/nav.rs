@@ -500,6 +500,7 @@ fn process_render_nav_action(
                 ctx.zaps,
                 ctx.img_cache,
                 &mut app.view_state,
+                app.jobs.sender(),
                 ui,
             )
         }
@@ -563,7 +564,7 @@ fn render_nav_body(
         note_cache: ctx.note_cache,
         zaps: ctx.zaps,
         pool: ctx.pool,
-        job_pool: ctx.job_pool,
+        jobs: app.jobs.sender(),
         unknown_ids: ctx.unknown_ids,
         clipboard: ctx.clipboard,
         i18n: ctx.i18n,
@@ -586,7 +587,6 @@ fn render_nav_body(
                 depth,
                 ui,
                 &mut note_context,
-                &mut app.jobs,
                 scroll_to_top,
             );
 
@@ -606,13 +606,12 @@ fn render_nav_body(
             app.note_options,
             ui,
             &mut note_context,
-            &mut app.jobs,
         ),
         Route::Accounts(amr) => {
             let resp = render_accounts_route(
                 ui,
                 ctx,
-                &mut app.jobs,
+                app.jobs.sender(),
                 &mut app.view_state.login,
                 &mut app.onboarding,
                 &mut app.view_state.follow_packs,
@@ -642,7 +641,6 @@ fn render_nav_body(
             ctx.settings.get_settings_mut(),
             &mut note_context,
             &mut app.note_options,
-            &mut app.jobs,
         )
         .ui(ui)
         .map_output(RenderNavAction::SettingsAction),
@@ -687,7 +685,6 @@ fn render_nav_body(
                     &note,
                     inner_rect,
                     options,
-                    &mut app.jobs,
                     col,
                 )
                 .show(ui)
@@ -722,7 +719,6 @@ fn render_nav_body(
                 &note,
                 inner_rect,
                 app.note_options,
-                &mut app.jobs,
                 col,
             )
             .show(ui);
@@ -743,7 +739,6 @@ fn render_nav_body(
                 kp,
                 inner_rect,
                 app.note_options,
-                &mut app.jobs,
             )
             .ui(&txn, ui);
 
@@ -782,7 +777,6 @@ fn render_nav_body(
                 app.note_options,
                 search_buffer,
                 &mut note_context,
-                &mut app.jobs,
             )
             .show(ui)
             .map_output(RenderNavAction::NoteAction)
@@ -858,7 +852,13 @@ fn render_nav_body(
                 return BodyResponse::none();
             };
 
-            EditProfileView::new(ctx.i18n, state, ctx.img_cache, ctx.clipboard)
+            EditProfileView::new(
+                ctx.i18n,
+                state,
+                ctx.img_cache,
+                ctx.clipboard,
+                app.jobs.sender(),
+            )
                 .ui(ui)
                 .map_output_maybe(|save| {
                     if save {
@@ -934,6 +934,7 @@ fn render_nav_body(
                     &txn,
                     &target.zap_recipient,
                     default_msats,
+                    app.jobs.sender(),
                 )
                 .ui(ui),
             )
@@ -1084,6 +1085,7 @@ pub fn render_nav(
                         std::slice::from_ref(route),
                         col,
                         ctx.i18n,
+                        app.jobs.sender(),
                     )
                     .show_move_button(!narrow)
                     .show_delete_button(!narrow)
@@ -1127,6 +1129,7 @@ pub fn render_nav(
                     nav.routes(),
                     col,
                     ctx.i18n,
+                    app.jobs.sender(),
                 )
                 .show_move_button(!narrow)
                 .show_delete_button(!narrow)

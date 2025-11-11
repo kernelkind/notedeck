@@ -10,7 +10,7 @@ pub struct JobPool {
 
 impl Default for JobPool {
     fn default() -> Self {
-        JobPool::new(2)
+        JobPool::new(4)
     }
 }
 
@@ -18,14 +18,16 @@ impl JobPool {
     pub fn new(num_threads: usize) -> Self {
         let queue = SegQueue::<Job>::new();
         let arc_queue = Arc::new(queue);
-        for _ in 0..num_threads {
+        for i in 0..num_threads {
             let queue_ref = arc_queue.clone();
             std::thread::spawn(move || loop {
                 let Some(job) = queue_ref.pop() else {
                     continue;
                 };
 
+                tracing::trace!("Starting job on thread {i}");
                 job();
+                tracing::trace!("Finished job on thread {i}");
             });
         }
 
@@ -62,6 +64,10 @@ impl JobPool {
         self.tx.push(job);
 
         rx_result
+    }
+
+    pub fn schedule_no_output(&self, job: impl FnOnce() + Send + 'static) {
+        self.tx.push(Box::new(job));
     }
 }
 

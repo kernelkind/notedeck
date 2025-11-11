@@ -6,7 +6,7 @@ use nostrdb::{Note, ProfileRecord, Transaction};
 use notedeck::fonts::get_font_size;
 use notedeck::name::get_display_name;
 use notedeck::ui::is_narrow;
-use notedeck::{tr_plural, JobsCache, Muted, NotedeckTextStyle};
+use notedeck::{tr_plural, Muted, NotedeckTextStyle};
 use notedeck_ui::app_images::{like_image_filled, repost_image};
 use notedeck_ui::{ProfilePic, ProfilePreview};
 use std::f32::consts::PI;
@@ -30,7 +30,6 @@ pub struct TimelineView<'a, 'd> {
     timeline_cache: &'a mut TimelineCache,
     note_options: NoteOptions,
     note_context: &'a mut NoteContext<'d>,
-    jobs: &'a mut JobsCache,
     col: usize,
     scroll_to_top: bool,
 }
@@ -42,7 +41,6 @@ impl<'a, 'd> TimelineView<'a, 'd> {
         timeline_cache: &'a mut TimelineCache,
         note_context: &'a mut NoteContext<'d>,
         note_options: NoteOptions,
-        jobs: &'a mut JobsCache,
         col: usize,
     ) -> Self {
         let scroll_to_top = false;
@@ -51,7 +49,6 @@ impl<'a, 'd> TimelineView<'a, 'd> {
             timeline_cache,
             note_options,
             note_context,
-            jobs,
             col,
             scroll_to_top,
         }
@@ -64,7 +61,6 @@ impl<'a, 'd> TimelineView<'a, 'd> {
             self.timeline_cache,
             self.note_options,
             self.note_context,
-            self.jobs,
             self.col,
             self.scroll_to_top,
         )
@@ -93,7 +89,6 @@ fn timeline_ui(
     timeline_cache: &mut TimelineCache,
     mut note_options: NoteOptions,
     note_context: &mut NoteContext,
-    jobs: &mut JobsCache,
     col: usize,
     scroll_to_top: bool,
 ) -> BodyResponse<NoteAction> {
@@ -190,7 +185,6 @@ fn timeline_ui(
             note_options,
             &txn,
             note_context,
-            jobs,
         )
         .show(ui)
     });
@@ -378,7 +372,6 @@ pub struct TimelineTabView<'a, 'd> {
     note_options: NoteOptions,
     txn: &'a Transaction,
     note_context: &'a mut NoteContext<'d>,
-    jobs: &'a mut JobsCache,
 }
 
 impl<'a, 'd> TimelineTabView<'a, 'd> {
@@ -388,14 +381,12 @@ impl<'a, 'd> TimelineTabView<'a, 'd> {
         note_options: NoteOptions,
         txn: &'a Transaction,
         note_context: &'a mut NoteContext<'d>,
-        jobs: &'a mut JobsCache,
     ) -> Self {
         Self {
             tab,
             note_options,
             txn,
             note_context,
-            jobs,
         }
     }
 
@@ -477,7 +468,6 @@ impl<'a, 'd> TimelineTabView<'a, 'd> {
                 ui,
                 self.note_context,
                 self.note_options,
-                self.jobs,
                 &underlying_note,
             ),
             NoteUnit::Composite(composite) => match composite {
@@ -485,7 +475,6 @@ impl<'a, 'd> TimelineTabView<'a, 'd> {
                     ui,
                     self.note_context,
                     self.note_options,
-                    self.jobs,
                     mute,
                     self.txn,
                     &underlying_note,
@@ -495,7 +484,6 @@ impl<'a, 'd> TimelineTabView<'a, 'd> {
                     ui,
                     self.note_context,
                     self.note_options,
-                    self.jobs,
                     mute,
                     self.txn,
                     &underlying_note,
@@ -676,12 +664,11 @@ fn render_note(
     ui: &mut egui::Ui,
     note_context: &mut NoteContext,
     note_options: NoteOptions,
-    jobs: &mut JobsCache,
     note: &Note,
 ) -> RenderEntryResponse {
     let mut action = None;
     notedeck_ui::padding(8.0, ui, |ui| {
-        let resp = NoteView::new(note_context, note, note_options, jobs).show(ui);
+        let resp = NoteView::new(note_context, note, note_options).show(ui);
 
         if let Some(note_action) = resp.action {
             action = Some(note_action);
@@ -699,7 +686,6 @@ fn render_reaction_cluster(
     ui: &mut egui::Ui,
     note_context: &mut NoteContext,
     note_options: NoteOptions,
-    jobs: &mut JobsCache,
     mute: &std::sync::Arc<Muted>,
     txn: &Transaction,
     underlying_note: &Note,
@@ -729,7 +715,6 @@ fn render_reaction_cluster(
         ui,
         note_context,
         note_options | NoteOptions::Notification,
-        jobs,
         underlying_note,
         profiles_to_show,
         CompositeType::Reaction,
@@ -742,7 +727,6 @@ fn render_composite_entry(
     ui: &mut egui::Ui,
     note_context: &mut NoteContext,
     mut note_options: NoteOptions,
-    jobs: &mut JobsCache,
     underlying_note: &nostrdb::Note<'_>,
     profiles_to_show: Vec<ProfileEntry>,
     composite_type: CompositeType,
@@ -783,21 +767,22 @@ fn render_composite_entry(
             let show_label_newline = ui
                 .horizontal_wrapped(|ui| {
                     profiling::scope!("header");
-                    let pfps_resp = ui
-                        .allocate_ui_with_layout(
-                            vec2(ui.available_width(), 32.0),
-                            Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                render_profiles(
-                                    ui,
-                                    profiles_to_show,
-                                    &composite_type,
-                                    note_context.img_cache,
-                                    note_options.contains(NoteOptions::Notification),
-                                )
-                            },
+            let pfps_resp = ui
+                .allocate_ui_with_layout(
+                    vec2(ui.available_width(), 32.0),
+                    Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        render_profiles(
+                            ui,
+                            profiles_to_show,
+                            &composite_type,
+                            note_context.img_cache,
+                            note_context.jobs,
+                            note_options.contains(NoteOptions::Notification),
                         )
-                        .inner;
+                    },
+                )
+                .inner;
 
                     if let Some(cur_action) = pfps_resp.action {
                         action = Some(cur_action);
@@ -867,7 +852,7 @@ fn render_composite_entry(
 
                         ui.add_space(48.0);
                     };
-                    NoteView::new(note_context, underlying_note, note_options, jobs).show(ui)
+                    NoteView::new(note_context, underlying_note, note_options).show(ui)
                 })
                 .inner;
 
@@ -886,6 +871,7 @@ fn render_profiles(
     profiles_to_show: Vec<ProfileEntry>,
     composite_type: &CompositeType,
     img_cache: &mut notedeck::Images,
+    jobs: &notedeck::JobSender,
     notification: bool,
 ) -> PfpsResponse {
     let mut action = None;
@@ -932,7 +918,7 @@ fn render_profiles(
                     profiling::scope!("actual rendering individual pfp");
 
                     let mut widget =
-                        ProfilePic::from_profile_or_default(img_cache, entry.record.as_ref())
+                        ProfilePic::from_profile_or_default(img_cache, jobs, entry.record.as_ref())
                             .size(24.0)
                             .sense(Sense::click());
                     let mut resp = ui.put(rect, &mut widget);
@@ -941,7 +927,7 @@ fn render_profiles(
                     if let Some(record) = entry.record.as_ref() {
                         resp = resp.on_hover_ui_at_pointer(|ui| {
                             ui.set_max_width(300.0);
-                            ui.add(ProfilePreview::new(record, img_cache));
+                            ui.add(ProfilePreview::new(record, img_cache, jobs));
                         });
                     }
 
@@ -977,7 +963,6 @@ fn render_repost_cluster(
     ui: &mut egui::Ui,
     note_context: &mut NoteContext,
     note_options: NoteOptions,
-    jobs: &mut JobsCache,
     mute: &std::sync::Arc<Muted>,
     txn: &Transaction,
     underlying_note: &Note,
@@ -997,7 +982,6 @@ fn render_repost_cluster(
         ui,
         note_context,
         note_options,
-        jobs,
         underlying_note,
         profiles_to_show,
         CompositeType::Repost,

@@ -5,7 +5,7 @@ use crate::{
 use egui::{Align, Key, KeyboardShortcut, Layout, Modifiers};
 use nostrdb::{Ndb, Transaction};
 use notedeck::{
-    tr, Accounts, AppContext, Images, JobsCache, Localization, NoteAction, NoteContext,
+    tr, Accounts, AppContext, Images, JobSender, Localization, NoteAction, NoteContext,
 };
 use notedeck_ui::{app_images, icons::search_icon, NoteOptions, ProfilePic};
 
@@ -89,10 +89,10 @@ impl<'a> DaveUi<'a> {
     pub fn ui(
         &mut self,
         app_ctx: &mut AppContext,
-        jobs: &mut JobsCache,
+        job_sender: &JobSender,
         ui: &mut egui::Ui,
     ) -> DaveResponse {
-        let action = top_buttons_ui(app_ctx, ui);
+        let action = top_buttons_ui(app_ctx, job_sender, ui);
 
         egui::Frame::NONE
             .show(ui, |ui| {
@@ -118,7 +118,10 @@ impl<'a> DaveUi<'a> {
                         .show(ui, |ui| {
                             Self::chat_frame(ui.ctx())
                                 .show(ui, |ui| {
-                                    ui.vertical(|ui| self.render_chat(app_ctx, jobs, ui)).inner
+                                    ui.vertical(|ui| {
+                                        self.render_chat(app_ctx, job_sender, ui)
+                                    })
+                                    .inner
                                 })
                                 .inner
                         })
@@ -155,7 +158,7 @@ impl<'a> DaveUi<'a> {
     fn render_chat(
         &self,
         ctx: &mut AppContext,
-        jobs: &mut JobsCache,
+        job_sender: &JobSender,
         ui: &mut egui::Ui,
     ) -> Option<NoteAction> {
         let mut action: Option<NoteAction> = None;
@@ -182,7 +185,7 @@ impl<'a> DaveUi<'a> {
                     // have a debug option to show this
                     None
                 }
-                Message::ToolCalls(toolcalls) => Self::tool_calls_ui(ctx, jobs, toolcalls, ui),
+                Message::ToolCalls(toolcalls) => Self::tool_calls_ui(ctx, job_sender, toolcalls, ui),
             };
 
             if r.is_some() {
@@ -197,17 +200,22 @@ impl<'a> DaveUi<'a> {
         //ui.label(format!("tool_response: {:?}", tool_response));
     }
 
-    fn search_call_ui(ctx: &mut AppContext, query_call: &QueryCall, ui: &mut egui::Ui) {
+    fn search_call_ui(
+        ctx: &mut AppContext,
+        query_call: &QueryCall,
+        job_sender: &JobSender,
+        ui: &mut egui::Ui,
+    ) {
         ui.add(search_icon(16.0, 16.0));
         ui.add_space(8.0);
 
-        query_call_ui(ctx.img_cache, ctx.ndb, query_call, ui);
+        query_call_ui(ctx.img_cache, ctx.ndb, query_call, job_sender, ui);
     }
 
     /// The ai has asked us to render some notes, so we do that here
     fn present_notes_ui(
         ctx: &mut AppContext,
-        jobs: &mut JobsCache,
+        job_sender: &JobSender,
         call: &PresentNotesCall,
         ui: &mut egui::Ui,
     ) -> Option<NoteAction> {
@@ -218,7 +226,7 @@ impl<'a> DaveUi<'a> {
             note_cache: ctx.note_cache,
             zaps: ctx.zaps,
             pool: ctx.pool,
-            job_pool: ctx.job_pool,
+            jobs: job_sender,
             unknown_ids: ctx.unknown_ids,
             clipboard: ctx.clipboard,
             i18n: ctx.i18n,
@@ -249,7 +257,6 @@ impl<'a> DaveUi<'a> {
                                         &mut note_context,
                                         &note,
                                         NoteOptions::default(),
-                                        jobs,
                                     )
                                     .preview_style()
                                     .hide_media(true)
@@ -272,7 +279,7 @@ impl<'a> DaveUi<'a> {
 
     fn tool_calls_ui(
         ctx: &mut AppContext,
-        jobs: &mut JobsCache,
+        job_sender: &JobSender,
         toolcalls: &[ToolCall],
         ui: &mut egui::Ui,
     ) -> Option<NoteAction> {
@@ -282,7 +289,7 @@ impl<'a> DaveUi<'a> {
             for call in toolcalls {
                 match call.calls() {
                     ToolCalls::PresentNotes(call) => {
-                        let r = Self::present_notes_ui(ctx, jobs, call, ui);
+                        let r = Self::present_notes_ui(ctx, job_sender, call, ui);
                         if r.is_some() {
                             note_action = r;
                         }
@@ -295,7 +302,7 @@ impl<'a> DaveUi<'a> {
                             egui::vec2(ui.available_size().x, 32.0),
                             Layout::left_to_right(Align::Center),
                             |ui| {
-                                Self::search_call_ui(ctx, search_call, ui);
+                                Self::search_call_ui(ctx, search_call, job_sender, ui);
                             },
                         );
                     }
@@ -399,7 +406,13 @@ fn new_chat_button() -> impl egui::Widget {
     }
 }
 
-fn query_call_ui(cache: &mut notedeck::Images, ndb: &Ndb, query: &QueryCall, ui: &mut egui::Ui) {
+fn query_call_ui(
+    cache: &mut notedeck::Images,
+    ndb: &Ndb,
+    query: &QueryCall,
+    jobs: &JobSender,
+    ui: &mut egui::Ui,
+) {
     ui.spacing_mut().item_spacing.x = 8.0;
     if let Some(pubkey) = query.author() {
         let txn = Transaction::new(ndb).unwrap();
@@ -409,6 +422,7 @@ fn query_call_ui(cache: &mut notedeck::Images, ndb: &Ndb, query: &QueryCall, ui:
                 ui.add(
                     &mut ProfilePic::from_profile_or_default(
                         cache,
+                        jobs,
                         ndb.get_profile_by_pubkey(&txn, pubkey.bytes())
                             .ok()
                             .as_ref(),
@@ -477,7 +491,11 @@ fn pill_label_ui(name: &str, mut value: impl FnMut(&mut egui::Ui), ui: &mut egui
         });
 }
 
-fn top_buttons_ui(app_ctx: &mut AppContext, ui: &mut egui::Ui) -> Option<DaveAction> {
+fn top_buttons_ui(
+    app_ctx: &mut AppContext,
+    job_sender: &JobSender,
+    ui: &mut egui::Ui,
+) -> Option<DaveAction> {
     // Scroll area for chat messages
     let mut action: Option<DaveAction> = None;
     let mut rect = ui.available_rect_before_wrap();
@@ -489,7 +507,13 @@ fn top_buttons_ui(app_ctx: &mut AppContext, ui: &mut egui::Ui) -> Option<DaveAct
     let r = ui
         .put(
             rect,
-            &mut pfp_button(&txn, app_ctx.accounts, app_ctx.img_cache, app_ctx.ndb),
+            &mut pfp_button(
+                &txn,
+                app_ctx.accounts,
+                app_ctx.img_cache,
+                app_ctx.ndb,
+                job_sender,
+            ),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
 
@@ -512,13 +536,14 @@ fn pfp_button<'me, 'a>(
     accounts: &Accounts,
     img_cache: &'me mut Images,
     ndb: &Ndb,
+    jobs: &'me JobSender,
 ) -> ProfilePic<'me, 'a> {
     let account = accounts.get_selected_account();
     let profile = ndb
         .get_profile_by_pubkey(txn, account.key.pubkey.bytes())
         .ok();
 
-    ProfilePic::from_profile_or_default(img_cache, profile.as_ref())
+    ProfilePic::from_profile_or_default(img_cache, jobs, profile.as_ref())
         .size(24.0)
         .sense(egui::Sense::click())
 }

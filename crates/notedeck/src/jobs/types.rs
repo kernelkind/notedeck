@@ -1,47 +1,51 @@
-use egui::TextureHandle;
+use std::path::PathBuf;
+
+use crate::{media::http::HyperHttpResponse, TexturedImage};
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum JobIdOwned {
-    Blurhash(String), // image URL
+pub(crate) struct JobIdAccessible {
+    pub access: JobAccess,
+    pub job_id: JobId,
 }
 
-impl<'a> From<&JobId<'a>> for JobIdOwned {
-    fn from(jobid: &JobId<'a>) -> Self {
-        match jobid {
-            JobId::Blurhash(s) => JobIdOwned::Blurhash(s.to_string()),
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub(crate) struct JobId {
+    pub id: String,
+    pub job_type: JobIdType,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub(crate) enum JobAccess {
+    Public,
+    Internal,
+}
+
+impl JobIdAccessible {
+    pub fn new_public(id: String, job_type: JobIdType) -> Self {
+        Self {
+            job_id: JobId { id, job_type },
+            access: JobAccess::Public,
         }
+    }
+
+    pub fn into_internal(mut self) -> Self {
+        self.access = JobAccess::Internal;
+        self
     }
 }
 
-#[derive(Debug, Hash)]
-pub enum JobId<'a> {
-    Blurhash(&'a str), // image URL
-}
-
-impl hashbrown::Equivalent<JobIdOwned> for JobId<'_> {
-    fn equivalent(&self, key: &JobIdOwned) -> bool {
-        match (self, key) {
-            (JobId::Blurhash(a), JobIdOwned::Blurhash(b)) => *a == b.as_str(),
-        }
-    }
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub enum JobIdType {
+    Blurhash,
+    StaticImg,
+    AnimatedImg,
 }
 
 #[derive(Debug)]
 pub enum JobParamsOwned {
     Blurhash(BlurhashParamsOwned),
-}
-
-impl<'a> From<JobParams<'a>> for JobParamsOwned {
-    fn from(params: JobParams<'a>) -> Self {
-        match params {
-            JobParams::Blurhash(bp) => JobParamsOwned::Blurhash(bp.into()),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum JobParams<'a> {
-    Blurhash(BlurhashParams<'a>),
+    DiskImg(ImgParamsOwned),
+    NetImg(FromNetImgParamsOwned),
 }
 
 #[derive(Debug)]
@@ -50,32 +54,18 @@ pub struct BlurhashParamsOwned {
     pub url: String,
     pub ctx: egui::Context,
 }
-
-impl<'a> From<BlurhashParams<'a>> for BlurhashParamsOwned {
-    fn from(params: BlurhashParams<'a>) -> Self {
-        BlurhashParamsOwned {
-            blurhash: params.blurhash.to_owned(),
-            url: params.url.to_owned(),
-            ctx: params.ctx.clone(),
-        }
-    }
+#[derive(Debug)]
+pub struct ImgParamsOwned {
+    pub url: String,
+    pub path: PathBuf,
 }
 
 #[derive(Debug)]
-pub struct BlurhashParams<'a> {
-    pub blurhash: &'a str,
-    pub url: &'a str,
-    pub ctx: &'a egui::Context,
+pub struct FromNetImgParamsOwned {
+    pub http_resp: HyperHttpResponse,
+    pub img_params: ImgParamsOwned,
 }
 
-pub enum Job {
-    Blurhash(Option<TextureHandle>),
-}
-
-impl std::fmt::Debug for Job {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Job::Blurhash(_) => write!(f, "Blurhash"),
-        }
-    }
+pub struct ImageJob {
+    pub job: Result<TexturedImage, crate::Error>,
 }

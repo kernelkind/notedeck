@@ -6,10 +6,9 @@ use egui_extras::{Size, StripBuilder};
 use enostr::NoteId;
 use nostrdb::Transaction;
 use notedeck::{
-    tr,
     ui::{is_narrow, richtext_small},
-    Images, JobsCache, LanguageIdentifier, Localization, NoteContext, NotedeckTextStyle, Settings,
-    SettingsHandler, DEFAULT_NOTE_BODY_FONT_SIZE,
+    tr, DEFAULT_NOTE_BODY_FONT_SIZE, Images, LanguageIdentifier, Localization, NoteContext,
+    NotedeckTextStyle, Settings, SettingsHandler,
 };
 use notedeck_ui::{
     app_images::{copy_to_clipboard_dark_image, copy_to_clipboard_image},
@@ -98,7 +97,6 @@ pub struct SettingsView<'a> {
     settings: &'a mut Settings,
     note_context: &'a mut NoteContext<'a>,
     note_options: &'a mut NoteOptions,
-    jobs: &'a mut JobsCache,
 }
 
 fn settings_group<S>(ui: &mut egui::Ui, title: S, contents: impl FnOnce(&mut egui::Ui))
@@ -125,13 +123,11 @@ impl<'a> SettingsView<'a> {
         settings: &'a mut Settings,
         note_context: &'a mut NoteContext<'a>,
         note_options: &'a mut NoteOptions,
-        jobs: &'a mut JobsCache,
     ) -> Self {
         Self {
             settings,
             note_context,
             note_options,
-            jobs,
         }
     }
 
@@ -203,7 +199,6 @@ impl<'a> SettingsView<'a> {
                                 self.note_context,
                                 &preview_note,
                                 *self.note_options,
-                                self.jobs,
                             )
                             .actionbar(false)
                             .options_button(false)
