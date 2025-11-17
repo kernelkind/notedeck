@@ -4,7 +4,7 @@ use egui::{vec2, Button, CornerRadius, Layout, Margin, RichText, ScrollArea, Tex
 use egui_winit::clipboard::Clipboard;
 use enostr::ProfileState;
 use notedeck::{
-    profile::unwrap_profile_url, tr, Images, JobSender, Localization, NotedeckTextStyle,
+    profile::unwrap_profile_url, tr, Images, MediaJobSender, Localization, NotedeckTextStyle,
 };
 use notedeck_ui::context_menu::{input_context, PasteBehavior};
 use notedeck_ui::{profile::banner, ProfilePic};
@@ -16,7 +16,7 @@ pub struct EditProfileView<'a> {
     clipboard: &'a mut Clipboard,
     img_cache: &'a mut Images,
     i18n: &'a mut Localization,
-    jobs: &'a JobSender,
+    jobs: &'a MediaJobSender,
 }
 
 impl<'a> EditProfileView<'a> {
@@ -25,7 +25,7 @@ impl<'a> EditProfileView<'a> {
         state: &'a mut ProfileState,
         img_cache: &'a mut Images,
         clipboard: &'a mut Clipboard,
-        jobs: &'a JobSender,
+        jobs: &'a MediaJobSender,
     ) -> Self {
         Self {
             i18n,

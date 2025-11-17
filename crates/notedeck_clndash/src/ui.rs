@@ -4,7 +4,7 @@ use egui::Color32;
 use egui::Label;
 use egui::RichText;
 use egui::Widget;
-use notedeck::{AppContext, Jobs};
+use notedeck::AppContext;
 use std::collections::HashMap;
 
 pub fn note_hover_ui(
@@ -41,8 +41,6 @@ pub fn note_hover_ui(
             .get_profile_by_pubkey(&txn, zapreq_note.pubkey())
             .ok();
 
-        let jobs = Jobs::default();
-
         // TODO(jb55): make this less horrible
         let mut note_context = notedeck::NoteContext {
             ndb: ctx.ndb,
@@ -51,7 +49,7 @@ pub fn note_hover_ui(
             note_cache: ctx.note_cache,
             zaps: ctx.zaps,
             pool: ctx.pool,
-            jobs: jobs.sender(),
+            jobs: ctx.media_jobs.sender(),
             unknown_ids: ctx.unknown_ids,
             clipboard: ctx.clipboard,
             i18n: ctx.i18n,

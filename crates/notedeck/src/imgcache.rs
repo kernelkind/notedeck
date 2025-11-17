@@ -8,7 +8,7 @@ use crate::urls::{UrlCache, UrlMimes};
 use crate::ImageMetadata;
 use crate::RenderableMedia;
 use crate::Result;
-use crate::{JobSender, ObfuscationType};
+use crate::{MediaJobSender, ObfuscationType};
 use egui::TextureHandle;
 use image::{Delay, Frame};
 
@@ -368,7 +368,7 @@ impl Images {
 
     pub fn latest_texture<'a>(
         &'a mut self,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ui: &mut egui::Ui,
         url: &str,
         img_type: ImageType,

@@ -2,12 +2,12 @@ use crate::ProfilePreview;
 use egui::Sense;
 use enostr::Pubkey;
 use nostrdb::{Ndb, Transaction};
-use notedeck::{name::get_display_name, Images, JobSender, NoteAction, NotedeckTextStyle};
+use notedeck::{name::get_display_name, Images, MediaJobSender, NoteAction, NotedeckTextStyle};
 
 pub struct Mention<'a> {
     ndb: &'a Ndb,
     img_cache: &'a mut Images,
-    jobs: &'a JobSender,
+    jobs: &'a MediaJobSender,
     txn: &'a Transaction,
     pk: &'a [u8; 32],
     selectable: bool,
@@ -18,7 +18,7 @@ impl<'a> Mention<'a> {
     pub fn new(
         ndb: &'a Ndb,
         img_cache: &'a mut Images,
-        jobs: &'a JobSender,
+        jobs: &'a MediaJobSender,
         txn: &'a Transaction,
         pk: &'a [u8; 32],
     ) -> Self {
@@ -64,7 +64,7 @@ impl<'a> Mention<'a> {
 fn mention_ui(
     ndb: &Ndb,
     img_cache: &mut Images,
-    jobs: &JobSender,
+    jobs: &MediaJobSender,
     txn: &Transaction,
     pk: &[u8; 32],
     ui: &mut egui::Ui,

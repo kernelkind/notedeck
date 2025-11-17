@@ -5,15 +5,15 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-use crate::Animation;
 use crate::{
     media::{
         images::{buffer_to_color_image, process_image},
         load_texture_checked, AnimationMode,
     },
-    CompleteResponse, Error, ImageFrame, ImageType, JobIdType, JobOutput, JobPackage, JobResult,
-    JobRun, JobSender, MediaCache, NoOutputRun, RunType, TextureFrame,
+    CompleteResponse, Error, ImageFrame, ImageType, JobOutput, JobPackage, JobRun, MediaJobSender,
+    MediaCache, MediaJobKind, NoOutputRun, RunType, TextureFrame,
 };
+use crate::{Animation, MediaJobResult};
 use crate::{GifState, TextureState};
 use egui::{ColorImage, TextureHandle};
 use image::{codecs::gif::GifDecoder, AnimationDecoder, DynamicImage, Frame};
@@ -133,13 +133,13 @@ impl AnimatedImgTexCache {
         self.cache.get(url)
     }
 
-    pub fn request(&self, jobs: &JobSender, ctx: &egui::Context, url: &str, imgtype: ImageType) {
+    pub fn request(&self, jobs: &MediaJobSender, ctx: &egui::Context, url: &str, imgtype: ImageType) {
         let _ = self.get_or_request(jobs, ctx, url, imgtype);
     }
 
     pub fn get_or_request(
         &self,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ctx: &egui::Context,
         url: &str,
         imgtype: ImageType,
@@ -155,7 +155,7 @@ impl AnimatedImgTexCache {
         if path.exists() {
             if let Err(e) = jobs.send(JobPackage::new(
                 url.to_owned(),
-                JobIdType::AnimatedImg,
+                MediaJobKind::AnimatedImg,
                 RunType::Output(JobRun::Sync(Box::new(move || {
                     from_disk_job_run(ctx, url, path)
                 }))),
@@ -166,7 +166,7 @@ impl AnimatedImgTexCache {
             let anim_path = self.animated_img_cache_path.clone();
             if let Err(e) = jobs.send(JobPackage::new(
                 url.to_owned(),
-                JobIdType::AnimatedImg,
+                MediaJobKind::AnimatedImg,
                 RunType::Output(JobRun::Async(Box::pin(from_net_run(
                     ctx, url, anim_path, imgtype,
                 )))),
@@ -179,17 +179,17 @@ impl AnimatedImgTexCache {
     }
 }
 
-fn from_disk_job_run(ctx: egui::Context, url: String, path: PathBuf) -> JobOutput {
+fn from_disk_job_run(ctx: egui::Context, url: String, path: PathBuf) -> JobOutput<MediaJobResult> {
     tracing::trace!("Starting animated from disk job for {url}");
     let gif_bytes = match std::fs::read(path.clone()) {
         Ok(b) => b,
         Err(e) => {
-            return JobOutput::Complete(CompleteResponse::new(JobResult::Animation(Err(
+            return JobOutput::Complete(CompleteResponse::new(MediaJobResult::Animation(Err(
                 Error::Io(e),
             ))))
         }
     };
-    JobOutput::Complete(CompleteResponse::new(JobResult::Animation(
+    JobOutput::Complete(CompleteResponse::new(MediaJobResult::Animation(
         generate_anim_pkg(ctx.clone(), url.to_owned(), gif_bytes, |img| {
             buffer_to_color_image(img.as_flat_samples_u8(), img.width(), img.height())
         })
@@ -202,13 +202,13 @@ async fn from_net_run(
     url: String,
     path: PathBuf,
     imgtype: ImageType,
-) -> JobOutput {
+) -> JobOutput<MediaJobResult> {
     let res = match crate::media::http::http_req(&url).await {
         Ok(r) => r,
         Err(e) => {
-            return JobOutput::complete(JobResult::Animation(Err(crate::Error::Generic(format!(
-                "Http error: {e}"
-            )))));
+            return JobOutput::complete(MediaJobResult::Animation(Err(crate::Error::Generic(
+                format!("Http error: {e}"),
+            ))));
         }
     };
 
@@ -220,13 +220,13 @@ async fn from_net_run(
             }) {
                 Ok(a) => a,
                 Err(e) => {
-                    return JobOutput::Complete(CompleteResponse::new(JobResult::Animation(Err(
-                        e,
-                    ))));
+                    return JobOutput::Complete(CompleteResponse::new(MediaJobResult::Animation(
+                        Err(e),
+                    )));
                 }
             };
         JobOutput::Complete(
-            CompleteResponse::new(JobResult::Animation(Ok(animation.anim))).run_no_output(
+            CompleteResponse::new(MediaJobResult::Animation(Ok(animation.anim))).run_no_output(
                 NoOutputRun::Sync(Box::new(move || {
                     tracing::trace!("writing animated texture to file for {url}");
                     if let Err(e) = MediaCache::write_gif(&path, &url, animation.img_frames) {

@@ -3,13 +3,13 @@ use egui::{vec2, InnerResponse, Sense, Stroke, TextureHandle};
 use notedeck::media::images::ImageType;
 use notedeck::media::latest::LatestImageTex;
 use notedeck::media::AnimationMode;
-use notedeck::JobSender;
+use notedeck::MediaJobSender;
 use notedeck::MediaAction;
 use notedeck::{show_one_error_message, supported_mime_hosted_at_url, Images};
 
 pub struct ProfilePic<'cache, 'url> {
     cache: &'cache mut Images,
-    jobs: &'cache JobSender,
+    jobs: &'cache MediaJobSender,
     url: &'url str,
     size: f32,
     sense: Sense,
@@ -39,7 +39,7 @@ impl egui::Widget for &mut ProfilePic<'_, '_> {
 }
 
 impl<'cache, 'url> ProfilePic<'cache, 'url> {
-    pub fn new(cache: &'cache mut Images, jobs: &'cache JobSender, url: &'url str) -> Self {
+    pub fn new(cache: &'cache mut Images, jobs: &'cache MediaJobSender, url: &'url str) -> Self {
         let size = Self::default_size() as f32;
         let sense = Sense::hover();
 
@@ -71,7 +71,7 @@ impl<'cache, 'url> ProfilePic<'cache, 'url> {
 
     pub fn from_profile(
         cache: &'cache mut Images,
-        jobs: &'cache JobSender,
+        jobs: &'cache MediaJobSender,
         profile: &nostrdb::ProfileRecord<'url>,
     ) -> Option<Self> {
         profile
@@ -83,7 +83,7 @@ impl<'cache, 'url> ProfilePic<'cache, 'url> {
 
     pub fn from_profile_or_default(
         cache: &'cache mut Images,
-        jobs: &'cache JobSender,
+        jobs: &'cache MediaJobSender,
         profile: Option<&nostrdb::ProfileRecord<'url>>,
     ) -> Self {
         let url = profile
@@ -126,7 +126,7 @@ impl<'cache, 'url> ProfilePic<'cache, 'url> {
 #[profiling::function]
 fn render_pfp(
     ui: &mut egui::Ui,
-    jobs: &JobSender,
+    jobs: &MediaJobSender,
     img_cache: &mut Images,
     url: &str,
     ui_size: f32,

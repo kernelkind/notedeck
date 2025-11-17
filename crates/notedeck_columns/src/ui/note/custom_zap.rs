@@ -5,7 +5,7 @@ use egui::{
 use enostr::Pubkey;
 use nostrdb::{Ndb, ProfileRecord, Transaction};
 use notedeck::{
-    fonts::get_font_size, get_profile_url, name::get_display_name, tr, Images, JobSender,
+    fonts::get_font_size, get_profile_url, name::get_display_name, tr, Images, MediaJobSender,
     Localization, NotedeckTextStyle,
 };
 use notedeck_ui::{
@@ -20,7 +20,7 @@ pub struct CustomZapView<'a> {
     target_pubkey: &'a Pubkey,
     default_msats: u64,
     i18n: &'a mut Localization,
-    jobs: &'a JobSender,
+    jobs: &'a MediaJobSender,
 }
 
 #[allow(clippy::new_without_default)]
@@ -32,7 +32,7 @@ impl<'a> CustomZapView<'a> {
         txn: &'a Transaction,
         target_pubkey: &'a Pubkey,
         default_msats: u64,
-        jobs: &'a JobSender,
+        jobs: &'a MediaJobSender,
     ) -> Self {
         Self {
             target_pubkey,
@@ -173,7 +173,7 @@ fn show_title(ui: &mut egui::Ui, i18n: &mut Localization) {
 fn show_profile(
     ui: &mut egui::Ui,
     images: &mut Images,
-    jobs: &JobSender,
+    jobs: &MediaJobSender,
     profile: Option<&ProfileRecord>,
 ) {
     let max_size = 24.0;

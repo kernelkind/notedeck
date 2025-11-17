@@ -2,7 +2,7 @@ use std::mem;
 
 use egui::{Layout, ScrollArea};
 use nostrdb::Ndb;
-use notedeck::{tr, Images, JobSender, Localization};
+use notedeck::{tr, Images, MediaJobSender, Localization};
 use notedeck_ui::{
     colors,
     nip51_set::{Nip51SetUiCache, Nip51SetWidget, Nip51SetWidgetAction, Nip51SetWidgetFlags},
@@ -17,7 +17,7 @@ pub struct FollowPackOnboardingView<'a> {
     ndb: &'a Ndb,
     images: &'a mut Images,
     loc: &'a mut Localization,
-    jobs: &'a JobSender,
+    jobs: &'a MediaJobSender,
 }
 
 pub enum OnboardingResponse {
@@ -37,7 +37,7 @@ impl<'a> FollowPackOnboardingView<'a> {
         ndb: &'a Ndb,
         images: &'a mut Images,
         loc: &'a mut Localization,
-        jobs: &'a JobSender,
+        jobs: &'a MediaJobSender,
     ) -> Self {
         Self {
             onboarding,

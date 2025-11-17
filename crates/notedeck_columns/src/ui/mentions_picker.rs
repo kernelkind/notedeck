@@ -1,7 +1,7 @@
 use egui::{vec2, FontId, Layout, Pos2, Rect, ScrollArea, UiBuilder, Vec2b};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
 use notedeck::{
-    fonts::get_font_size, name::get_display_name, profile::get_profile_url, Images, JobSender,
+    fonts::get_font_size, name::get_display_name, profile::get_profile_url, Images, MediaJobSender,
     NotedeckTextStyle,
 };
 use notedeck_ui::{
@@ -20,7 +20,7 @@ pub struct MentionPickerView<'a> {
     txn: &'a Transaction,
     img_cache: &'a mut Images,
     results: &'a Vec<&'a [u8; 32]>,
-    jobs: &'a JobSender,
+    jobs: &'a MediaJobSender,
 }
 
 pub enum MentionPickerResponse {
@@ -34,7 +34,7 @@ impl<'a> MentionPickerView<'a> {
         ndb: &'a Ndb,
         txn: &'a Transaction,
         results: &'a Vec<&'a [u8; 32]>,
-        jobs: &'a JobSender,
+        jobs: &'a MediaJobSender,
     ) -> Self {
         Self {
             ndb,
@@ -132,7 +132,7 @@ impl<'a> MentionPickerView<'a> {
 fn user_result<'a>(
     profile: &'a ProfileRecord<'_>,
     cache: &'a mut Images,
-    jobs: &'a JobSender,
+    jobs: &'a MediaJobSender,
     index: usize,
     width: f32,
 ) -> impl egui::Widget + 'a {

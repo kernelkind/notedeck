@@ -1,7 +1,7 @@
 use enostr::{FullKeypair, Pubkey};
 use nostrdb::{Ndb, Transaction};
 
-use notedeck::{Accounts, AppContext, JobSender, Localization, SingleUnkIdAction, UnknownIds};
+use notedeck::{Accounts, AppContext, Localization, SingleUnkIdAction, UnknownIds};
 use notedeck_ui::nip51_set::Nip51SetUiCache;
 
 pub use crate::accounts::route::AccountsResponse;
@@ -77,7 +77,6 @@ pub struct AddAccountAction {
 pub fn render_accounts_route(
     ui: &mut egui::Ui,
     app_ctx: &mut AppContext,
-    jobs: &JobSender,
     login_state: &mut AcquireKeyState,
     onboarding: &mut Onboarding,
     follow_packs_ui: &mut Nip51SetUiCache,
@@ -87,7 +86,7 @@ pub fn render_accounts_route(
         AccountsRoute::Accounts => AccountsView::new(
             app_ctx.ndb,
             app_ctx.accounts,
-            jobs,
+            app_ctx.media_jobs.sender(),
             app_ctx.img_cache,
             app_ctx.i18n,
         )
@@ -108,7 +107,7 @@ pub fn render_accounts_route(
             app_ctx.ndb,
             app_ctx.img_cache,
             app_ctx.i18n,
-            jobs,
+            app_ctx.media_jobs.sender(),
         )
         .ui(ui)
         .map_output(|r| match r {

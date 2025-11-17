@@ -1,29 +1,25 @@
-use std::path::PathBuf;
-
-use crate::{media::http::HyperHttpResponse, TexturedImage};
-
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub(crate) struct JobIdAccessible {
+pub(crate) struct JobIdAccessible<K> {
     pub access: JobAccess,
-    pub job_id: JobId,
+    pub job_id: JobId<K>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub(crate) struct JobId {
+pub struct JobId<K> {
     pub id: String,
-    pub job_type: JobIdType,
+    pub job_kind: K,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) enum JobAccess {
-    Public,
-    Internal,
+    Public,   // Jobs requested outside the cache
+    Internal, // Jobs requested inside the cache
 }
 
-impl JobIdAccessible {
-    pub fn new_public(id: String, job_type: JobIdType) -> Self {
+impl<K> JobIdAccessible<K> {
+    pub fn new_public(id: String, job_kind: K) -> Self {
         Self {
-            job_id: JobId { id, job_type },
+            job_id: JobId { id, job_kind },
             access: JobAccess::Public,
         }
     }
@@ -35,37 +31,8 @@ impl JobIdAccessible {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum JobIdType {
+pub enum MediaJobKind {
     Blurhash,
     StaticImg,
     AnimatedImg,
-}
-
-#[derive(Debug)]
-pub enum JobParamsOwned {
-    Blurhash(BlurhashParamsOwned),
-    DiskImg(ImgParamsOwned),
-    NetImg(FromNetImgParamsOwned),
-}
-
-#[derive(Debug)]
-pub struct BlurhashParamsOwned {
-    pub blurhash: String,
-    pub url: String,
-    pub ctx: egui::Context,
-}
-#[derive(Debug)]
-pub struct ImgParamsOwned {
-    pub url: String,
-    pub path: PathBuf,
-}
-
-#[derive(Debug)]
-pub struct FromNetImgParamsOwned {
-    pub http_resp: HyperHttpResponse,
-    pub img_params: ImgParamsOwned,
-}
-
-pub struct ImageJob {
-    pub job: Result<TexturedImage, crate::Error>,
 }

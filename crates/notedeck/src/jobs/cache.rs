@@ -1,37 +1,35 @@
 use std::{
     collections::HashSet,
+    fmt::Debug,
     future::Future,
+    hash::Hash,
     pin::Pin,
     sync::mpsc::{Receiver, Sender},
 };
 
 use crossbeam::queue::SegQueue;
-use egui::TextureHandle;
 
-use crate::{
-    jobs::{
-        types::{JobAccess, JobId, JobIdAccessible, JobIdType},
-        JobPool,
-    },
-    Animation, Error, TextureState, TexturesCache,
+use crate::jobs::{
+    types::{JobAccess, JobId, JobIdAccessible},
+    JobPool,
 };
 
-pub struct JobsCache {
-    receive_new_jobs: Receiver<JobPackage>,
-    running: HashSet<JobId>,
-    send_new_jobs: Sender<JobPackage>,
-    completed: CompletionQueue,
+pub struct JobsCache<K, T: 'static> {
+    receive_new_jobs: Receiver<JobPackage<K, T>>,
+    running: HashSet<JobId<K>>,
+    send_new_jobs: Sender<JobPackage<K, T>>,
+    completed: CompletionQueue<K, T>,
 }
 
-type CompletionQueue = std::sync::Arc<SegQueue<JobComplete>>;
+type CompletionQueue<K, T> = std::sync::Arc<SegQueue<JobComplete<K, T>>>;
 
-pub enum JobOutput {
-    Complete(CompleteResponse),
-    Next(JobRun),
+pub enum JobOutput<T> {
+    Complete(CompleteResponse<T>),
+    Next(JobRun<T>),
 }
 
-impl JobOutput {
-    pub fn complete(response: JobResult) -> Self {
+impl<T> JobOutput<T> {
+    pub fn complete(response: T) -> Self {
         JobOutput::Complete(CompleteResponse::new(response))
     }
 
@@ -44,24 +42,18 @@ impl JobOutput {
     // }
 }
 
-pub struct CompleteResponse {
-    response: JobResult,
+pub struct CompleteResponse<T> {
+    response: T,
     run_no_output: Option<NoOutputRun>,
 }
 
-pub struct JobComplete {
-    job_id: JobId,
-    response: JobResult,
+pub struct JobComplete<K, T> {
+    pub job_id: JobId<K>,
+    pub response: T,
 }
 
-pub enum JobResult {
-    StaticImg(Result<TextureHandle, Error>),
-    Blurhash(Result<TextureHandle, Error>),
-    Animation(Result<Animation, Error>),
-}
-
-impl CompleteResponse {
-    pub fn new(response: JobResult) -> Self {
+impl<T> CompleteResponse<T> {
+    pub fn new(response: T) -> Self {
         Self {
             response,
             run_no_output: None,
@@ -79,32 +71,31 @@ pub enum NoOutputRun {
     Async(Pin<Box<dyn Future<Output = ()> + Send + 'static>>),
 }
 
-type JobFut = Pin<Box<dyn Future<Output = JobOutput> + Send + 'static>>;
-type SyncFn = Box<dyn FnOnce() -> JobOutput + Send + 'static>;
-type AsyncFn = JobFut;
+type SyncFn<T> = Box<dyn FnOnce() -> JobOutput<T> + Send + 'static>;
+type AsyncFn<T> = Pin<Box<dyn Future<Output = JobOutput<T>> + Send + 'static>>;
 
-pub enum JobRun {
-    Sync(SyncFn),
-    Async(AsyncFn),
+pub enum JobRun<T> {
+    Sync(SyncFn<T>),
+    Async(AsyncFn<T>),
 }
 
-pub struct JobPackage {
-    id: JobIdAccessible,
-    run: RunType,
+pub struct JobPackage<K, T> {
+    id: JobIdAccessible<K>,
+    run: RunType<T>,
 }
 
-impl JobPackage {
-    pub fn new(id: String, job_type: JobIdType, run: RunType) -> Self {
+impl<K, T> JobPackage<K, T> {
+    pub fn new(id: String, job_kind: K, run: RunType<T>) -> Self {
         Self {
-            id: JobIdAccessible::new_public(id, job_type),
+            id: JobIdAccessible::new_public(id, job_kind),
             run,
         }
     }
 }
 
-pub enum RunType {
+pub enum RunType<T> {
     NoOutput(NoOutputRun),
-    Output(JobRun),
+    Output(JobRun<T>),
 }
 
 #[derive(Debug)]
@@ -112,8 +103,15 @@ pub enum JobError {
     InvalidParameters,
 }
 
-impl JobsCache {
-    pub fn new(receive_new_jobs: Receiver<JobPackage>, send_new_jobs: Sender<JobPackage>) -> Self {
+impl<K, T> JobsCache<K, T>
+where
+    K: Hash + Eq + Clone + Debug + Send + 'static,
+    T: Send + 'static,
+{
+    pub fn new(
+        receive_new_jobs: Receiver<JobPackage<K, T>>,
+        send_new_jobs: Sender<JobPackage<K, T>>,
+    ) -> Self {
         Self {
             receive_new_jobs,
             send_new_jobs,
@@ -122,7 +120,7 @@ impl JobsCache {
         }
     }
 
-    pub fn run_received(&mut self, pool: &mut JobPool, tex_cache: &mut TexturesCache) {
+    pub fn run_received(&mut self, pool: &mut JobPool, mut pre_action: impl FnMut(&JobId<K>)) {
         for pkg in self.receive_new_jobs.try_iter() {
             let id = &pkg.id;
             if id.access == JobAccess::Public && self.running.contains(&id.job_id) {
@@ -141,7 +139,7 @@ impl JobsCache {
                 RunType::Output(job_run) => job_run,
             };
 
-            pre_run_action(pkg.id.clone(), tex_cache);
+            pre_action(&id.job_id);
 
             run_received_job(
                 job_run,
@@ -153,23 +151,30 @@ impl JobsCache {
         }
     }
 
-    pub fn deliver_all_completed(&mut self, tex_cache: &mut TexturesCache) {
+    pub fn deliver_all_completed(&mut self, mut deliver_complete: impl FnMut(JobComplete<K, T>)) {
         while let Some(res) = self.completed.pop() {
             tracing::trace!("Got completed: {:?}", res.job_id);
             let id = res.job_id.clone();
-            deliver_completed_job(res, tex_cache);
+            deliver_complete(res);
             self.running.remove(&id);
         }
     }
+
+    pub fn sender(&self) -> &Sender<JobPackage<K, T>> {
+        &self.send_new_jobs
+    }
 }
 
-fn run_received_job(
-    job_run: JobRun,
+fn run_received_job<K, T>(
+    job_run: JobRun<T>,
     pool: &mut JobPool,
-    send_new_jobs: Sender<JobPackage>,
-    completion_queue: CompletionQueue,
-    id: JobIdAccessible,
-) {
+    send_new_jobs: Sender<JobPackage<K, T>>,
+    completion_queue: CompletionQueue<K, T>,
+    id: JobIdAccessible<K>,
+) where
+    K: Hash + Eq + Clone + Debug + Send + 'static,
+    T: Send + 'static,
+{
     match job_run {
         JobRun::Sync(run) => {
             run_sync(pool, send_new_jobs, completion_queue, id, run);
@@ -180,35 +185,16 @@ fn run_received_job(
     }
 }
 
-pub fn pre_run_action(id_accessable: JobIdAccessible, tex_cache: &mut TexturesCache) {
-    let id = id_accessable.job_id.id;
-    match id_accessable.job_id.job_type {
-        JobIdType::Blurhash => {
-            tex_cache
-                .blurred
-                .cache
-                .insert(id, TextureState::Pending.into());
-        }
-        JobIdType::StaticImg => {
-            tex_cache
-                .static_image
-                .cache
-                .insert(id, TextureState::Pending);
-        }
-        JobIdType::AnimatedImg => {
-            tex_cache.animated.cache.insert(id, TextureState::Pending);
-        }
-    }
-}
-
-fn run_sync<'a, F: Send + 'static>(
+fn run_sync<'a, F, K, T>(
     job_pool: &mut JobPool,
-    send_new_jobs: Sender<JobPackage>,
-    completion_queue: CompletionQueue,
-    id: JobIdAccessible,
+    send_new_jobs: Sender<JobPackage<K, T>>,
+    completion_queue: CompletionQueue<K, T>,
+    id: JobIdAccessible<K>,
     run_job: F,
 ) where
-    F: FnOnce() -> JobOutput,
+    F: FnOnce() -> JobOutput<T> + Send + 'static,
+    K: Hash + Eq + Clone + Debug + Send + 'static,
+    T: Send + 'static,
 {
     let id_c = id.clone();
     let wrapped: Box<dyn FnOnce() + Send + 'static> = Box::new(move || {
@@ -243,12 +229,15 @@ fn run_sync<'a, F: Send + 'static>(
     job_pool.schedule_no_output(wrapped);
 }
 
-fn run_async<'a>(
-    send_new_jobs: Sender<JobPackage>,
-    completion_queue: CompletionQueue,
-    id: JobIdAccessible,
-    run_job: JobFut,
-) {
+fn run_async<'a, K, T>(
+    send_new_jobs: Sender<JobPackage<K, T>>,
+    completion_queue: CompletionQueue<K, T>,
+    id: JobIdAccessible<K>,
+    run_job: AsyncFn<T>,
+) where
+    K: Hash + Eq + Clone + Debug + Send + 'static,
+    T: Send + 'static,
+{
     tracing::trace!("Spawning async job: {id:?}");
     tokio::spawn(async move {
         {
@@ -292,34 +281,4 @@ fn no_output_run(pool: &mut JobPool, run: NoOutputRun) {
             tokio::spawn(f);
         }
     }
-}
-
-fn deliver_completed_job(completed: JobComplete, tex_cache: &mut TexturesCache) {
-    let id = completed.job_id.id;
-    let id_c = id.clone();
-    match completed.response {
-        JobResult::StaticImg(job_complete) => {
-            let r = match job_complete {
-                Ok(t) => TextureState::Loaded(t),
-                Err(e) => TextureState::Error(e),
-            };
-            tex_cache.static_image.cache.insert(id, r);
-        }
-        JobResult::Animation(animation) => {
-            let r = match animation {
-                Ok(a) => TextureState::Loaded(a),
-                Err(e) => TextureState::Error(e),
-            };
-
-            tex_cache.animated.cache.insert(id, r);
-        }
-        JobResult::Blurhash(texture_handle) => {
-            let r = match texture_handle {
-                Ok(t) => TextureState::Loaded(t),
-                Err(e) => TextureState::Error(e),
-            };
-            tex_cache.blurred.cache.insert(id, r.into());
-        }
-    }
-    tracing::trace!("Delivered job for {id_c}");
 }

@@ -4,8 +4,8 @@ use egui::TextureHandle;
 use nostrdb::Note;
 
 use crate::{
-    media::load_texture_checked, CompleteResponse, JobIdType, JobOutput, JobPackage, JobResult,
-    JobRun, JobSender, RunType, TextureState,
+    media::load_texture_checked, CompleteResponse, MediaJobKind, JobOutput, JobPackage, MediaJobResult,
+    JobRun, MediaJobSender, RunType, TextureState,
 };
 
 #[derive(Clone)]
@@ -212,7 +212,7 @@ impl BlurCache {
 
     pub fn get_or_request(
         &self,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ui: &egui::Ui,
         url: &str,
         blurhash: &ImageMetadata,
@@ -233,7 +233,7 @@ impl BlurCache {
 
         if let Err(e) = jobs.send(JobPackage::new(
             url.to_owned(),
-            JobIdType::Blurhash,
+            MediaJobKind::Blurhash,
             RunType::Output(JobRun::Sync(Box::new(move || {
                 tracing::trace!("Starting blur job for {url}");
                 let res = generate_blurhash_texturehandle(
@@ -243,7 +243,7 @@ impl BlurCache {
                     pixel_sizes.x,
                     pixel_sizes.y,
                 );
-                JobOutput::Complete(CompleteResponse::new(JobResult::Blurhash(res)))
+                JobOutput::Complete(CompleteResponse::new(MediaJobResult::Blurhash(res)))
             }))),
         )) {
             tracing::error!("{e}");

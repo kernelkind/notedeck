@@ -21,8 +21,7 @@ use enostr::{ClientMessage, PoolRelay, Pubkey, RelayEvent, RelayMessage, RelayPo
 use nostrdb::Transaction;
 use notedeck::{
     tr, ui::is_narrow, Accounts, AppAction, AppContext, AppResponse, DataPath, DataPathType,
-    FilterState, Images, JobSender, Jobs, Localization, NotedeckOptions, SettingsHandler,
-    UnknownIds,
+    FilterState, Images, MediaJobSender, Localization, NotedeckOptions, SettingsHandler, UnknownIds,
 };
 use notedeck_ui::{
     media::{MediaViewer, MediaViewerFlags, MediaViewerState},
@@ -49,7 +48,6 @@ pub struct Damus {
     pub timeline_cache: TimelineCache,
     pub subscriptions: Subscriptions,
     pub support: Support,
-    pub jobs: Jobs,
     pub threads: Threads,
 
     //frame_history: crate::frame_history::FrameHistory,
@@ -209,14 +207,6 @@ fn unknown_id_send(unknown_ids: &mut UnknownIds, pool: &mut RelayPool) {
 #[profiling::function]
 fn update_damus(damus: &mut Damus, app_ctx: &mut AppContext<'_>, ctx: &egui::Context) {
     app_ctx.img_cache.urls.cache.handle_io();
-    damus
-        .jobs
-        .cache
-        .run_received(app_ctx.job_pool, &mut app_ctx.img_cache.textures);
-    damus
-        .jobs
-        .cache
-        .deliver_all_completed(&mut app_ctx.img_cache.textures);
 
     if damus.columns(app_ctx.accounts).columns().is_empty() {
         damus
@@ -402,7 +392,7 @@ fn render_damus(damus: &mut Damus, app_ctx: &mut AppContext<'_>, ui: &mut egui::
         ui,
         &mut damus.view_state.media_viewer,
         app_ctx.img_cache,
-        damus.jobs.sender(),
+        app_ctx.media_jobs.sender(),
     );
 
     // We use this for keeping timestamps and things up to date
@@ -418,7 +408,7 @@ fn fullscreen_media_viewer_ui(
     ui: &mut egui::Ui,
     state: &mut MediaViewerState,
     img_cache: &mut Images,
-    jobs: &JobSender,
+    jobs: &MediaJobSender,
 ) {
     if !state.should_show(ui) {
         if state.scene_rect.is_some() {
@@ -532,7 +522,6 @@ impl Damus {
 
         let support = Support::new(app_context.path);
         let note_options = get_note_options(parsed_args, app_context.settings);
-        let jobs = Jobs::default();
         let threads = Threads::default();
 
         Self {
@@ -547,7 +536,6 @@ impl Damus {
             support,
             decks_cache,
             unrecognized_args,
-            jobs,
             threads,
             onboarding: Onboarding::default(),
         }
@@ -598,7 +586,6 @@ impl Damus {
             options,
             decks_cache,
             unrecognized_args: BTreeSet::default(),
-            jobs: Jobs::default(),
             threads: Threads::default(),
             onboarding: Onboarding::default(),
         }

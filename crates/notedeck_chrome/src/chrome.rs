@@ -21,8 +21,8 @@ use notedeck::DrawerRouter;
 use notedeck::Error;
 use notedeck::SoftKeyboardContext;
 use notedeck::{
-    tr, App, AppAction, AppContext, JobSender, Localization, Notedeck, NotedeckOptions,
-    NotedeckTextStyle, UserAccount, WalletType,
+    tr, App, AppAction, AppContext, Localization, Notedeck, NotedeckOptions, NotedeckTextStyle,
+    UserAccount, WalletType,
 };
 use notedeck_columns::{timeline::TimelineKind, Damus};
 use notedeck_dave::{Dave, DaveAvatar};
@@ -484,7 +484,7 @@ fn chrome_handle_app_action(
                 ctx.zaps,
                 ctx.img_cache,
                 &mut columns.view_state,
-                columns.jobs.sender(),
+                ctx.media_jobs.sender(),
                 ui,
             );
 
@@ -541,7 +541,7 @@ fn columns_route_to_profile(
         ctx.zaps,
         ctx.img_cache,
         &mut columns.view_state,
-        columns.jobs.sender(),
+        ctx.media_jobs.sender(),
         ui,
     );
 
@@ -591,14 +591,8 @@ fn topdown_sidebar(
         get_profile_url_owned(None)
     };
 
-    let sender = chrome
-        .get_columns_app()
-        .map(|d| d.jobs.sender().clone())
-        .unwrap_or_else(|| {
-            let (jobs, _) = std::sync::mpsc::channel();
-            JobSender::new(jobs)
-        }); // TODO(kernelkind): need to fix this mess...
-    let pfp_resp = ui.add(&mut ProfilePic::new(ctx.img_cache, &sender, profile_url).size(64.0));
+    let pfp_resp = ui
+        .add(&mut ProfilePic::new(ctx.img_cache, ctx.media_jobs.sender(), profile_url).size(64.0));
 
     ui.horizontal_wrapped(|ui| {
         ui.add(egui::Label::new(

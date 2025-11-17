@@ -16,7 +16,7 @@ use notedeck::GlobalWallet;
 use notedeck::Images;
 use notedeck::Localization;
 use notedeck::MediaAction;
-use notedeck::{get_current_wallet, JobSender};
+use notedeck::{get_current_wallet, MediaJobSender};
 pub use options::NoteOptions;
 pub use reply_description::reply_desc;
 
@@ -682,7 +682,7 @@ impl PfpResponse {
 fn show_actual_pfp(
     ui: &mut egui::Ui,
     images: &mut Images,
-    jobs: &JobSender,
+    jobs: &MediaJobSender,
     pic: &str,
     pfp_size: i8,
     note_key: NoteKey,
@@ -721,7 +721,7 @@ fn show_actual_pfp(
 fn show_fallback_pfp(
     ui: &mut egui::Ui,
     images: &mut Images,
-    jobs: &JobSender,
+    jobs: &MediaJobSender,
     pfp_size: i8,
 ) -> PfpResponse {
     let sense = Sense::click();

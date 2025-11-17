@@ -8,8 +8,8 @@ use crate::{
         images::{fetch_static_img_from_disk, parse_img_response},
         load_texture_checked,
     },
-    CompleteResponse, ImageType, JobIdType, JobOutput, JobPackage, JobResult, JobRun, JobSender,
-    MediaCache, RunType, TextureState,
+    CompleteResponse, ImageType, MediaJobKind, JobOutput, JobPackage, JobRun, MediaJobSender, MediaCache,
+    MediaJobResult, RunType, TextureState,
 };
 
 pub struct StaticImgTexCache {
@@ -33,13 +33,13 @@ impl StaticImgTexCache {
         self.cache.get(url)
     }
 
-    pub fn request(&self, jobs: &JobSender, ctx: &egui::Context, url: &str, imgtype: ImageType) {
+    pub fn request(&self, jobs: &MediaJobSender, ctx: &egui::Context, url: &str, imgtype: ImageType) {
         let _ = self.get_or_request(jobs, ctx, url, imgtype);
     }
 
     pub fn get_or_request(
         &self,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ctx: &egui::Context,
         url: &str,
         imgtype: ImageType,
@@ -56,9 +56,9 @@ impl StaticImgTexCache {
             let url = url.to_owned();
             if let Err(e) = jobs.send(JobPackage::new(
                 url.to_owned(),
-                JobIdType::StaticImg,
+                MediaJobKind::StaticImg,
                 RunType::Output(JobRun::Sync(Box::new(move || {
-                    JobOutput::Complete(CompleteResponse::new(JobResult::StaticImg(
+                    JobOutput::Complete(CompleteResponse::new(MediaJobResult::StaticImg(
                         fetch_static_img_from_disk(ctx.clone(), &url, &path),
                     )))
                 }))),
@@ -70,7 +70,7 @@ impl StaticImgTexCache {
             let ctx = ctx.clone();
             if let Err(e) = jobs.send(JobPackage::new(
                 url.to_owned(),
-                JobIdType::StaticImg,
+                MediaJobKind::StaticImg,
                 RunType::Output(JobRun::Async(Box::pin(fetch_static_img_from_net(
                     url,
                     ctx,
@@ -91,14 +91,14 @@ async fn fetch_static_img_from_net(
     ctx: egui::Context,
     path: PathBuf,
     imgtype: ImageType,
-) -> JobOutput {
+) -> JobOutput<MediaJobResult> {
     tracing::trace!("fetch static img from net: starting job. sending http request for {url}");
     let res = match http_req(&url).await {
         Ok(r) => r,
         Err(e) => {
-            return JobOutput::complete(JobResult::StaticImg(Err(crate::Error::Generic(format!(
-                "Http error: {e}"
-            )))));
+            return JobOutput::complete(MediaJobResult::StaticImg(Err(crate::Error::Generic(
+                format!("Http error: {e}"),
+            ))));
         }
     };
 
@@ -107,7 +107,9 @@ async fn fetch_static_img_from_net(
         let img = match parse_img_response(res, imgtype) {
             Ok(i) => i,
             Err(e) => {
-                return JobOutput::Complete(CompleteResponse::new(JobResult::StaticImg(Err(e))))
+                return JobOutput::Complete(CompleteResponse::new(MediaJobResult::StaticImg(Err(
+                    e,
+                ))))
             }
         };
 
@@ -115,7 +117,7 @@ async fn fetch_static_img_from_net(
             load_texture_checked(&ctx, url.clone(), img.clone(), Default::default());
 
         JobOutput::Complete(
-            CompleteResponse::new(JobResult::StaticImg(Ok(texture_handle))).run_no_output(
+            CompleteResponse::new(MediaJobResult::StaticImg(Ok(texture_handle))).run_no_output(
                 crate::NoOutputRun::Sync(Box::new(move || {
                     tracing::trace!("static img from net: Saving output from {url}");
                     if let Err(e) = MediaCache::write(&path, &url, img) {

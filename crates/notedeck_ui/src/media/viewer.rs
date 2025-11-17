@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use egui::{emath::TSTransform, pos2, Color32, Rangef, Rect};
 use notedeck::media::{AnimationMode, MediaInfo, ViewMediaInfo};
-use notedeck::{ImageType, Images, JobSender};
+use notedeck::{ImageType, Images, MediaJobSender};
 
 bitflags! {
     #[repr(transparent)]
@@ -93,7 +93,7 @@ impl<'a> MediaViewer<'a> {
     pub fn ui(
         &mut self,
         images: &mut Images,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ui: &mut egui::Ui,
     ) -> egui::Response {
         if self.state.flags.contains(MediaViewerFlags::Fullscreen) {
@@ -114,7 +114,7 @@ impl<'a> MediaViewer<'a> {
     fn ui_content(
         &mut self,
         images: &mut Images,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ui: &mut egui::Ui,
     ) -> egui::Response {
         let avail_rect = ui.available_rect_before_wrap();
@@ -188,7 +188,7 @@ impl<'a> MediaViewer<'a> {
         ui: &mut egui::Ui,
         media: &MediaInfo,
         images: &mut Images,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
     ) -> Rect {
         // fetch image texture
         let Some(texture) = images.latest_texture(
@@ -220,7 +220,7 @@ impl<'a> MediaViewer<'a> {
     fn render_image_tiles(
         infos: &[MediaInfo],
         images: &mut Images,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ui: &mut egui::Ui,
         open_amount: f32,
     ) {

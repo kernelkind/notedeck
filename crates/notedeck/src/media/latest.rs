@@ -9,7 +9,7 @@ use crate::{
         static_imgs::StaticImgTexCache,
         AnimationMode, BlurCache,
     },
-    Error, GifStateMap, ImageType, JobSender, MediaCacheType, ObfuscationType, TextureState,
+    Error, GifStateMap, ImageType, MediaJobSender, MediaCacheType, ObfuscationType, TextureState,
 };
 
 pub enum MediaRenderState<'a> {
@@ -49,7 +49,7 @@ impl<'a> NoLoadingLatestTex<'a> {
 
     pub fn latest(
         &mut self,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ctx: &egui::Context,
         url: &str,
         cache_type: MediaCacheType,
@@ -67,7 +67,7 @@ impl<'a> NoLoadingLatestTex<'a> {
 
     pub fn latest_state(
         &mut self,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ctx: &egui::Context,
         url: &str,
         cache_type: MediaCacheType,
@@ -127,7 +127,7 @@ impl<'a> UntrustedMediaLatestTex<'a> {
 
     pub fn latest(
         &self,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ui: &egui::Ui,
         url: &str,
         obfuscation_type: &'a ObfuscationType,
@@ -138,7 +138,7 @@ impl<'a> UntrustedMediaLatestTex<'a> {
 
     fn latest_internal(
         &self,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ui: &egui::Ui,
         url: &str,
         obfuscation_type: &'a ObfuscationType,
@@ -173,7 +173,7 @@ impl<'a> TrustedMediaLatestTex<'a> {
 
     pub fn latest(
         &mut self,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ui: &egui::Ui,
         url: &str,
         cache_type: MediaCacheType,

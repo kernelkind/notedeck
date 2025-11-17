@@ -8,7 +8,7 @@ use egui_wgpu::RenderState;
 use enostr::KeypairUnowned;
 use futures::StreamExt;
 use nostrdb::Transaction;
-use notedeck::{AppAction, AppContext, AppResponse, Jobs};
+use notedeck::{AppAction, AppContext, AppResponse};
 use std::collections::HashMap;
 use std::string::ToString;
 use std::sync::mpsc::{self, Receiver};
@@ -43,7 +43,6 @@ pub struct Dave {
     client: async_openai::Client<OpenAIConfig>,
     incoming_tokens: Option<Receiver<DaveApiResponse>>,
     model_config: ModelConfig,
-    jobs: Jobs,
 }
 
 /// Calculate an anonymous user_id from a keypair
@@ -108,7 +107,6 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
             input,
             model_config,
             chat: vec![],
-            jobs: Jobs::default(),
         }
     }
 
@@ -189,8 +187,7 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
         DaveResponse::default()
             */
 
-        DaveUi::new(self.model_config.trial, &self.chat, &mut self.input)
-            .ui(app_ctx, self.jobs.sender(), ui)
+        DaveUi::new(self.model_config.trial, &self.chat, &mut self.input).ui(app_ctx, ui)
     }
 
     fn handle_new_chat(&mut self) {
@@ -342,13 +339,6 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
 impl notedeck::App for Dave {
     fn update(&mut self, ctx: &mut AppContext<'_>, ui: &mut egui::Ui) -> AppResponse {
         let mut app_action: Option<AppAction> = None;
-
-        self.jobs
-            .cache
-            .run_received(ctx.job_pool, &mut ctx.img_cache.textures);
-        self.jobs
-            .cache
-            .deliver_all_completed(&mut ctx.img_cache.textures);
 
         // always insert system prompt if we have no context
         if self.chat.is_empty() {

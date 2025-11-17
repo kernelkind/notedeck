@@ -13,7 +13,7 @@ use egui::{Margin, Response, RichText, Sense, Stroke, UiBuilder};
 use enostr::Pubkey;
 use nostrdb::{Ndb, Transaction};
 use notedeck::tr;
-use notedeck::{Images, JobSender, Localization, NotedeckTextStyle};
+use notedeck::{Images, MediaJobSender, Localization, NotedeckTextStyle};
 use notedeck_ui::app_images;
 use notedeck_ui::{
     anim::{AnimationHelper, ICON_EXPANSION_MULTIPLE},
@@ -28,7 +28,7 @@ pub struct NavTitle<'a> {
     col_id: usize,
     options: u32,
     i18n: &'a mut Localization,
-    jobs: &'a JobSender,
+    jobs: &'a MediaJobSender,
 }
 
 impl<'a> NavTitle<'a> {
@@ -43,7 +43,7 @@ impl<'a> NavTitle<'a> {
         routes: &'a [Route],
         col_id: usize,
         i18n: &'a mut Localization,
-        jobs: &'a JobSender,
+        jobs: &'a MediaJobSender,
     ) -> Self {
         let options = Self::SHOW_MOVE | Self::SHOW_DELETE;
         NavTitle {

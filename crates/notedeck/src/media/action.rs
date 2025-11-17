@@ -1,4 +1,4 @@
-use crate::{ImageType, Images, JobSender, MediaCacheType};
+use crate::{ImageType, Images, MediaJobSender, MediaCacheType};
 
 /// Tracks where media was on the screen so that
 /// we can do fun animations when opening the
@@ -86,7 +86,7 @@ impl MediaAction {
     pub fn process_default_media_actions(
         self,
         images: &mut Images,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         ctx: &egui::Context,
     ) {
         match self {

@@ -871,7 +871,7 @@ fn render_profiles(
     profiles_to_show: Vec<ProfileEntry>,
     composite_type: &CompositeType,
     img_cache: &mut notedeck::Images,
-    jobs: &notedeck::JobSender,
+    jobs: &notedeck::MediaJobSender,
     notification: bool,
 ) -> PfpsResponse {
     let mut action = None;

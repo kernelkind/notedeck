@@ -4,7 +4,7 @@ use enostr::Pubkey;
 use hashbrown::{hash_map::RawEntryMut, HashMap};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
 use notedeck::{
-    fonts::get_font_size, get_profile_url, name::get_display_name, tr, Images, JobSender,
+    fonts::get_font_size, get_profile_url, name::get_display_name, tr, Images, MediaJobSender,
     Localization, Nip51Set, Nip51SetCache, NotedeckTextStyle,
 };
 
@@ -19,7 +19,7 @@ pub struct Nip51SetWidget<'a> {
     ndb: &'a Ndb,
     images: &'a mut Images,
     loc: &'a mut Localization,
-    jobs: &'a JobSender,
+    jobs: &'a MediaJobSender,
     flags: Nip51SetWidgetFlags,
 }
 
@@ -52,7 +52,7 @@ impl<'a> Nip51SetWidget<'a> {
         ndb: &'a Ndb,
         loc: &'a mut Localization,
         images: &'a mut Images,
-        jobs: &'a JobSender,
+        jobs: &'a MediaJobSender,
     ) -> Self {
         Self {
             state,
@@ -153,7 +153,7 @@ fn render_pack(
     ui_state: &mut Nip51SetUiCache,
     ndb: &Ndb,
     images: &mut Images,
-    jobs: &JobSender,
+    jobs: &MediaJobSender,
     loc: &mut Localization,
     image_trusted: bool,
 ) -> Option<Nip51SetWidgetAction> {
@@ -257,7 +257,7 @@ const PFP_SIZE: f32 = 32.0;
 fn render_profile_item(
     ui: &mut egui::Ui,
     images: &mut Images,
-    jobs: &JobSender,
+    jobs: &MediaJobSender,
     profile: Option<&ProfileRecord>,
     checked: &mut bool,
 ) -> bool {

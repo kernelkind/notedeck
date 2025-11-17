@@ -500,7 +500,7 @@ fn process_render_nav_action(
                 ctx.zaps,
                 ctx.img_cache,
                 &mut app.view_state,
-                app.jobs.sender(),
+                ctx.media_jobs.sender(),
                 ui,
             )
         }
@@ -564,7 +564,7 @@ fn render_nav_body(
         note_cache: ctx.note_cache,
         zaps: ctx.zaps,
         pool: ctx.pool,
-        jobs: app.jobs.sender(),
+        jobs: ctx.media_jobs.sender(),
         unknown_ids: ctx.unknown_ids,
         clipboard: ctx.clipboard,
         i18n: ctx.i18n,
@@ -611,7 +611,6 @@ fn render_nav_body(
             let resp = render_accounts_route(
                 ui,
                 ctx,
-                app.jobs.sender(),
                 &mut app.view_state.login,
                 &mut app.onboarding,
                 &mut app.view_state.follow_packs,
@@ -772,14 +771,9 @@ fn render_nav_body(
                 search_buffer.focus_state = FocusState::ShouldRequestFocus;
             }
 
-            SearchView::new(
-                &txn,
-                app.note_options,
-                search_buffer,
-                &mut note_context,
-            )
-            .show(ui)
-            .map_output(RenderNavAction::NoteAction)
+            SearchView::new(&txn, app.note_options, search_buffer, &mut note_context)
+                .show(ui)
+                .map_output(RenderNavAction::NoteAction)
         }
         Route::NewDeck => {
             let id = ui.id().with("new-deck");
@@ -857,23 +851,23 @@ fn render_nav_body(
                 state,
                 ctx.img_cache,
                 ctx.clipboard,
-                app.jobs.sender(),
+                ctx.media_jobs.sender(),
             )
-                .ui(ui)
-                .map_output_maybe(|save| {
-                    if save {
-                        app.view_state
-                            .pubkey_to_profile_state
-                            .get(kp.pubkey)
-                            .map(|state| {
-                                RenderNavAction::ProfileAction(ProfileAction::SaveChanges(
-                                    SaveProfileChanges::new(kp.to_full(), state.clone()),
-                                ))
-                            })
-                    } else {
-                        None
-                    }
-                })
+            .ui(ui)
+            .map_output_maybe(|save| {
+                if save {
+                    app.view_state
+                        .pubkey_to_profile_state
+                        .get(kp.pubkey)
+                        .map(|state| {
+                            RenderNavAction::ProfileAction(ProfileAction::SaveChanges(
+                                SaveProfileChanges::new(kp.to_full(), state.clone()),
+                            ))
+                        })
+                } else {
+                    None
+                }
+            })
         }
         Route::Wallet(wallet_type) => {
             let state = match wallet_type {
@@ -934,7 +928,7 @@ fn render_nav_body(
                     &txn,
                     &target.zap_recipient,
                     default_msats,
-                    app.jobs.sender(),
+                    ctx.media_jobs.sender(),
                 )
                 .ui(ui),
             )
@@ -1085,7 +1079,7 @@ pub fn render_nav(
                         std::slice::from_ref(route),
                         col,
                         ctx.i18n,
-                        app.jobs.sender(),
+                        ctx.media_jobs.sender(),
                     )
                     .show_move_button(!narrow)
                     .show_delete_button(!narrow)
@@ -1129,7 +1123,7 @@ pub fn render_nav(
                     nav.routes(),
                     col,
                     ctx.i18n,
-                    app.jobs.sender(),
+                    ctx.media_jobs.sender(),
                 )
                 .show_move_button(!narrow)
                 .show_delete_button(!narrow)

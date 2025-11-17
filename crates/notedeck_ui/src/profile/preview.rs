@@ -4,7 +4,7 @@ use egui_extras::Size;
 use nostrdb::ProfileRecord;
 
 use notedeck::{
-    name::get_display_name, profile::get_profile_url, tr, Images, JobSender, Localization,
+    name::get_display_name, profile::get_profile_url, tr, Images, MediaJobSender, Localization,
     NotedeckTextStyle,
 };
 
@@ -13,7 +13,7 @@ use super::{about_section_widget, banner, display_name_widget};
 pub struct ProfilePreview<'a, 'cache> {
     profile: &'a ProfileRecord<'a>,
     cache: &'cache mut Images,
-    jobs: &'cache JobSender,
+    jobs: &'cache MediaJobSender,
     banner_height: Size,
 }
 
@@ -21,7 +21,7 @@ impl<'a, 'cache> ProfilePreview<'a, 'cache> {
     pub fn new(
         profile: &'a ProfileRecord<'a>,
         cache: &'cache mut Images,
-        jobs: &'cache JobSender,
+        jobs: &'cache MediaJobSender,
     ) -> Self {
         let banner_height = Size::exact(80.0);
         ProfilePreview {
@@ -79,7 +79,7 @@ pub struct SimpleProfilePreview<'a, 'cache> {
     profile: Option<&'a ProfileRecord<'a>>,
     pub i18n: &'cache mut Localization,
     cache: &'cache mut Images,
-    jobs: &'cache JobSender,
+    jobs: &'cache MediaJobSender,
     is_nsec: bool,
 }
 
@@ -87,7 +87,7 @@ impl<'a, 'cache> SimpleProfilePreview<'a, 'cache> {
     pub fn new(
         profile: Option<&'a ProfileRecord<'a>>,
         cache: &'cache mut Images,
-        jobs: &'cache JobSender,
+        jobs: &'cache MediaJobSender,
         i18n: &'cache mut Localization,
         is_nsec: bool,
     ) -> Self {

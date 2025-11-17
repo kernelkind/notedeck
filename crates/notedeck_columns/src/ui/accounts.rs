@@ -3,7 +3,7 @@ use egui::{
 };
 use enostr::Pubkey;
 use nostrdb::{Ndb, Transaction};
-use notedeck::{tr, Accounts, Images, JobSender, Localization};
+use notedeck::{tr, Accounts, Images, MediaJobSender, Localization};
 use notedeck_ui::colors::PINK;
 use notedeck_ui::profile::preview::SimpleProfilePreview;
 
@@ -15,7 +15,7 @@ pub struct AccountsView<'a> {
     ndb: &'a Ndb,
     accounts: &'a Accounts,
     img_cache: &'a mut Images,
-    jobs: &'a JobSender,
+    jobs: &'a MediaJobSender,
     i18n: &'a mut Localization,
 }
 
@@ -36,7 +36,7 @@ impl<'a> AccountsView<'a> {
     pub fn new(
         ndb: &'a Ndb,
         accounts: &'a Accounts,
-        jobs: &'a JobSender,
+        jobs: &'a MediaJobSender,
         img_cache: &'a mut Images,
         i18n: &'a mut Localization,
     ) -> Self {
@@ -87,7 +87,7 @@ impl<'a> AccountsView<'a> {
         accounts: &Accounts,
         ndb: &Ndb,
         img_cache: &mut Images,
-        jobs: &JobSender,
+        jobs: &MediaJobSender,
         i18n: &mut Localization,
     ) -> Option<AccountsViewResponse> {
         let mut return_op: Option<AccountsViewResponse> = None;

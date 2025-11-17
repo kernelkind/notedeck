@@ -4,7 +4,7 @@ use egui::{
     TextureHandle, Vec2,
 };
 use notedeck::media::latest::ObfuscatedTexture;
-use notedeck::JobSender;
+use notedeck::MediaJobSender;
 use notedeck::{
     fonts::get_font_size, show_one_error_message, tr, Images, Localization, MediaAction,
     MediaCacheType, NotedeckTextStyle, RenderableMedia,
@@ -27,7 +27,7 @@ pub enum MediaViewAction {
 pub fn image_carousel(
     ui: &mut egui::Ui,
     img_cache: &mut Images,
-    jobs: &JobSender,
+    jobs: &MediaJobSender,
     medias: &[RenderableMedia],
     carousel_id: egui::Id,
     i18n: &mut Localization,
@@ -114,7 +114,7 @@ pub fn image_carousel(
 pub fn render_media(
     ui: &mut egui::Ui,
     img_cache: &mut Images,
-    jobs: &JobSender,
+    jobs: &MediaJobSender,
     media: &RenderableMedia,
     trusted_media: bool,
     i18n: &mut Localization,

@@ -18,10 +18,10 @@ use notedeck::media::AnimationMode;
 #[cfg(target_os = "android")]
 use notedeck::platform::android::try_open_file_picker;
 use notedeck::platform::get_next_selected_file;
+use notedeck::PixelDimensions;
 use notedeck::{
     name::get_display_name, supported_mime_hosted_at_url, tr, Localization, NoteAction, NoteContext,
 };
-use notedeck::{Jobs, PixelDimensions};
 use notedeck_ui::{
     app_images,
     context_menu::{input_context, PasteBehavior},
@@ -828,7 +828,6 @@ mod preview {
     pub struct PostPreview {
         draft: Draft,
         poster: FullKeypair,
-        jobs: Jobs,
     }
 
     impl PostPreview {
@@ -858,20 +857,12 @@ mod preview {
             PostPreview {
                 draft,
                 poster: FullKeypair::generate(),
-                jobs: Jobs::default(),
             }
         }
     }
 
     impl App for PostPreview {
         fn update(&mut self, app: &mut AppContext<'_>, ui: &mut egui::Ui) -> AppResponse {
-            self.jobs
-                .cache
-                .run_received(app.job_pool, &mut app.img_cache.textures);
-            self.jobs
-                .cache
-                .deliver_all_completed(&mut app.img_cache.textures);
-
             let txn = Transaction::new(app.ndb).expect("txn");
             let mut note_context = NoteContext {
                 ndb: app.ndb,
@@ -881,7 +872,7 @@ mod preview {
                 note_cache: app.note_cache,
                 zaps: app.zaps,
                 pool: app.pool,
-                jobs: self.jobs.sender(),
+                jobs: app.media_jobs.sender(),
                 unknown_ids: app.unknown_ids,
                 clipboard: app.clipboard,
                 i18n: app.i18n,
