@@ -16,7 +16,7 @@ pub async fn android_main(android_app: AndroidApp) {
     //std::env::set_var("DAVE_MODEL", "hhao/qwen2.5-coder-tools:latest");
     std::env::set_var(
         "RUST_LOG",
-        "egui=debug,egui-winit=debug,winit=debug,notedeck=debug,notedeck_columns=debug,notedeck_chrome=debug,enostr=debug,android_activity=debug",
+        "notedeck::error,notedeck::media=trace,notedeck::jobs=trace",
     );
 
     //std::env::set_var(
