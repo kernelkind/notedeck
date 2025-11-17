@@ -13,12 +13,19 @@ use url::Url;
 pub async fn http_req(url: &str) -> Result<HyperHttpResponse, HyperHttpError> {
     let mut current_uri: Uri = url.parse().map_err(|_| HyperHttpError::Uri)?;
 
-    let https = HttpsConnectorBuilder::new()
-        .with_native_roots()
-        .map_err(|e| HyperHttpError::Hyper(Box::new(e)))?
-        .https_or_http()
-        .enable_http1()
-        .build();
+    let https = {
+        let builder = match HttpsConnectorBuilder::new().with_native_roots() {
+            Ok(builder) => builder,
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to load native root certificates ({err}). Falling back to WebPKI store."
+                );
+                HttpsConnectorBuilder::new().with_webpki_roots()
+            }
+        };
+
+        builder.https_or_http().enable_http1().build()
+    };
 
     let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build(https);
 
@@ -26,10 +33,7 @@ pub async fn http_req(url: &str) -> Result<HyperHttpResponse, HyperHttpError> {
     let mut redirects = 0;
 
     let res = loop {
-        let authority = current_uri
-            .authority()
-            .ok_or(HyperHttpError::Host)?
-            .clone();
+        let authority = current_uri.authority().ok_or(HyperHttpError::Host)?.clone();
 
         // Fetch the url...
         let req = Request::builder()
