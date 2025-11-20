@@ -317,6 +317,7 @@ impl Chrome {
             .vertical(|mut strip| {
                 // the actual content, shifted up because of the soft keyboard
                 strip.cell(|ui| {
+                    ui.spacing_mut().item_spacing = prev_spacing;
                     action = self.panel(ctx, ui, keyboard_height);
                 });
 
@@ -328,7 +329,6 @@ impl Chrome {
                     }
                 });
             });
-        ui.spacing_mut().item_spacing = prev_spacing;
 
         // hovering virtual keyboard
         if virtual_keyboard {
