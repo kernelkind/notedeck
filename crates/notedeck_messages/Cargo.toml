@@ -7,4 +7,10 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 egui = { workspace = true }
+egui_virtual_list = { workspace = true }
+enostr = { workspace = true }
+hashbrown = { workspace = true }
 notedeck = { workspace = true }
+nostrdb = { workspace = true }
+profiling = { workspace = true }
+tracing = { workspace = true }
