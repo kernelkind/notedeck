@@ -14,3 +14,4 @@ notedeck = { workspace = true }
 nostrdb = { workspace = true }
 profiling = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }

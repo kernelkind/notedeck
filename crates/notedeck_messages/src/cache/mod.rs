@@ -1,10 +1,12 @@
 mod conversation;
+mod membership;
 mod message_store;
-pub mod nip17;
+mod state;
 
 pub use conversation::{
-    ConversationCache, ConversationDescriptor, ConversationFilters, ConversationHydration,
-    ConversationId, ConversationMetadata, ConversationNode, ConversationSummary,
-    ConversationUpdate,
+    Conversation, ConversationCache, ConversationFilters, ConversationId, ConversationMetadata,
+    ConversationSummary,
 };
+pub use membership::ConversationIdentifier;
 pub use message_store::MessageStore;
+pub use state::ConversationStates;
