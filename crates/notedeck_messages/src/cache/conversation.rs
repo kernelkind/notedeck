@@ -154,13 +154,13 @@ impl ConversationCache {
             }
         }
     }
+
+    pub fn first_convo_id(&self) -> Option<ConversationId> {
+        Some(self.order.first()?.id)
+    }
 }
 
-fn refresh_order(
-    order: &mut Vec<ConversationOrder>,
-    id: ConversationId,
-    latest: u64,
-) {
+fn refresh_order(order: &mut Vec<ConversationOrder>, id: ConversationId, latest: u64) {
     if let Some(pos) = order.iter().position(|entry| entry.id == id) {
         order.remove(pos);
     }
@@ -282,7 +282,7 @@ impl Conversation {
         ConversationSummary {
             metadata: &self.metadata,
             last_message: self.messages.latest(),
-            unread_count: todo!(),
+            unread_count: 0, // TODO: fix
             total_messages: self.messages.len(),
         }
     }
@@ -330,13 +330,6 @@ impl Default for ConversationCache {
             order: Vec::new(),
         }
     }
-}
-
-fn refs_from_query(results: Vec<QueryResult<'_>>) -> Vec<NoteRef> {
-    results
-        .into_iter()
-        .map(NoteRef::from_query_result)
-        .collect()
 }
 
 fn get_conversations<'a>(

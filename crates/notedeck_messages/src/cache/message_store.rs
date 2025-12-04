@@ -8,7 +8,7 @@ use notedeck::NoteRef;
 /// backing data is already sorted from newest to oldest.
 #[derive(Default)]
 pub struct MessageStore {
-    order: Vec<NoteRef>,
+    pub messages_ordered: Vec<NoteRef>,
     seen: HashSet<NoteKey>,
 }
 
@@ -24,7 +24,7 @@ impl MessageStore {
             return false;
         }
 
-        match self.order.binary_search(&note) {
+        match self.messages_ordered.binary_search(&note) {
             Ok(_) => {
                 debug_assert!(
                     false,
@@ -33,7 +33,7 @@ impl MessageStore {
                 false
             }
             Err(idx) => {
-                self.order.insert(idx, note);
+                self.messages_ordered.insert(idx, note);
                 true
             }
         }
@@ -54,23 +54,23 @@ impl MessageStore {
     }
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &NoteRef> {
-        self.order.iter()
+        self.messages_ordered.iter()
     }
 
     pub fn as_slice(&self) -> &[NoteRef] {
-        &self.order
+        &self.messages_ordered
     }
 
     pub fn is_empty(&self) -> bool {
-        self.order.is_empty()
+        self.messages_ordered.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        self.order.len()
+        self.messages_ordered.len()
     }
 
     pub fn latest(&self) -> Option<&NoteRef> {
-        self.order.first()
+        self.messages_ordered.first()
     }
 
     pub fn newest_timestamp(&self) -> Option<u64> {
