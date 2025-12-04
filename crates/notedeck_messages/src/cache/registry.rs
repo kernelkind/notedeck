@@ -142,13 +142,3 @@ impl<'a> ConversationIdentifierUnowned<'a> {
         }
     }
 }
-
-// easily retrievable from Note<'a>
-struct Nip17ChatMessage<'a> {
-    receiver: &'a [u8; 32],
-    sender: &'a [u8; 32],
-    p_tags: Vec<&'a [u8; 32]>,
-    subject: Option<&'a str>,
-    reply_to: Option<&'a [u8; 32]>, // NoteId
-    message: &'a str,
-}

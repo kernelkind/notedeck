@@ -384,3 +384,49 @@ fn chatroom_filter(participants: Vec<&[u8; 32]>) -> Vec<Filter> {
         })
         .build()]
 }
+
+// easily retrievable from Note<'a>
+pub struct Nip17ChatMessage<'a> {
+    sender: &'a [u8; 32],
+    p_tags: Vec<&'a [u8; 32]>,
+    subject: Option<&'a str>,
+    reply_to: Option<&'a [u8; 32]>, // NoteId
+    message: &'a str,
+}
+
+pub fn parse_chat_message<'a>(note: &Note<'a>) -> Option<Nip17ChatMessage<'a>> {
+    if note.kind() != 14 {
+        return None;
+    }
+
+    let mut p_tags = Vec::new();
+    let mut subject = None;
+    let mut reply_to = None;
+
+    for tag in note.tags() {
+        if tag.count() < 2 {
+            continue;
+        }
+        let Some(first) = tag.get_str(0) else {
+            continue;
+        };
+
+        if first == "p" {
+            if let Some(id) = tag.get_id(1) {
+                p_tags.push(id);
+            }
+        } else if first == "subject" {
+            subject = tag.get_str(1);
+        } else if first == "e" {
+            reply_to = tag.get_id(1);
+        }
+    }
+
+    Some(Nip17ChatMessage {
+        sender: note.pubkey(),
+        p_tags,
+        subject,
+        reply_to,
+        message: note.content(),
+    })
+}

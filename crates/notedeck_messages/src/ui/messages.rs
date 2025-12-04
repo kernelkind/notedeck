@@ -1,16 +1,25 @@
 use egui::ScrollArea;
 use egui_extras::{Size, StripBuilder};
+use nostrdb::{Ndb, Transaction};
 
-use crate::cache::{ConversationCache, ConversationStates, ConversationSummary};
+use crate::cache::{
+    parse_chat_message, ConversationCache, ConversationStates, ConversationSummary,
+    Nip17ChatMessage,
+};
 
 pub struct MessagesUi<'a> {
     cache: &'a ConversationCache,
     states: &'a mut ConversationStates,
+    ndb: &'a Ndb,
 }
 
 impl<'a> MessagesUi<'a> {
-    pub fn new(cache: &'a ConversationCache, states: &'a mut ConversationStates) -> Self {
-        Self { cache, states }
+    pub fn new(
+        cache: &'a ConversationCache,
+        states: &'a mut ConversationStates,
+        ndb: &'a Ndb,
+    ) -> Self {
+        Self { cache, states, ndb }
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
@@ -38,7 +47,6 @@ impl<'a> MessagesUi<'a> {
                 strip.cell(|ui| {
                     let id = self.states.active.unwrap_or({
                         let Some(id) = self.cache.first_convo_id() else {
-                            login_nsec_prompt(ui);
                             return;
                         };
                         id
@@ -55,6 +63,17 @@ impl<'a> MessagesUi<'a> {
                         .ui_custom_layout(ui, conversation.messages.len(), |ui, index| {
                             let noteref = conversation.messages.messages_ordered[index];
 
+                            let txn = Transaction::new(self.ndb).expect("txn");
+                            let Ok(note) = self.ndb.get_note_by_key(&txn, noteref.key) else {
+                                return 1;
+                            };
+
+                            let Some(chat_msg) = parse_chat_message(&note) else {
+                                return 1;
+                            };
+
+                            render_chat_message(ui, chat_msg);
+
                             1
                         });
                 });
@@ -63,6 +82,10 @@ impl<'a> MessagesUi<'a> {
 }
 
 pub fn render_summary(ui: &mut egui::Ui, summary: ConversationSummary) -> egui::Response {
+    unimplemented!()
+}
+
+pub fn render_chat_message(ui: &mut egui::Ui, chat_msg: Nip17ChatMessage) -> egui::Response {
     unimplemented!()
 }
 

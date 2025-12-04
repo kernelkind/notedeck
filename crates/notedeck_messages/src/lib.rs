@@ -38,7 +38,9 @@ impl App for MessagesApp {
             return AppResponse::none();
         };
 
-        MessagesUi::new(cache, &mut self.states).ui(ui);
+        self.subs.ensure(ctx.pool, &ctx.accounts);
+
+        MessagesUi::new(cache, &mut self.states, &ctx.ndb).ui(ui);
         AppResponse::none()
     }
 }
