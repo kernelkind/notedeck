@@ -82,7 +82,8 @@ impl ConversationCache {
         }
 
         if updated {
-            refresh_order(&mut self.order, id, &conversation);
+            let latest = conversation.last_activity();
+            refresh_order(&mut self.order, id, latest);
         }
 
         let sub = match ndb.subscribe(&chatroom_filter) {
@@ -122,7 +123,8 @@ impl ConversationCache {
         }
 
         if updated {
-            refresh_order(&mut self.order, id, &conversation);
+            let latest = conversation.last_activity();
+            refresh_order(&mut self.order, id, latest);
         }
     }
 
@@ -147,7 +149,8 @@ impl ConversationCache {
             });
 
             if conversation.ingest_kind_14(res) {
-                refresh_order(&mut self.order, id, &conversation);
+                let latest = conversation.last_activity();
+                refresh_order(&mut self.order, id, latest);
             }
         }
     }
@@ -156,16 +159,17 @@ impl ConversationCache {
 fn refresh_order(
     order: &mut Vec<ConversationOrder>,
     id: ConversationId,
-    conversation: &Conversation,
+    latest: u64,
 ) {
-    let latest = conversation.last_activity();
-    if let Some(entry) = order.iter_mut().find(|entry| entry.id == id) {
-        entry.latest = latest;
-    } else {
-        order.push(ConversationOrder { id, latest });
+    if let Some(pos) = order.iter().position(|entry| entry.id == id) {
+        order.remove(pos);
     }
 
-    order.sort();
+    let entry = ConversationOrder { id, latest };
+    let idx = match order.binary_search(&entry) {
+        Ok(idx) | Err(idx) => idx,
+    };
+    order.insert(idx, entry);
 }
 
 fn get_p_tags<'a>(note: &Note<'a>) -> Vec<&'a [u8; 32]> {
