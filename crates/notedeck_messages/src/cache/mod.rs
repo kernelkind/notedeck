@@ -1,12 +1,11 @@
 mod conversation;
-mod membership;
 mod message_store;
+mod registry;
 mod state;
 
 pub use conversation::{
-    Conversation, ConversationCache, ConversationFilters, ConversationId, ConversationMetadata,
-    ConversationSummary,
+    Conversation, ConversationCache, ConversationId, ConversationMetadata, ConversationSummary,
 };
-pub use membership::ConversationIdentifier;
 pub use message_store::MessageStore;
+pub use registry::ConversationIdentifier;
 pub use state::ConversationStates;

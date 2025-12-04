@@ -1,34 +1,171 @@
 use std::cmp::Ordering;
 
-use crate::cache::ConversationIdentifier;
+use crate::cache::registry::{
+    ConversationIdentifierUnowned, ConversationParticipantsUnowned, ConversationRegistry,
+};
 
 use super::message_store::MessageStore;
 use enostr::Pubkey;
-use hashbrown::{hash_map::Entry, HashMap};
-use nostrdb::{Filter, FilterBuilder, Ndb, NoteKey, QueryResult, Transaction};
-use notedeck::NoteRef;
-use tracing::{error, warn};
-
-const DEFAULT_PAGE_SIZE: usize = 256;
+use hashbrown::HashMap;
+use nostrdb::{Filter, FilterBuilder, Ndb, Note, QueryResult, Subscription, Transaction};
+use notedeck::{note::event_tag, NoteRef};
 
 pub type ConversationId = u32;
+
 pub struct ConversationCache {
-    conversation_ids: HashMap<ConversationIdentifier, ConversationId>,
+    registry: ConversationRegistry,
     conversations: HashMap<ConversationId, Conversation>,
     order: Vec<ConversationOrder>,
+}
+
+impl ConversationCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.conversations.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.conversations.is_empty()
+    }
+
+    pub fn get(&self, id: ConversationId) -> Option<&Conversation> {
+        self.conversations.get(&id)
+    }
+
+    pub fn get_id_by_index(&self, i: usize) -> Option<&ConversationId> {
+        Some(&self.order.get(i)?.id)
+    }
+
+    pub fn get_summary_by_index(&self, i: usize) -> Option<ConversationSummary> {
+        Some(self.conversations.get(self.get_id_by_index(i)?)?.summary())
+    }
+
+    pub fn close_conversation(&mut self, ndb: &mut Ndb, id: ConversationId) {
+        let Some(conversation) = self.conversations.get_mut(&id) else {
+            return;
+        };
+
+        let ConversationActivity::Active(sub) = conversation.state else {
+            return;
+        };
+
+        if let Err(e) = ndb.unsubscribe(sub) {
+            tracing::error!("ndb could not unsub: {e:?}");
+        }
+    }
+
+    /// A conversation is "opened" when the user navigates to the conversation
+    #[profiling::function]
+    pub fn open_conversation(&mut self, ndb: &Ndb, txn: &Transaction, id: ConversationId) {
+        let Some(conversation) = self.conversations.get_mut(&id) else {
+            return;
+        };
+
+        let pubkeys = conversation.metadata.participants.clone();
+        let participants: Vec<&[u8; 32]> = pubkeys.iter().map(|p| p.bytes()).collect();
+
+        let chatroom_filter = chatroom_filter(participants);
+        let results = match ndb.query(txn, &chatroom_filter, 200) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("problem with chatroom filter ndb::query: {e:?}");
+                return;
+            }
+        };
+
+        for res in results {
+            conversation.ingest_kind_14(res);
+        }
+
+        let sub = match ndb.subscribe(&chatroom_filter) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("Failed to ndb::subscribe to chatroom filter: {e:?}");
+                return;
+            }
+        };
+
+        conversation.state = ConversationActivity::Active(sub);
+    }
+
+    /// check for updates on an already opened conversation
+    pub fn check_for_updates(&mut self, ndb: &Ndb, txn: &Transaction, id: ConversationId) {
+        let Some(conversation) = self.conversations.get_mut(&id) else {
+            return;
+        };
+
+        let ConversationActivity::Active(sub) = conversation.state else {
+            tracing::warn!("attempting to check for updates on a stale conversation");
+            return;
+        };
+
+        let notes = ndb.poll_for_notes(sub, 10);
+
+        for key in notes {
+            let Ok(note) = ndb.get_note_by_key(txn, key) else {
+                continue;
+            };
+
+            conversation.messages.insert(NoteRef {
+                key,
+                created_at: note.created_at(),
+            });
+        }
+    }
+
+    pub fn init_conversations(&mut self, ndb: &Ndb, txn: &Transaction, cur_acc: &Pubkey) {
+        let Some(results) = get_conversations(ndb, txn, cur_acc) else {
+            return;
+        };
+
+        for res in results {
+            let participants = get_p_tags(&res.note);
+            let id = self
+                .registry
+                .get_or_insert(ConversationIdentifierUnowned::Nip17(
+                    ConversationParticipantsUnowned(participants.clone()),
+                ));
+
+            let conversation = self.conversations.entry(id).or_insert_with(|| {
+                let participants: Vec<Pubkey> =
+                    participants.into_iter().map(|p| Pubkey::new(*p)).collect();
+
+                Conversation::new(participants)
+            });
+
+            conversation.ingest_kind_14(res);
+        }
+    }
+}
+
+fn get_p_tags<'a>(note: &Note<'a>) -> Vec<&'a [u8; 32]> {
+    let mut items = Vec::new();
+    for tag in note.tags() {
+        if tag.count() < 2 {
+            continue;
+        }
+
+        if tag.get_str(0) != Some("p") {
+            continue;
+        }
+
+        let Some(item) = tag.get_id(1) else {
+            continue;
+        };
+
+        items.push(item);
+    }
+
+    items
 }
 
 #[derive(Clone, Copy, Debug)]
 struct ConversationOrder {
     id: ConversationId,
     latest: u64,
-}
-
-impl ConversationOrder {
-    /// Use for removal in BTreeSet
-    pub fn only_id(id: ConversationId) -> Self {
-        Self { id, latest: 0 }
-    }
 }
 
 // Equality is *only by id*.
@@ -63,27 +200,22 @@ impl Ord for ConversationOrder {
 
 #[derive(Clone, Debug, Default)]
 pub struct ConversationMetadata {
-    pub title: Option<String>,
-    pub picture_url: Option<String>,
+    pub title: Option<TitleMetadata>,
     pub participants: Vec<Pubkey>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct ConversationFilters {
-    pub local: Vec<Filter>,
-    pub remote: Vec<Filter>,
+#[derive(Clone, Debug)]
+pub struct TitleMetadata {
+    pub title: String,
+    pub last_modified: u64,
 }
 
-impl ConversationFilters {
-    pub fn single_local(filter: Filter) -> Self {
+impl ConversationMetadata {
+    pub fn new(participants: Vec<Pubkey>) -> Self {
         Self {
-            local: vec![filter],
-            remote: Vec::new(),
+            title: None,
+            participants,
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.local.is_empty() && self.remote.is_empty()
     }
 }
 
@@ -97,18 +229,29 @@ pub struct ConversationSummary<'a> {
 
 pub struct Conversation {
     pub messages: MessageStore,
-    pub set_scroll_offset: Option<f32>,
+    pub state: ConversationActivity,
     pub metadata: ConversationMetadata,
-    pub unread_count: usize,
-    filters: ConversationFilters,
+}
+
+pub enum ConversationActivity {
+    Active(Subscription),
+    Stale,
 }
 
 impl Conversation {
+    pub fn new(participants: Vec<Pubkey>) -> Self {
+        Self {
+            messages: MessageStore::default(),
+            metadata: ConversationMetadata::new(participants),
+            state: ConversationActivity::Stale,
+        }
+    }
+
     fn summary<'a>(&'a self) -> ConversationSummary<'a> {
         ConversationSummary {
             metadata: &self.metadata,
             last_message: self.messages.latest(),
-            unread_count: self.unread_count,
+            unread_count: todo!(),
             total_messages: self.messages.len(),
         }
     }
@@ -117,61 +260,45 @@ impl Conversation {
         self.messages.newest_timestamp().unwrap_or(0)
     }
 
-    fn ingest_refs<I>(&mut self, notes: I) -> Vec<NoteKey>
-    where
-        I: IntoIterator<Item = NoteRef>,
-    {
-        let inserted = self.messages.extend(notes);
-        if inserted.is_empty() {
-            return Vec::new();
+    pub fn ingest_kind_14(&mut self, kind_14_res: QueryResult) {
+        if kind_14_res.note.kind() != 14 {
+            tracing::error!("tried to ingest a non-kind 14 note...");
+            return;
         }
 
-        self.unread_count += inserted.len();
-        inserted.into_iter().map(|r| r.key).collect()
-    }
+        let res = kind_14_res;
 
-    fn filters(&self) -> &[Filter] {
-        &self.filters.local
+        if let Some(title) = event_tag(&res.note, "subject") {
+            let created = res.note.created_at();
+
+            if self
+                .metadata
+                .title
+                .as_ref()
+                .map_or(true, |cur| created > cur.last_modified)
+            {
+                self.metadata.title = Some(TitleMetadata {
+                    title: title.to_string(),
+                    last_modified: created,
+                });
+            }
+        }
+
+        self.messages.insert(NoteRef {
+            key: res.note_key,
+            created_at: res.note.created_at(),
+        });
     }
 }
 
 impl Default for ConversationCache {
     fn default() -> Self {
         Self {
-            conversation_ids: HashMap::new(),
+            registry: ConversationRegistry::default(),
             conversations: HashMap::new(),
             order: Vec::new(),
         }
     }
-}
-
-impl ConversationCache {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn len(&self) -> usize {
-        self.conversations.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.conversations.is_empty()
-    }
-
-    pub fn get(&self, id: ConversationId) -> Option<&Conversation> {
-        self.conversations.get(&id)
-    }
-
-    pub fn get_id_by_index(&self, i: usize) -> Option<&ConversationId> {
-        Some(&self.order.get(i)?.id)
-    }
-
-    pub fn get_summary_by_index(&self, i: usize) -> Option<ConversationSummary> {
-        Some(self.conversations.get(self.get_id_by_index(i)?)?.summary())
-    }
-
-    #[profiling::function]
-    pub fn open_conversation(&mut self, ndb: &Ndb, txn: &Transaction, id: ConversationId) {}
 }
 
 fn refs_from_query(results: Vec<QueryResult<'_>>) -> Vec<NoteRef> {
@@ -181,8 +308,18 @@ fn refs_from_query(results: Vec<QueryResult<'_>>) -> Vec<NoteRef> {
         .collect()
 }
 
-fn get_conversations(ndb: &Ndb, txn: &Transaction, cur_acc: &Pubkey) {
-    let res = ndb.query(txn, &conversation_filter(cur_acc), 300);
+fn get_conversations<'a>(
+    ndb: &Ndb,
+    txn: &'a Transaction,
+    cur_acc: &Pubkey,
+) -> Option<Vec<QueryResult<'a>>> {
+    match ndb.query(txn, &conversation_filter(cur_acc), 300) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            tracing::error!("error fetching kind 14 messages: {e}");
+            None
+        }
+    }
 }
 
 fn conversation_filter(cur_acc: &Pubkey) -> Vec<Filter> {
@@ -196,4 +333,30 @@ fn conversation_filter(cur_acc: &Pubkey) -> Vec<Filter> {
             .pubkey([cur_acc.bytes()])
             .build(),
     ]
+}
+
+fn chatroom_filter(participants: Vec<&[u8; 32]>) -> Vec<Filter> {
+    let num_participants = participants.len();
+    vec![FilterBuilder::new()
+        .kinds([14])
+        .pubkey(participants)
+        .custom(move |note| {
+            let mut p_tags = 0;
+            for tag in note.tags() {
+                if tag.get_str(0) != Some("p") {
+                    continue;
+                }
+                p_tags += 1;
+
+                if p_tags > num_participants {
+                    return false;
+                }
+            }
+            if p_tags != num_participants {
+                return false;
+            }
+
+            true
+        })
+        .build()]
 }
