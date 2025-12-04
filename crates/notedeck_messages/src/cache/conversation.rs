@@ -76,8 +76,13 @@ impl ConversationCache {
             }
         };
 
+        let mut updated = false;
         for res in results {
-            conversation.ingest_kind_14(res);
+            updated |= conversation.ingest_kind_14(res);
+        }
+
+        if updated {
+            refresh_order(&mut self.order, id, &conversation);
         }
 
         let sub = match ndb.subscribe(&chatroom_filter) {
@@ -104,15 +109,20 @@ impl ConversationCache {
 
         let notes = ndb.poll_for_notes(sub, 10);
 
+        let mut updated = false;
         for key in notes {
             let Ok(note) = ndb.get_note_by_key(txn, key) else {
                 continue;
             };
 
-            conversation.messages.insert(NoteRef {
+            updated |= conversation.messages.insert(NoteRef {
                 key,
                 created_at: note.created_at(),
             });
+        }
+
+        if updated {
+            refresh_order(&mut self.order, id, &conversation);
         }
     }
 
@@ -136,9 +146,26 @@ impl ConversationCache {
                 Conversation::new(participants)
             });
 
-            conversation.ingest_kind_14(res);
+            if conversation.ingest_kind_14(res) {
+                refresh_order(&mut self.order, id, &conversation);
+            }
         }
     }
+}
+
+fn refresh_order(
+    order: &mut Vec<ConversationOrder>,
+    id: ConversationId,
+    conversation: &Conversation,
+) {
+    let latest = conversation.last_activity();
+    if let Some(entry) = order.iter_mut().find(|entry| entry.id == id) {
+        entry.latest = latest;
+    } else {
+        order.push(ConversationOrder { id, latest });
+    }
+
+    order.sort();
 }
 
 fn get_p_tags<'a>(note: &Note<'a>) -> Vec<&'a [u8; 32]> {
@@ -260,10 +287,10 @@ impl Conversation {
         self.messages.newest_timestamp().unwrap_or(0)
     }
 
-    pub fn ingest_kind_14(&mut self, kind_14_res: QueryResult) {
+    pub fn ingest_kind_14(&mut self, kind_14_res: QueryResult) -> bool {
         if kind_14_res.note.kind() != 14 {
             tracing::error!("tried to ingest a non-kind 14 note...");
-            return;
+            return false;
         }
 
         let res = kind_14_res;
@@ -287,7 +314,7 @@ impl Conversation {
         self.messages.insert(NoteRef {
             key: res.note_key,
             created_at: res.note.created_at(),
-        });
+        })
     }
 }
 
