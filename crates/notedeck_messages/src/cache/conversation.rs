@@ -394,6 +394,28 @@ pub struct Nip17ChatMessage<'a> {
     message: &'a str,
 }
 
+impl<'a> Nip17ChatMessage<'a> {
+    pub fn sender(&self) -> &'a [u8; 32] {
+        self.sender
+    }
+
+    pub fn recipients(&self) -> &[&'a [u8; 32]] {
+        &self.p_tags
+    }
+
+    pub fn subject(&self) -> Option<&'a str> {
+        self.subject
+    }
+
+    pub fn reply_to(&self) -> Option<&'a [u8; 32]> {
+        self.reply_to
+    }
+
+    pub fn message(&self) -> &'a str {
+        self.message
+    }
+}
+
 pub fn parse_chat_message<'a>(note: &Note<'a>) -> Option<Nip17ChatMessage<'a>> {
     if note.kind() != 14 {
         return None;
