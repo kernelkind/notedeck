@@ -16,6 +16,7 @@ pub struct ConversationCache {
     registry: ConversationRegistry,
     conversations: HashMap<ConversationId, Conversation>,
     order: Vec<ConversationOrder>,
+    pub initialized_convos: bool,
 }
 
 impl ConversationCache {
@@ -130,8 +131,11 @@ impl ConversationCache {
 
     pub fn init_conversations(&mut self, ndb: &Ndb, txn: &Transaction, cur_acc: &Pubkey) {
         let Some(results) = get_conversations(ndb, txn, cur_acc) else {
+            tracing::warn!("Got no conversations from ndb");
             return;
         };
+
+        tracing::trace!("Received {} conversations from ndb", results.len());
 
         for res in results {
             let participants = get_p_tags(&res.note);
@@ -148,6 +152,7 @@ impl ConversationCache {
                 Conversation::new(participants)
             });
 
+            tracing::trace!("ingesting into conversation: {:?}", res.note.json());
             if conversation.ingest_kind_14(res) {
                 let latest = conversation.last_activity();
                 refresh_order(&mut self.order, id, latest);
@@ -328,6 +333,7 @@ impl Default for ConversationCache {
             registry: ConversationRegistry::default(),
             conversations: HashMap::new(),
             order: Vec::new(),
+            initialized_convos: false,
         }
     }
 }
@@ -347,16 +353,20 @@ fn get_conversations<'a>(
 }
 
 fn conversation_filter(cur_acc: &Pubkey) -> Vec<Filter> {
-    vec![
-        FilterBuilder::new()
-            .authors([cur_acc.bytes()])
-            .kinds([14])
-            .build(),
-        FilterBuilder::new()
-            .kinds([14])
-            .pubkey([cur_acc.bytes()])
-            .build(),
-    ]
+    // vec![
+    //     FilterBuilder::new()
+    //         .authors([cur_acc.bytes()])
+    //         .kinds([14])
+    //         .build(),
+    //     FilterBuilder::new()
+    //         .kinds([14])
+    //         .pubkey([cur_acc.bytes()])
+    //         .build(),
+    // ]
+    vec![FilterBuilder::new()
+        .kinds([14])
+        .pubkey([cur_acc.bytes()])
+        .build()]
 }
 
 fn chatroom_filter(participants: Vec<&[u8; 32]>) -> Vec<Filter> {
@@ -451,4 +461,20 @@ pub fn parse_chat_message<'a>(note: &Note<'a>) -> Option<Nip17ChatMessage<'a>> {
         reply_to,
         message: note.content(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use nostrdb::{Config, Ndb};
+
+    #[test]
+    fn test_giftwrap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path();
+        let map_size = 1024usize * 1024usize * 1024usize * 1024usize;
+        let config = Config::new().set_ingester_threads(2).set_mapsize(map_size);
+
+        let mut ndb = Ndb::new(&path.to_string_lossy(), &config).unwrap();
+
+    }
 }

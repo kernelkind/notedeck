@@ -4,7 +4,7 @@ pub mod ui;
 
 use enostr::{Pubkey, RelayEvent, RelayPool};
 use hashbrown::HashMap;
-use nostrdb::Filter;
+use nostrdb::{Filter, Transaction};
 use notedeck::{try_process_events_core, Accounts, App, AppContext, AppResponse};
 
 use crate::{
@@ -39,6 +39,24 @@ impl App for MessagesApp {
         };
 
         self.subs.ensure(ctx.pool, &ctx.accounts);
+
+        {
+            let txn = Transaction::new(&ctx.ndb).expect("txn");
+            if !cache.initialized_convos {
+                if let Some(nsec) = ctx
+                    .accounts
+                    .selected_filled()
+                    .map(|f| f.secret_key.secret_bytes())
+                {
+                    ctx.ndb.add_key(&nsec);
+                    ctx.ndb.process_giftwraps(&txn);
+                }
+                cache.initialized_convos = true;
+            } else {
+                ctx.ndb.process_giftwraps(&txn);
+            }
+            cache.init_conversations(&ctx.ndb, &txn, ctx.accounts.selected_account_pubkey());
+        }
 
         MessagesUi::new(cache, &mut self.states, &ctx.ndb).ui(ui);
         AppResponse::none()
@@ -121,6 +139,13 @@ impl ConversationSubs {
         }
 
         let filter = remote_filters(accounts.selected_account_pubkey());
+
+        let s = filter
+            .iter()
+            .map(|f| f.json().unwrap())
+            .collect::<Vec<String>>()
+            .join(",");
+        tracing::info!("Performing remote sub for giftwrap filter for: {s}");
         self.remotes = vec![RemoteFilter {
             remote_id: remote_sub(pool, filter.clone()),
             filter,

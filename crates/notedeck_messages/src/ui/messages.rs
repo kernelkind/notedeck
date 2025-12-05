@@ -32,6 +32,7 @@ impl<'a> MessagesUi<'a> {
                     ScrollArea::vertical().show(ui, |ui| {
                         let num_convos = self.cache.len();
 
+                        ui.label("Conversations");
                         self.states
                             .convos_list
                             .ui_custom_layout(ui, num_convos, |ui, index| {
@@ -54,6 +55,7 @@ impl<'a> MessagesUi<'a> {
                     });
 
                     let Some(conversation) = self.cache.get(id) else {
+                        tracing::error!("don't have conversation for id {id}");
                         return;
                     };
 

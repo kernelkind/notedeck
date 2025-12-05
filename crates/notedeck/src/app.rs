@@ -463,6 +463,7 @@ fn process_message_core(ctx: &mut AppContext<'_>, relay: &str, msg: &RelayMessag
             match relay {
                 PoolRelay::Websocket(_) => {
                     //info!("processing event {}", event);
+                    tracing::trace!("processing event {ev}");
                     if let Err(err) = ctx.ndb.process_event_with(
                         ev,
                         nostrdb::IngestMetadata::new()
