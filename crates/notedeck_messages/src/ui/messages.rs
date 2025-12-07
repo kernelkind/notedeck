@@ -43,7 +43,7 @@ impl<'a> MessagesUi<'a> {
             .size(Size::remainder())
             .horizontal(|mut strip| {
                 strip.cell(|ui| {
-                    self.render_conversation_list_panel(ui);
+                    self.render_conversation_list_panel(ui, img_cache);
                 });
 
                 strip.cell(|ui| {
@@ -52,7 +52,7 @@ impl<'a> MessagesUi<'a> {
             });
     }
 
-    fn render_conversation_list_panel(&mut self, ui: &mut egui::Ui) {
+    fn render_conversation_list_panel(&mut self, ui: &mut egui::Ui, img_cache: &mut Images) {
         Frame::new()
             .fill(ui.visuals().faint_bg_color)
             .inner_margin(Margin::symmetric(12, 10))
@@ -91,10 +91,9 @@ impl<'a> MessagesUi<'a> {
                                     let num_convos = self.cache.len();
                                     let mut active = self.states.active;
                                     let txn = Transaction::new(self.ndb).expect("txn");
+                                    let txn_ref = &txn;
 
-                                    self.states.convos_list.ui_custom_layout(
-                                        ui,
-                                        num_convos,
+                                    self.states.convos_list.ui_custom_layout(ui, num_convos, {
                                         |ui, index| {
                                             let Some(id) =
                                                 self.cache.get_id_by_index(index).copied()
@@ -110,16 +109,29 @@ impl<'a> MessagesUi<'a> {
 
                                             let title = conversation_title(
                                                 summary.metadata,
-                                                &txn,
+                                                txn_ref,
                                                 self.ndb,
                                                 self.selected_pubkey,
                                             );
+
+                                            let partner = direct_chat_partner(
+                                                summary.metadata.participants.as_slice(),
+                                                self.selected_pubkey,
+                                            );
+                                            let partner_profile = partner.and_then(|pk| {
+                                                self.ndb
+                                                    .get_profile_by_pubkey(txn_ref, pk.bytes())
+                                                    .ok()
+                                            });
 
                                             let response = render_summary(
                                                 ui,
                                                 summary,
                                                 Some(id) == active,
                                                 &title,
+                                                partner.is_some(),
+                                                partner_profile.as_ref(),
+                                                &mut *img_cache,
                                             );
 
                                             if response.clicked() {
@@ -128,8 +140,8 @@ impl<'a> MessagesUi<'a> {
                                             }
 
                                             1
-                                        },
-                                    );
+                                        }
+                                    });
                                 });
                         });
                     });
@@ -159,11 +171,15 @@ impl<'a> MessagesUi<'a> {
             unread_count: state.unread_count,
             total_messages: conversation.messages.len(),
         };
-        let title = {
-            let txn = Transaction::new(self.ndb).expect("txn");
-            conversation_title(summary.metadata, &txn, self.ndb, self.selected_pubkey)
-        };
+        let txn = Transaction::new(self.ndb).expect("txn");
+        let title = conversation_title(summary.metadata, &txn, self.ndb, self.selected_pubkey);
         let meta_line = conversation_meta_line(&summary);
+        let partner = direct_chat_partner(
+            summary.metadata.participants.as_slice(),
+            self.selected_pubkey,
+        );
+        let partner_profile =
+            partner.and_then(|pk| self.ndb.get_profile_by_pubkey(&txn, pk.bytes()).ok());
 
         let outer_margin = Margin {
             left: 0,
@@ -183,14 +199,6 @@ impl<'a> MessagesUi<'a> {
                     .size(Size::exact(102.0))
                     .vertical(|mut strip| {
                         strip.cell(|ui| {
-                            let partner = direct_chat_partner(
-                                summary.metadata.participants.as_slice(),
-                                self.selected_pubkey,
-                            );
-                            let txn = Transaction::new(self.ndb).expect("txn");
-                            let partner_profile = partner.and_then(|pk| {
-                                self.ndb.get_profile_by_pubkey(&txn, pk.bytes()).ok()
-                            });
                             conversation_header(
                                 ui,
                                 &title,
@@ -202,7 +210,14 @@ impl<'a> MessagesUi<'a> {
                         });
 
                         strip.cell(|ui| {
-                            conversation_history(ui, conversation, state, self.ndb, img_cache);
+                            conversation_history(
+                                ui,
+                                conversation,
+                                state,
+                                self.ndb,
+                                &txn,
+                                img_cache,
+                            );
                         });
 
                         strip.cell(|ui| {
@@ -265,6 +280,7 @@ fn conversation_history(
     conversation: &Conversation,
     state: &mut ConversationState,
     ndb: &Ndb,
+    txn: &Transaction,
     img_cache: &mut Images,
 ) {
     Frame::new()
@@ -275,7 +291,6 @@ fn conversation_history(
                 .ui_custom_layout(ui, conversation.messages.len(), move |ui, index| {
                     let noteref = conversation.messages.messages_ordered[index];
 
-                    let txn = Transaction::new(ndb).expect("txn");
                     let Ok(note) = ndb.get_note_by_key(&txn, noteref.key) else {
                         tracing::error!("Could not get key {:?}", noteref.key);
                         return 1;
@@ -371,6 +386,9 @@ pub fn render_summary(
     summary: ConversationSummary,
     selected: bool,
     title: &str,
+    show_partner_avatar: bool,
+    partner_profile: Option<&ProfileRecord<'_>>,
+    img_cache: &mut Images,
 ) -> egui::Response {
     let meta_line = conversation_meta_line(&summary);
     let unread = summary.unread_count;
@@ -393,6 +411,13 @@ pub fn render_summary(
         .inner_margin(Margin::symmetric(12, 8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
+                if show_partner_avatar {
+                    let mut pic = ProfilePic::from_profile_or_default(img_cache, partner_profile)
+                        .size(ProfilePic::medium_size() as f32);
+                    ui.add(&mut pic);
+                    ui.add_space(8.0);
+                }
+
                 ui.vertical(|ui| {
                     ui.label(RichText::new(title).strong());
 
