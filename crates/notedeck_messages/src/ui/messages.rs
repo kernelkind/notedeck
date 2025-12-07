@@ -1,3 +1,4 @@
+use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use egui::{
     vec2, Align, Button, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, TextEdit,
 };
@@ -292,7 +293,9 @@ fn conversation_history(
         .inner_margin(Margin::symmetric(16, 0))
         .show(ui, |ui| {
             let mut last_sender: Option<([u8; 32], u64)> = None;
+            let mut last_day: Option<NaiveDate> = None;
             let current = *selected_pubkey.bytes();
+            let today = Local::now().date_naive();
             let total = conversation.messages.len();
             state.list.ui_custom_layout(ui, total, |ui, index| {
                 if index >= total {
@@ -324,6 +327,25 @@ fn conversation_history(
                     };
                 last_sender = Some((sender_bytes, noteref.created_at));
                 let sender_name = sender_label(profile.as_ref(), chat_msg.sender());
+                let msg_dt = local_datetime(noteref.created_at);
+                let msg_date = msg_dt.date_naive();
+                if last_day.map(|d| d != msg_date).unwrap_or(true) {
+                    let label = format_day_heading(msg_date, today);
+                    ui.add_space(8.0);
+                    ui.vertical_centered(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(label)
+                                    .strong()
+                                    .color(ui.visuals().weak_text_color()),
+                            )
+                            .wrap(),
+                        );
+                    });
+                    ui.add_space(4.0);
+                    last_day = Some(msg_date);
+                }
+                let timestamp_label = format_timestamp_label(&msg_dt);
 
                 render_chat_message(
                     ui,
@@ -333,6 +355,7 @@ fn conversation_history(
                     is_self,
                     show_sender_name,
                     &sender_name,
+                    &timestamp_label,
                 );
 
                 1
@@ -485,6 +508,7 @@ pub fn render_chat_message(
     is_self: bool,
     show_sender_name: bool,
     sender_name: &str,
+    timestamp_label: &str,
 ) -> egui::Response {
     let reply = chat_msg.reply_to().map(short_note_id_from_bytes);
     let message = chat_msg.message();
@@ -518,6 +542,7 @@ pub fn render_chat_message(
                     show_sender_name.then_some(sender_name),
                     reply_ref,
                     message,
+                    timestamp_label,
                     text_color,
                     secondary_color,
                 );
@@ -629,6 +654,26 @@ fn conversation_meta_line(summary: &ConversationSummary<'_>) -> String {
     parts.join(" • ")
 }
 
+fn local_datetime(timestamp: u64) -> DateTime<Local> {
+    DateTime::<Utc>::from_timestamp(timestamp as i64, 0)
+        .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap())
+        .with_timezone(&Local)
+}
+
+fn format_day_heading(date: NaiveDate, today: NaiveDate) -> String {
+    if date == today {
+        "Today".to_string()
+    } else if date == today - Duration::days(1) {
+        "Yesterday".to_string()
+    } else {
+        date.format("%A, %B %-d, %Y").to_string()
+    }
+}
+
+fn format_timestamp_label(dt: &DateTime<Local>) -> String {
+    dt.format("%-I:%M %p").to_string()
+}
+
 fn direct_chat_partner<'a>(participants: &'a [Pubkey], current: &Pubkey) -> Option<&'a Pubkey> {
     if participants.len() != 2 {
         return None;
@@ -664,6 +709,7 @@ fn chat_bubble_contents(
     sender_name: Option<&str>,
     reply_to: Option<&str>,
     message: &str,
+    timestamp_label: &str,
     text_color: egui::Color32,
     secondary_color: egui::Color32,
 ) {
@@ -680,7 +726,21 @@ fn chat_bubble_contents(
             ui.add_space(2.0);
         }
 
-        ui.label(RichText::new(message).color(text_color));
+        let msg_resp = ui.label(RichText::new(message).color(text_color));
+
+        ui.add_space(4.0);
+        let desired_size = {
+            let mut rect = ui.available_rect_before_wrap();
+            rect.set_width(msg_resp.rect.width());
+            rect.size()
+        };
+        ui.allocate_ui_with_layout(desired_size, Layout::right_to_left(Align::BOTTOM), |ui| {
+            ui.label(
+                RichText::new(timestamp_label)
+                    .small()
+                    .color(secondary_color),
+            );
+        });
     });
 }
 

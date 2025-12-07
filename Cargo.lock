@@ -3849,6 +3849,7 @@ dependencies = [
 name = "notedeck_messages"
 version = "0.7.1"
 dependencies = [
+ "chrono",
  "egui",
  "egui_extras",
  "egui_virtual_list",
