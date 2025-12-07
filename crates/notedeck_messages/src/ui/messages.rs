@@ -293,47 +293,50 @@ fn conversation_history(
         .show(ui, |ui| {
             let mut last_sender: Option<([u8; 32], u64)> = None;
             let current = *selected_pubkey.bytes();
-            state
-                .list
-                .ui_custom_layout(ui, conversation.messages.len(), |ui, index| {
-                    let noteref = conversation.messages.messages_ordered[index];
+            let total = conversation.messages.len();
+            state.list.ui_custom_layout(ui, total, |ui, index| {
+                if index >= total {
+                    return 0;
+                }
+                let latest_index = total - 1 - index;
+                let noteref = conversation.messages.messages_ordered[latest_index];
 
-                    let Ok(note) = ndb.get_note_by_key(txn, noteref.key) else {
-                        tracing::error!("Could not get key {:?}", noteref.key);
-                        return 1;
+                let Ok(note) = ndb.get_note_by_key(txn, noteref.key) else {
+                    tracing::error!("Could not get key {:?}", noteref.key);
+                    return 1;
+                };
+
+                let Some(chat_msg) = parse_chat_message(&note) else {
+                    tracing::error!("Could not parse chat message for note {noteref:?}");
+                    return 1;
+                };
+
+                let profile = ndb.get_profile_by_pubkey(txn, chat_msg.sender()).ok();
+                let sender_bytes = *chat_msg.sender();
+                let is_self = sender_bytes == current;
+                let show_sender_name = !is_self
+                    && match last_sender {
+                        Some((prev_sender, prev_time)) if prev_sender == sender_bytes => {
+                            let delta = noteref.created_at.saturating_sub(prev_time);
+                            delta > GROUP_WINDOW_SECS
+                        }
+                        _ => true,
                     };
+                last_sender = Some((sender_bytes, noteref.created_at));
+                let sender_name = sender_label(profile.as_ref(), chat_msg.sender());
 
-                    let Some(chat_msg) = parse_chat_message(&note) else {
-                        tracing::error!("Could not parse chat message for note {noteref:?}");
-                        return 1;
-                    };
+                render_chat_message(
+                    ui,
+                    chat_msg,
+                    img_cache,
+                    profile.as_ref(),
+                    is_self,
+                    show_sender_name,
+                    &sender_name,
+                );
 
-                    let profile = ndb.get_profile_by_pubkey(txn, chat_msg.sender()).ok();
-                    let sender_bytes = *chat_msg.sender();
-                    let is_self = sender_bytes == current;
-                    let show_sender_name = !is_self
-                        && match last_sender {
-                            Some((prev_sender, prev_time)) if prev_sender == sender_bytes => {
-                                let delta = noteref.created_at.saturating_sub(prev_time);
-                                delta > GROUP_WINDOW_SECS
-                            }
-                            _ => true,
-                        };
-                    last_sender = Some((sender_bytes, noteref.created_at));
-                    let sender_name = sender_label(profile.as_ref(), chat_msg.sender());
-
-                    render_chat_message(
-                        ui,
-                        chat_msg,
-                        img_cache,
-                        profile.as_ref(),
-                        is_self,
-                        show_sender_name,
-                        &sender_name,
-                    );
-
-                    1
-                });
+                1
+            });
         });
 }
 
