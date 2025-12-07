@@ -1,6 +1,4 @@
-use egui::{
-    Align, Button, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, Stroke, TextEdit,
-};
+use egui::{Align, Button, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, TextEdit};
 use egui_extras::{Size, StripBuilder};
 use enostr::{NoteId, Pubkey};
 use nostrdb::{Ndb, Transaction};
@@ -192,19 +190,36 @@ impl<'a> MessagesUi<'a> {
 
                         strip.cell(|ui| {
                             ui.add_space(4.0);
-                            ui.horizontal(|ui| {
-                                let text_edit = TextEdit::singleline(&mut state.composer)
-                                    .hint_text("Type a message")
-                                    .desired_width(f32::INFINITY);
-                                ui.add(text_edit);
+                            Frame::new()
+                                .fill(ui.visuals().extreme_bg_color)
+                                .inner_margin(Margin::symmetric(8, 6))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        let available = ui.available_width();
+                                        let spacing = ui.spacing().item_spacing.x;
+                                        let button_width = 88.0;
+                                        let input_width =
+                                            (available - button_width - spacing).max(80.0);
+                                        let text_height = ui.spacing().interact_size.y * 1.4;
 
-                                let send =
-                                    ui.add_enabled(!state.composer.is_empty(), Button::new("Send"));
+                                        let text_edit = TextEdit::singleline(&mut state.composer)
+                                            .hint_text("Type a message");
+                                        ui.add_sized([input_width, text_height], text_edit);
 
-                                if send.clicked() {
-                                    state.composer.clear();
-                                }
-                            });
+                                        let send_response = ui
+                                            .add_enabled_ui(!state.composer.is_empty(), |ui| {
+                                                ui.add_sized(
+                                                    [button_width, text_height],
+                                                    Button::new("Send"),
+                                                )
+                                            })
+                                            .response;
+
+                                        if send_response.clicked() {
+                                            state.composer.clear();
+                                        }
+                                    });
+                                });
                         });
                     });
             });
