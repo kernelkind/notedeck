@@ -65,7 +65,11 @@ impl App for MessagesApp {
             cache.initialized_convos = true;
         }
 
-        MessagesUi::new(cache, &mut self.states, &ctx.ndb).ui(ui, &mut *ctx.img_cache);
+        let selected_pubkey = ctx.accounts.selected_account_pubkey();
+        MessagesUi::new(cache, &mut self.states, &ctx.ndb, selected_pubkey).ui(
+            ui,
+            &mut *ctx.img_cache,
+        );
         AppResponse::none()
     }
 }

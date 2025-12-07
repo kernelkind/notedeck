@@ -16,6 +16,7 @@ pub struct MessagesUi<'a> {
     cache: &'a ConversationCache,
     states: &'a mut ConversationStates,
     ndb: &'a Ndb,
+    selected_pubkey: &'a Pubkey,
 }
 
 impl<'a> MessagesUi<'a> {
@@ -23,8 +24,14 @@ impl<'a> MessagesUi<'a> {
         cache: &'a ConversationCache,
         states: &'a mut ConversationStates,
         ndb: &'a Ndb,
+        selected_pubkey: &'a Pubkey,
     ) -> Self {
-        Self { cache, states, ndb }
+        Self {
+            cache,
+            states,
+            ndb,
+            selected_pubkey,
+        }
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, img_cache: &mut Images) {
@@ -83,6 +90,7 @@ impl<'a> MessagesUi<'a> {
                                 .show(ui, |ui| {
                                     let num_convos = self.cache.len();
                                     let mut active = self.states.active;
+                                    let txn = Transaction::new(self.ndb).expect("txn");
 
                                     self.states.convos_list.ui_custom_layout(
                                         ui,
@@ -100,8 +108,19 @@ impl<'a> MessagesUi<'a> {
                                                 return 0;
                                             };
 
-                                            let response =
-                                                render_summary(ui, summary, Some(id) == active);
+                                            let title = conversation_title(
+                                                summary.metadata,
+                                                &txn,
+                                                self.ndb,
+                                                self.selected_pubkey,
+                                            );
+
+                                            let response = render_summary(
+                                                ui,
+                                                summary,
+                                                Some(id) == active,
+                                                &title,
+                                            );
 
                                             if response.clicked() {
                                                 self.states.active = Some(id);
@@ -140,7 +159,10 @@ impl<'a> MessagesUi<'a> {
             unread_count: state.unread_count,
             total_messages: conversation.messages.len(),
         };
-        let title = conversation_title(summary.metadata);
+        let title = {
+            let txn = Transaction::new(self.ndb).expect("txn");
+            conversation_title(summary.metadata, &txn, self.ndb, self.selected_pubkey)
+        };
         let meta_line = conversation_meta_line(&summary);
 
         let outer_margin = Margin {
@@ -316,8 +338,8 @@ pub fn render_summary(
     ui: &mut egui::Ui,
     summary: ConversationSummary,
     selected: bool,
+    title: &str,
 ) -> egui::Response {
-    let title = conversation_title(summary.metadata);
     let meta_line = conversation_meta_line(&summary);
     let unread = summary.unread_count;
     let visuals = ui.visuals();
@@ -434,31 +456,49 @@ pub fn login_nsec_prompt(ui: &mut egui::Ui) {
     });
 }
 
-fn fallback_convo_title(participants: &[Pubkey]) -> String {
+fn fallback_convo_title(
+    participants: &[Pubkey],
+    txn: &Transaction,
+    ndb: &Ndb,
+    current: &Pubkey,
+) -> String {
     if participants.is_empty() {
         return "Conversation".to_string();
     }
 
-    const MAX_SHOWN: usize = 3;
-    let mut labels: Vec<String> = participants
-        .iter()
-        .take(MAX_SHOWN)
-        .map(short_pubkey)
-        .collect();
+    let mut others: Vec<&Pubkey> = participants.iter().filter(|pk| *pk != current).collect();
 
-    if participants.len() > MAX_SHOWN {
-        labels.push(format!("+{} more", participants.len() - MAX_SHOWN));
+    if participants.len() == 2 && others.len() == 1 {
+        return participant_label(ndb, txn, others[0]);
     }
 
-    labels.join(", ")
+    if others.is_empty() {
+        others = participants.iter().collect::<Vec<_>>();
+    }
+
+    let names: Vec<String> = others
+        .iter()
+        .map(|pk| participant_label(ndb, txn, pk))
+        .collect();
+
+    if names.is_empty() {
+        return "Conversation".to_string();
+    }
+
+    names.join(", ")
 }
 
-fn conversation_title(metadata: &ConversationMetadata) -> String {
+fn conversation_title(
+    metadata: &ConversationMetadata,
+    txn: &Transaction,
+    ndb: &Ndb,
+    current: &Pubkey,
+) -> String {
     metadata
         .title
         .as_ref()
         .map(|t| t.title.clone())
-        .unwrap_or_else(|| fallback_convo_title(&metadata.participants))
+        .unwrap_or_else(|| fallback_convo_title(&metadata.participants, txn, ndb, current))
 }
 
 fn conversation_meta_line(summary: &ConversationSummary<'_>) -> String {
@@ -491,6 +531,17 @@ fn format_recipients(recipients: &[&[u8; 32]]) -> Option<String> {
             .collect::<Vec<_>>()
             .join(", "),
     )
+}
+
+fn participant_label(ndb: &Ndb, txn: &Transaction, pk: &Pubkey) -> String {
+    if let Ok(profile) = ndb.get_profile_by_pubkey(txn, pk.bytes()) {
+        let name = get_display_name(Some(&profile)).name();
+        if name != "??" {
+            return name.to_owned();
+        }
+    }
+
+    short_pubkey(pk)
 }
 
 fn sender_label(profile: Option<&ProfileRecord<'_>>, pubkey: &[u8; 32]) -> String {
