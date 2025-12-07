@@ -9,4 +9,4 @@ pub use conversation::{
 };
 pub use message_store::MessageStore;
 pub use registry::ConversationIdentifier;
-pub use state::ConversationStates;
+pub use state::{ConversationState, ConversationStates};

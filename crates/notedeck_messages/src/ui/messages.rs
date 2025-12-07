@@ -1,11 +1,13 @@
-use egui::{Align, Button, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, TextEdit};
+use egui::{
+    vec2, Align, Button, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, TextEdit,
+};
 use egui_extras::{Size, StripBuilder};
 use enostr::{NoteId, Pubkey};
 use nostrdb::{Ndb, Transaction};
 
 use crate::cache::{
-    parse_chat_message, ConversationCache, ConversationId, ConversationMetadata,
-    ConversationStates, ConversationSummary, Nip17ChatMessage,
+    parse_chat_message, Conversation, ConversationCache, ConversationId, ConversationMetadata,
+    ConversationState, ConversationStates, ConversationSummary, Nip17ChatMessage,
 };
 
 pub struct MessagesUi<'a> {
@@ -140,9 +142,16 @@ impl<'a> MessagesUi<'a> {
         let title = conversation_title(summary.metadata);
         let meta_line = conversation_meta_line(&summary);
 
+        let outer_margin = Margin {
+            left: 0,
+            right: 0,
+            top: 12,
+            bottom: 0,
+        };
+
         Frame::new()
             .fill(ui.visuals().panel_fill)
-            .inner_margin(Margin::symmetric(12, 10))
+            .inner_margin(outer_margin)
             .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
             .show(ui, |ui| {
                 StripBuilder::new(ui)
@@ -151,75 +160,15 @@ impl<'a> MessagesUi<'a> {
                     .size(Size::exact(80.0))
                     .vertical(|mut strip| {
                         strip.cell(|ui| {
-                            ui.vertical(|ui| {
-                                ui.heading(title);
-                                if !meta_line.is_empty() {
-                                    ui.label(
-                                        RichText::new(meta_line)
-                                            .color(ui.visuals().weak_text_color()),
-                                    );
-                                }
-                            });
-                            ui.add_space(4.0);
-                            ui.separator();
+                            conversation_header(ui, &title, &meta_line);
                         });
 
                         strip.cell(|ui| {
-                            state.list.ui_custom_layout(
-                                ui,
-                                conversation.messages.len(),
-                                |ui, index| {
-                                    let noteref = conversation.messages.messages_ordered[index];
-
-                                    let txn = Transaction::new(self.ndb).expect("txn");
-                                    let Ok(note) = self.ndb.get_note_by_key(&txn, noteref.key)
-                                    else {
-                                        return 1;
-                                    };
-
-                                    let Some(chat_msg) = parse_chat_message(&note) else {
-                                        return 1;
-                                    };
-
-                                    render_chat_message(ui, chat_msg);
-
-                                    1
-                                },
-                            );
+                            conversation_history(ui, conversation, state, self.ndb);
                         });
 
                         strip.cell(|ui| {
-                            ui.add_space(4.0);
-                            Frame::new()
-                                .fill(ui.visuals().extreme_bg_color)
-                                .inner_margin(Margin::symmetric(8, 6))
-                                .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        let available = ui.available_width();
-                                        let spacing = ui.spacing().item_spacing.x;
-                                        let button_width = 88.0;
-                                        let input_width =
-                                            (available - button_width - spacing).max(80.0);
-                                        let text_height = ui.spacing().interact_size.y * 1.4;
-
-                                        let text_edit = TextEdit::singleline(&mut state.composer)
-                                            .hint_text("Type a message");
-                                        ui.add_sized([input_width, text_height], text_edit);
-
-                                        let send_response = ui
-                                            .add_enabled_ui(!state.composer.is_empty(), |ui| {
-                                                ui.add_sized(
-                                                    [button_width, text_height],
-                                                    Button::new("Send"),
-                                                )
-                                            })
-                                            .response;
-
-                                        if send_response.clicked() {
-                                            state.composer.clear();
-                                        }
-                                    });
-                                });
+                            conversation_composer(ui, state);
                         });
                     });
             });
@@ -240,6 +189,79 @@ impl<'a> MessagesUi<'a> {
         self.states.active = Some(first);
         Some(first)
     }
+}
+
+fn conversation_header(ui: &mut egui::Ui, title: &str, meta_line: &str) {
+    Frame::new()
+        .inner_margin(Margin::symmetric(16, 8))
+        .show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.heading(title);
+                if !meta_line.is_empty() {
+                    ui.label(RichText::new(meta_line).color(ui.visuals().weak_text_color()));
+                }
+            });
+        });
+    ui.separator();
+}
+
+fn conversation_history(
+    ui: &mut egui::Ui,
+    conversation: &Conversation,
+    state: &mut ConversationState,
+    ndb: &Ndb,
+) {
+    Frame::new()
+        .inner_margin(Margin::symmetric(16, 0))
+        .show(ui, |ui| {
+            state
+                .list
+                .ui_custom_layout(ui, conversation.messages.len(), |ui, index| {
+                    let noteref = conversation.messages.messages_ordered[index];
+
+                    let txn = Transaction::new(ndb).expect("txn");
+                    let Ok(note) = ndb.get_note_by_key(&txn, noteref.key) else {
+                        return 1;
+                    };
+
+                    let Some(chat_msg) = parse_chat_message(&note) else {
+                        return 1;
+                    };
+
+                    render_chat_message(ui, chat_msg);
+
+                    1
+                });
+        });
+}
+
+fn conversation_composer(ui: &mut egui::Ui, state: &mut ConversationState) {
+    ui.separator();
+    Frame::new()
+        .fill(ui.visuals().extreme_bg_color)
+        .inner_margin(Margin::symmetric(16, 10))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let available = ui.available_width();
+                let spacing = ui.spacing().item_spacing.x;
+                let button_width = 96.0;
+                let input_width = (available - button_width - spacing).max(80.0);
+                let text_height = ui.spacing().interact_size.y * 1.4;
+
+                let text_edit =
+                    TextEdit::singleline(&mut state.composer).hint_text("Type a message");
+                ui.add_sized([input_width, text_height], text_edit);
+
+                let send_response = ui.add_enabled(
+                    !state.composer.is_empty(),
+                    Button::new("Send").min_size(vec2(button_width, text_height)),
+                );
+
+                if send_response.clicked() {
+                    state.composer.clear();
+                }
+            });
+        });
 }
 
 pub fn render_summary(
