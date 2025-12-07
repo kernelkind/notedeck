@@ -30,7 +30,7 @@ impl<'a> MessagesUi<'a> {
         let _ = self.active_conversation_id();
 
         StripBuilder::new(ui)
-            .size(Size::relative(0.33))
+            .size(Size::exact(300.0))
             .size(Size::remainder())
             .horizontal(|mut strip| {
                 strip.cell(|ui| {
@@ -50,9 +50,11 @@ impl<'a> MessagesUi<'a> {
             .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
             .show(ui, |ui| {
                 StripBuilder::new(ui)
+                    .size(Size::exact(32.0))
                     .size(Size::exact(60.0))
                     .size(Size::remainder())
                     .vertical(|mut strip| {
+                        strip.empty();
                         strip.cell(|ui| {
                             ui.vertical(|ui| {
                                 ui.horizontal(|ui| {
@@ -119,10 +121,7 @@ impl<'a> MessagesUi<'a> {
                 .fill(ui.visuals().panel_fill)
                 .inner_margin(Margin::same(24))
                 .show(ui, |ui| {
-                    ui.centered_and_justified(|ui| {
-                        ui.heading("Select a conversation");
-                        ui.label("Choose a chat from the left to start messaging.");
-                    });
+                    login_nsec_prompt(ui);
                 });
             return;
         };
@@ -157,7 +156,7 @@ impl<'a> MessagesUi<'a> {
                 StripBuilder::new(ui)
                     .size(Size::exact(70.0))
                     .size(Size::remainder())
-                    .size(Size::exact(80.0))
+                    .size(Size::exact(102.0))
                     .vertical(|mut strip| {
                         strip.cell(|ui| {
                             conversation_header(ui, &title, &meta_line);
@@ -168,6 +167,7 @@ impl<'a> MessagesUi<'a> {
                         });
 
                         strip.cell(|ui| {
+                            tracing::info!("Composer size: {}", ui.available_size());
                             conversation_composer(ui, state);
                         });
                     });
@@ -221,10 +221,12 @@ fn conversation_history(
 
                     let txn = Transaction::new(ndb).expect("txn");
                     let Ok(note) = ndb.get_note_by_key(&txn, noteref.key) else {
+                        tracing::info!("Could not get key {:?}", noteref.key);
                         return 1;
                     };
 
                     let Some(chat_msg) = parse_chat_message(&note) else {
+                        tracing::error!("Could not parse chat message for note {noteref:?}");
                         return 1;
                     };
 
@@ -236,32 +238,75 @@ fn conversation_history(
 }
 
 fn conversation_composer(ui: &mut egui::Ui, state: &mut ConversationState) {
-    ui.separator();
-    Frame::new()
-        .fill(ui.visuals().extreme_bg_color)
-        .inner_margin(Margin::symmetric(16, 10))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let available = ui.available_width();
-                let spacing = ui.spacing().item_spacing.x;
-                let button_width = 96.0;
-                let input_width = (available - button_width - spacing).max(80.0);
-                let text_height = ui.spacing().interact_size.y * 1.4;
+    {
+        let rect = ui.available_rect_before_wrap();
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, CornerRadius::ZERO, ui.visuals().panel_fill);
+    }
+    let margin = Margin::symmetric(16, 4);
+    Frame::new().inner_margin(margin).show(ui, |ui| {
+        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+            let text_height = ui.spacing().item_spacing.y * 1.4;
+            let size = vec2(ui.available_width(), text_height);
+            tracing::info!("textedit calcd size: {size:?}");
+            // TODO(kernelkind): ideally this will be multiline, but the default multiline impl doesn't work the way
+            // signal's multiline works... TBC
 
-                let text_edit =
-                    TextEdit::singleline(&mut state.composer).hint_text("Type a message");
-                ui.add_sized([input_width, text_height], text_edit);
+            let old = mut_visuals_corner_radius(ui, CornerRadius::same(16));
 
-                let send_response = ui.add_enabled(
-                    !state.composer.is_empty(),
-                    Button::new("Send").min_size(vec2(button_width, text_height)),
-                );
+            let hint_text = RichText::new("Type a message")
+                .color(ui.visuals().noninteractive().fg_stroke.color);
+            let text_edit = TextEdit::singleline(&mut state.composer)
+                .margin(Margin::symmetric(16, 8))
+                .vertical_align(Align::Center)
+                .hint_text(hint_text)
+                .min_size(size);
+            text_edit.show(ui);
+            restore_widgets_corner_rad(ui, old);
 
-                if send_response.clicked() {
-                    state.composer.clear();
-                }
-            });
+            // tracing::info!("textedit actual size: {:?}", resp.rect.size());
         });
+    });
+}
+
+/// An unfortunate hack to change the corner radius of a TextEdit...
+/// returns old `CornerRadius`
+fn mut_visuals_corner_radius(ui: &mut egui::Ui, rad: CornerRadius) -> WidgetsCornerRadius {
+    let widgets = &ui.visuals().widgets;
+    let old = WidgetsCornerRadius {
+        active: widgets.active.corner_radius,
+        hovered: widgets.hovered.corner_radius,
+        inactive: widgets.inactive.corner_radius,
+        noninteractive: widgets.noninteractive.corner_radius,
+        open: widgets.open.corner_radius,
+    };
+
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.active.corner_radius = rad;
+    widgets.hovered.corner_radius = rad;
+    widgets.inactive.corner_radius = rad;
+    widgets.noninteractive.corner_radius = rad;
+    widgets.open.corner_radius = rad;
+
+    old
+}
+
+fn restore_widgets_corner_rad(ui: &mut egui::Ui, old: WidgetsCornerRadius) {
+    let widgets = &mut ui.visuals_mut().widgets;
+
+    widgets.active.corner_radius = old.active;
+    widgets.hovered.corner_radius = old.hovered;
+    widgets.inactive.corner_radius = old.inactive;
+    widgets.noninteractive.corner_radius = old.noninteractive;
+    widgets.open.corner_radius = old.open;
+}
+
+struct WidgetsCornerRadius {
+    active: CornerRadius,
+    hovered: CornerRadius,
+    inactive: CornerRadius,
+    noninteractive: CornerRadius,
+    open: CornerRadius,
 }
 
 pub fn render_summary(
@@ -286,6 +331,7 @@ pub fn render_summary(
 
     Frame::new()
         .fill(fill)
+        .corner_radius(CornerRadius::same(12))
         .stroke(stroke)
         .inner_margin(Margin::symmetric(12, 8))
         .show(ui, |ui| {
