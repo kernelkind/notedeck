@@ -8,7 +8,7 @@ use super::message_store::MessageStore;
 use enostr::Pubkey;
 use hashbrown::HashMap;
 use nostrdb::{Filter, FilterBuilder, Ndb, Note, QueryResult, Subscription, Transaction};
-use notedeck::{note::event_tag, NoteRef};
+use notedeck::{note::event_tag, NoteCache, NoteRef, UnknownIds};
 
 pub type ConversationId = u32;
 
@@ -61,7 +61,14 @@ impl ConversationCache {
 
     /// A conversation is "opened" when the user navigates to the conversation
     #[profiling::function]
-    pub fn open_conversation(&mut self, ndb: &Ndb, txn: &Transaction, id: ConversationId) {
+    pub fn open_conversation(
+        &mut self,
+        ndb: &Ndb,
+        txn: &Transaction,
+        id: ConversationId,
+        note_cache: &mut NoteCache,
+        unknown_ids: &mut UnknownIds,
+    ) {
         let Some(conversation) = self.conversations.get_mut(&id) else {
             return;
         };
@@ -80,6 +87,7 @@ impl ConversationCache {
 
         let mut updated = false;
         for res in results {
+            UnknownIds::update_from_note(txn, ndb, unknown_ids, note_cache, &res.note);
             updated |= conversation.ingest_kind_14(res);
         }
 
@@ -100,7 +108,14 @@ impl ConversationCache {
     }
 
     /// check for updates on an already opened conversation
-    pub fn check_for_updates(&mut self, ndb: &Ndb, txn: &Transaction, id: ConversationId) {
+    pub fn check_for_updates(
+        &mut self,
+        ndb: &Ndb,
+        txn: &Transaction,
+        id: ConversationId,
+        note_cache: &mut NoteCache,
+        unknown_ids: &mut UnknownIds,
+    ) {
         let Some(conversation) = self.conversations.get_mut(&id) else {
             return;
         };
@@ -118,6 +133,7 @@ impl ConversationCache {
                 continue;
             };
 
+            UnknownIds::update_from_note(txn, ndb, unknown_ids, note_cache, &note);
             updated |= conversation.messages.insert(NoteRef {
                 key,
                 created_at: note.created_at(),
@@ -130,7 +146,14 @@ impl ConversationCache {
         }
     }
 
-    pub fn init_conversations(&mut self, ndb: &Ndb, txn: &Transaction, cur_acc: &Pubkey) {
+    pub fn init_conversations(
+        &mut self,
+        ndb: &Ndb,
+        txn: &Transaction,
+        cur_acc: &Pubkey,
+        note_cache: &mut NoteCache,
+        unknown_ids: &mut UnknownIds,
+    ) {
         let Some(results) = get_conversations(ndb, txn, cur_acc) else {
             tracing::warn!("Got no conversations from ndb");
             return;
@@ -168,6 +191,7 @@ impl ConversationCache {
             });
 
             tracing::trace!("ingesting into conversation id {id}: {:?}", res.note.json());
+            UnknownIds::update_from_note(txn, ndb, unknown_ids, note_cache, &res.note);
             if conversation.ingest_kind_14(res) {
                 let latest = conversation.last_activity();
                 refresh_order(&mut self.order, id, latest);

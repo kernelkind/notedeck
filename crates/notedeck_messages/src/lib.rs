@@ -54,7 +54,14 @@ impl App for MessagesApp {
 
         if !cache.initialized_convos {
             let txn = Transaction::new(&ctx.ndb).expect("txn");
-            cache.init_conversations(&ctx.ndb, &txn, ctx.accounts.selected_account_pubkey());
+            let selected_pubkey = ctx.accounts.selected_account_pubkey().clone();
+            cache.init_conversations(
+                &ctx.ndb,
+                &txn,
+                &selected_pubkey,
+                &mut *ctx.note_cache,
+                &mut *ctx.unknown_ids,
+            );
             cache.initialized_convos = true;
         }
 
