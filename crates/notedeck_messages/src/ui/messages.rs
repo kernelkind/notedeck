@@ -93,7 +93,9 @@ impl<'a> MessagesUi<'a> {
                                     let txn = Transaction::new(self.ndb).expect("txn");
                                     let txn_ref = &txn;
 
-                                    self.states.convos_list.ui_custom_layout(ui, num_convos, {
+                                    self.states.convos_list.ui_custom_layout(
+                                        ui,
+                                        num_convos,
                                         |ui, index| {
                                             let Some(id) =
                                                 self.cache.get_id_by_index(index).copied()
@@ -131,7 +133,7 @@ impl<'a> MessagesUi<'a> {
                                                 &title,
                                                 partner.is_some(),
                                                 partner_profile.as_ref(),
-                                                &mut *img_cache,
+                                                img_cache,
                                             );
 
                                             if response.clicked() {
@@ -140,8 +142,8 @@ impl<'a> MessagesUi<'a> {
                                             }
 
                                             1
-                                        }
-                                    });
+                                        },
+                                    );
                                 });
                         });
                     });
@@ -217,6 +219,7 @@ impl<'a> MessagesUi<'a> {
                                 self.ndb,
                                 &txn,
                                 img_cache,
+                                self.selected_pubkey,
                             );
                         });
 
@@ -282,16 +285,20 @@ fn conversation_history(
     ndb: &Ndb,
     txn: &Transaction,
     img_cache: &mut Images,
+    selected_pubkey: &Pubkey,
 ) {
+    const GROUP_WINDOW_SECS: u64 = 5 * 60;
     Frame::new()
         .inner_margin(Margin::symmetric(16, 0))
         .show(ui, |ui| {
+            let mut last_sender: Option<([u8; 32], u64)> = None;
+            let current = *selected_pubkey.bytes();
             state
                 .list
-                .ui_custom_layout(ui, conversation.messages.len(), move |ui, index| {
+                .ui_custom_layout(ui, conversation.messages.len(), |ui, index| {
                     let noteref = conversation.messages.messages_ordered[index];
 
-                    let Ok(note) = ndb.get_note_by_key(&txn, noteref.key) else {
+                    let Ok(note) = ndb.get_note_by_key(txn, noteref.key) else {
                         tracing::error!("Could not get key {:?}", noteref.key);
                         return 1;
                     };
@@ -301,9 +308,29 @@ fn conversation_history(
                         return 1;
                     };
 
-                    let profile = ndb.get_profile_by_pubkey(&txn, chat_msg.sender()).ok();
+                    let profile = ndb.get_profile_by_pubkey(txn, chat_msg.sender()).ok();
+                    let sender_bytes = *chat_msg.sender();
+                    let is_self = sender_bytes == current;
+                    let show_sender_name = !is_self
+                        && match last_sender {
+                            Some((prev_sender, prev_time)) if prev_sender == sender_bytes => {
+                                let delta = noteref.created_at.saturating_sub(prev_time);
+                                delta > GROUP_WINDOW_SECS
+                            }
+                            _ => true,
+                        };
+                    last_sender = Some((sender_bytes, noteref.created_at));
+                    let sender_name = sender_label(profile.as_ref(), chat_msg.sender());
 
-                    render_chat_message(ui, chat_msg, img_cache, profile.as_ref());
+                    render_chat_message(
+                        ui,
+                        chat_msg,
+                        img_cache,
+                        profile.as_ref(),
+                        is_self,
+                        show_sender_name,
+                        &sender_name,
+                    );
 
                     1
                 });
@@ -452,54 +479,77 @@ pub fn render_chat_message(
     chat_msg: Nip17ChatMessage,
     img_cache: &mut Images,
     profile: Option<&ProfileRecord<'_>>,
+    is_self: bool,
+    show_sender_name: bool,
+    sender_name: &str,
 ) -> egui::Response {
-    let sender = sender_label(profile, chat_msg.sender());
-    let recipients = format_recipients(chat_msg.recipients());
     let reply = chat_msg.reply_to().map(short_note_id_from_bytes);
-
-    Frame::new()
-        .inner_margin(Margin::symmetric(12, 8))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    let mut pic = ProfilePic::from_profile_or_default(img_cache, profile)
-                        .size(ProfilePic::medium_size() as f32);
-                    ui.add(&mut pic);
-                });
-                ui.add_space(12.0);
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(sender).strong());
-                        if let Some(subject) = chat_msg.subject() {
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new(subject)
-                                    .italics()
-                                    .color(ui.visuals().weak_text_color()),
-                            );
-                        }
-                    });
-
-                    if let Some(recipients) = recipients {
-                        ui.label(
-                            RichText::new(format!("To: {recipients}"))
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                    }
-
-                    if let Some(reply_id) = reply {
-                        ui.label(
-                            RichText::new(format!("↩ {reply_id}"))
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                    }
-
-                    ui.add_space(4.0);
-                    ui.label(chat_msg.message());
-                });
+    let message = chat_msg.message();
+    let bubble_fill = if is_self {
+        ui.visuals().selection.bg_fill
+    } else {
+        ui.visuals().extreme_bg_color
+    };
+    let bubble_stroke = if is_self {
+        ui.visuals().selection.stroke
+    } else {
+        ui.visuals().widgets.noninteractive.bg_stroke
+    };
+    let text_color = if is_self {
+        ui.visuals().selection.stroke.color
+    } else {
+        ui.visuals().text_color()
+    };
+    let secondary_color = ui.visuals().weak_text_color();
+    let reply_ref = reply.as_deref();
+    let bubble = |ui: &mut egui::Ui| {
+        Frame::new()
+            .fill(bubble_fill)
+            .stroke(bubble_stroke)
+            .corner_radius(CornerRadius::same(18))
+            .inner_margin(Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.set_max_width(ui.available_width().min(360.0));
+                chat_bubble_contents(
+                    ui,
+                    show_sender_name.then_some(sender_name),
+                    reply_ref,
+                    message,
+                    text_color,
+                    secondary_color,
+                );
             })
+            .response
+    };
+
+    if is_self {
+        ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+            let inner = ui.vertical(|ui| {
+                ui.add_space(8.0);
+                bubble(ui)
+            });
+            inner.inner
         })
-        .response
+        .inner
+    } else {
+        let avatar_size = ProfilePic::medium_size() as f32;
+        ui.horizontal(|ui| {
+            if show_sender_name {
+                let mut pic =
+                    ProfilePic::from_profile_or_default(img_cache, profile).size(avatar_size);
+                ui.add(&mut pic);
+            } else {
+                ui.allocate_space(vec2(avatar_size, avatar_size));
+            }
+            ui.add_space(8.0);
+            let inner = ui.vertical(|ui| {
+                ui.add_space(4.0);
+                bubble(ui)
+            });
+            inner.inner
+        })
+        .inner
+    }
 }
 
 pub fn login_nsec_prompt(ui: &mut egui::Ui) {
@@ -576,20 +626,6 @@ fn conversation_meta_line(summary: &ConversationSummary<'_>) -> String {
     parts.join(" • ")
 }
 
-fn format_recipients(recipients: &[&[u8; 32]]) -> Option<String> {
-    if recipients.is_empty() {
-        return None;
-    }
-
-    Some(
-        recipients
-            .iter()
-            .map(|pk| short_pubkey_from_bytes(pk))
-            .collect::<Vec<_>>()
-            .join(", "),
-    )
-}
-
 fn direct_chat_partner<'a>(participants: &'a [Pubkey], current: &Pubkey) -> Option<&'a Pubkey> {
     if participants.len() != 2 {
         return None;
@@ -618,6 +654,31 @@ fn sender_label(profile: Option<&ProfileRecord<'_>>, pubkey: &[u8; 32]) -> Strin
     }
 
     short_pubkey_from_bytes(pubkey)
+}
+
+fn chat_bubble_contents(
+    ui: &mut egui::Ui,
+    sender_name: Option<&str>,
+    reply_to: Option<&str>,
+    message: &str,
+    text_color: egui::Color32,
+    secondary_color: egui::Color32,
+) {
+    ui.vertical(|ui| {
+        if let Some(name) = sender_name {
+            ui.label(RichText::new(name).strong().color(secondary_color));
+            ui.add_space(2.0);
+        }
+
+        if let Some(reply_id) = reply_to {
+            ui.label(RichText::new(format!("↩ {reply_id}")).color(secondary_color));
+            ui.add_space(4.0);
+        } else {
+            ui.add_space(2.0);
+        }
+
+        ui.label(RichText::new(message).color(text_color));
+    });
 }
 
 fn short_pubkey(pk: &Pubkey) -> String {
