@@ -17,3 +17,4 @@ profiling = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 tempfile = { workspace = true }
+notedeck_ui = { workspace = true }
