@@ -1,8 +1,5 @@
 use hashbrown::{hash_map::RawEntryMut, HashMap};
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{BuildHasher, Hash, Hasher},
-};
+use std::hash::{BuildHasher, Hash, Hasher};
 
 use crate::cache::ConversationId;
 
@@ -38,7 +35,7 @@ impl ConversationRegistry {
                 let owned = normalized.into_owned();
                 let uid = self.next_id;
                 entry.insert(owned, uid);
-                self.next_id += uid;
+                self.next_id = self.next_id.wrapping_add(1);
                 uid
             }
         }
@@ -47,7 +44,7 @@ impl ConversationRegistry {
     pub fn insert(&mut self, id: ConversationIdentifier) -> ConversationId {
         let uid = self.next_id;
         self.conversation_ids.insert(id, uid);
-        self.next_id += uid;
+        self.next_id = self.next_id.wrapping_add(1);
 
         uid
     }
@@ -64,26 +61,13 @@ pub enum ConversationIdentifierUnowned<'a> {
 
 // Set of Pubkeys, sorted and deduplicated
 #[derive(Hash, Eq, PartialEq, Debug, Clone)]
-struct ConversationParticipants {
-    participants: Vec<[u8; 32]>,
-    hash: u64,
-}
+struct ConversationParticipants(Vec<[u8; 32]>);
 
 impl ConversationParticipants {
     pub fn new(mut items: Vec<[u8; 32]>) -> Self {
         items.sort();
         items.dedup();
-        let hash = Self::hash_participants(&items);
-        Self {
-            participants: items,
-            hash,
-        }
-    }
-
-    fn hash_participants(items: &[[u8; 32]]) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        items.hash(&mut hasher);
-        hasher.finish()
+        Self(items)
     }
 }
 
@@ -102,13 +86,14 @@ impl<'a> ConversationParticipantsUnowned<'a> {
     }
 
     fn matches(&self, owned: &ConversationParticipants) -> bool {
-        self.hash_value() == owned.hash
-    }
+        if self.0.len() != owned.0.len() {
+            return false;
+        }
 
-    fn hash_value(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.0.hash(&mut hasher);
-        hasher.finish()
+        self.0
+            .iter()
+            .zip(&owned.0)
+            .all(|(left, right)| *left == right)
     }
 
     fn into_owned(self) -> ConversationParticipants {
