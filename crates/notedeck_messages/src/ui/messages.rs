@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use egui::{
-    vec2, Align, Button, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, TextEdit,
+    vec2, Align, Button, CornerRadius, Frame, Key, Layout, Margin, RichText, ScrollArea, TextEdit,
 };
 use egui_extras::{Size, StripBuilder};
 use enostr::{NoteId, Pubkey};
@@ -12,6 +12,14 @@ use crate::cache::{
     parse_chat_message, Conversation, ConversationCache, ConversationId, ConversationMetadata,
     ConversationState, ConversationStates, ConversationSummary, Nip17ChatMessage,
 };
+
+#[derive(Debug)]
+pub enum MessagesAction {
+    SendMessage {
+        conversation_id: ConversationId,
+        content: String,
+    },
+}
 
 pub struct MessagesUi<'a> {
     cache: &'a ConversationCache,
@@ -35,9 +43,10 @@ impl<'a> MessagesUi<'a> {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, img_cache: &mut Images) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, img_cache: &mut Images) -> Option<MessagesAction> {
         // Ensure we have a selected conversation when any exist so both panels stay in sync.
         let _ = self.active_conversation_id();
+        let mut action = None;
 
         StripBuilder::new(ui)
             .size(Size::exact(300.0))
@@ -48,9 +57,14 @@ impl<'a> MessagesUi<'a> {
                 });
 
                 strip.cell(|ui| {
-                    self.render_conversation_view_panel(ui, img_cache);
+                    let panel_action = self.render_conversation_view_panel(ui, img_cache);
+                    if action.is_none() {
+                        action = panel_action;
+                    }
                 });
             });
+
+        action
     }
 
     fn render_conversation_list_panel(&mut self, ui: &mut egui::Ui, img_cache: &mut Images) {
@@ -151,7 +165,11 @@ impl<'a> MessagesUi<'a> {
             });
     }
 
-    fn render_conversation_view_panel(&mut self, ui: &mut egui::Ui, img_cache: &mut Images) {
+    fn render_conversation_view_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        img_cache: &mut Images,
+    ) -> Option<MessagesAction> {
         let Some(conversation_id) = self.active_conversation_id() else {
             Frame::new()
                 .fill(ui.visuals().panel_fill)
@@ -159,12 +177,12 @@ impl<'a> MessagesUi<'a> {
                 .show(ui, |ui| {
                     login_nsec_prompt(ui);
                 });
-            return;
+            return None;
         };
 
         let Some(conversation) = self.cache.get(conversation_id) else {
             tracing::error!("don't have conversation for id {conversation_id}");
-            return;
+            return None;
         };
 
         let state = self.states.get_or_insert(conversation_id);
@@ -191,6 +209,7 @@ impl<'a> MessagesUi<'a> {
             bottom: 0,
         };
 
+        let mut action = None;
         Frame::new()
             .fill(ui.visuals().panel_fill)
             .inner_margin(outer_margin)
@@ -225,10 +244,15 @@ impl<'a> MessagesUi<'a> {
                         });
 
                         strip.cell(|ui| {
-                            conversation_composer(ui, state);
+                            let composer_action = conversation_composer(ui, state, conversation_id);
+                            if action.is_none() {
+                                action = composer_action;
+                            }
                         });
                     });
             });
+
+        action
     }
 
     fn active_conversation_id(&mut self) -> Option<ConversationId> {
@@ -363,17 +387,25 @@ fn conversation_history(
         });
 }
 
-fn conversation_composer(ui: &mut egui::Ui, state: &mut ConversationState) {
+fn conversation_composer(
+    ui: &mut egui::Ui,
+    state: &mut ConversationState,
+    conversation_id: ConversationId,
+) -> Option<MessagesAction> {
     {
         let rect = ui.available_rect_before_wrap();
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, CornerRadius::ZERO, ui.visuals().panel_fill);
     }
     let margin = Margin::symmetric(16, 4);
+    let mut action = None;
     Frame::new().inner_margin(margin).show(ui, |ui| {
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
             let text_height = ui.spacing().item_spacing.y * 1.4;
-            let size = vec2(ui.available_width(), text_height);
+            let button_width = 78.0;
+            let spacing = ui.spacing().item_spacing.x;
+            let text_width = (ui.available_width() - button_width - spacing).max(0.0);
+            let size = vec2(text_width, text_height);
             // TODO(kernelkind): ideally this will be multiline, but the default multiline impl doesn't work the way
             // signal's multiline works... TBC
 
@@ -384,14 +416,50 @@ fn conversation_composer(ui: &mut egui::Ui, state: &mut ConversationState) {
             let text_edit = TextEdit::singleline(&mut state.composer)
                 .margin(Margin::symmetric(16, 8))
                 .vertical_align(Align::Center)
+                .desired_width(text_width)
                 .hint_text(hint_text)
                 .min_size(size);
-            text_edit.show(ui);
+            let text_resp = ui.add(text_edit);
             restore_widgets_corner_rad(ui, old);
 
-            // tracing::info!("textedit actual size: {:?}", resp.rect.size());
+            let enter_to_send = text_resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+            if enter_to_send {
+                if action.is_none() {
+                    action = prepare_send_action(conversation_id, state);
+                }
+            }
+
+            let can_send = !state.composer.trim().is_empty();
+            let send_clicked = ui
+                .add_enabled(
+                    can_send,
+                    Button::new("Send").min_size(vec2(button_width, text_height + 8.0)),
+                )
+                .clicked();
+            if send_clicked {
+                if action.is_none() {
+                    action = prepare_send_action(conversation_id, state);
+                }
+            }
         });
     });
+
+    action
+}
+
+fn prepare_send_action(
+    conversation_id: ConversationId,
+    state: &mut ConversationState,
+) -> Option<MessagesAction> {
+    if state.composer.trim().is_empty() {
+        return None;
+    }
+
+    let message = std::mem::take(&mut state.composer);
+    Some(MessagesAction::SendMessage {
+        conversation_id,
+        content: message,
+    })
 }
 
 /// An unfortunate hack to change the corner radius of a TextEdit...

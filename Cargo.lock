@@ -3855,6 +3855,7 @@ dependencies = [
  "egui_virtual_list",
  "enostr",
  "hashbrown 0.15.4",
+ "nostr 0.37.0",
  "nostrdb",
  "notedeck",
  "notedeck_ui",

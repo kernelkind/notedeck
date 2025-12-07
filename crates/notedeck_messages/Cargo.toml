@@ -19,3 +19,4 @@ uuid = { workspace = true }
 tempfile = { workspace = true }
 notedeck_ui = { workspace = true }
 chrono = { workspace = true }
+nostr = { workspace = true }
