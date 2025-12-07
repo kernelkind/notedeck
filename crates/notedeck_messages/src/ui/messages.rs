@@ -167,7 +167,6 @@ impl<'a> MessagesUi<'a> {
                         });
 
                         strip.cell(|ui| {
-                            tracing::info!("Composer size: {}", ui.available_size());
                             conversation_composer(ui, state);
                         });
                     });
@@ -221,7 +220,7 @@ fn conversation_history(
 
                     let txn = Transaction::new(ndb).expect("txn");
                     let Ok(note) = ndb.get_note_by_key(&txn, noteref.key) else {
-                        tracing::info!("Could not get key {:?}", noteref.key);
+                        tracing::error!("Could not get key {:?}", noteref.key);
                         return 1;
                     };
 
@@ -248,7 +247,6 @@ fn conversation_composer(ui: &mut egui::Ui, state: &mut ConversationState) {
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
             let text_height = ui.spacing().item_spacing.y * 1.4;
             let size = vec2(ui.available_width(), text_height);
-            tracing::info!("textedit calcd size: {size:?}");
             // TODO(kernelkind): ideally this will be multiline, but the default multiline impl doesn't work the way
             // signal's multiline works... TBC
 

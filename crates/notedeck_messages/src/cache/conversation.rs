@@ -139,7 +139,21 @@ impl ConversationCache {
         tracing::trace!("Received {} conversations from ndb", results.len());
 
         for res in results {
-            let participants = get_p_tags(&res.note);
+            let mut participants = get_p_tags(&res.note);
+            let chat_message_sender = res.note.pubkey();
+            if !participants.contains(&chat_message_sender) {
+                // the chat message sender must be in the participants set
+                participants.push(chat_message_sender);
+            }
+
+            {
+                let parts: Vec<Pubkey> = participants.iter().map(|i| Pubkey::new(**i)).collect();
+                tracing::trace!(
+                    "participants list for notekey {:?}: {:?}",
+                    res.note_key,
+                    parts
+                );
+            }
             let id = self
                 .registry
                 .get_or_insert(ConversationIdentifierUnowned::Nip17(
@@ -153,7 +167,7 @@ impl ConversationCache {
                 Conversation::new(participants)
             });
 
-            tracing::trace!("ingesting into conversation: {:?}", res.note.json());
+            tracing::trace!("ingesting into conversation id {id}: {:?}", res.note.json());
             if conversation.ingest_kind_14(res) {
                 let latest = conversation.last_activity();
                 refresh_order(&mut self.order, id, latest);
