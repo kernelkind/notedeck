@@ -476,6 +476,5 @@ mod tests {
         let config = Config::new().set_ingester_threads(2).set_mapsize(map_size);
 
         let mut ndb = Ndb::new(&path.to_string_lossy(), &config).unwrap();
-
     }
 }

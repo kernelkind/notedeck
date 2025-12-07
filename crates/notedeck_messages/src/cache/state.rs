@@ -23,4 +23,5 @@ impl ConversationStates {
 pub struct ConversationState {
     pub list: VirtualList,
     pub unread_count: usize,
+    pub composer: String,
 }
