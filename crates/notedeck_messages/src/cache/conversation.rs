@@ -44,6 +44,7 @@ impl ConversationCache {
         Some(self.conversations.get(self.get_id_by_index(i)?)?.summary())
     }
 
+    /// A conversation is "closed" when the user navigates away from it. This is to close the ndb sub
     pub fn close_conversation(&mut self, ndb: &mut Ndb, id: ConversationId) {
         let Some(conversation) = self.conversations.get_mut(&id) else {
             return;

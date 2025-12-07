@@ -38,24 +38,24 @@ impl App for MessagesApp {
             return AppResponse::none();
         };
 
-        self.subs.ensure(ctx.pool, &ctx.accounts);
-
-        {
-            let txn = Transaction::new(&ctx.ndb).expect("txn");
-            if !cache.initialized_convos {
-                if let Some(nsec) = ctx
-                    .accounts
-                    .selected_filled()
-                    .map(|f| f.secret_key.secret_bytes())
-                {
-                    ctx.ndb.add_key(&nsec);
-                    ctx.ndb.process_giftwraps(&txn);
-                }
-                cache.initialized_convos = true;
-            } else {
-                ctx.ndb.process_giftwraps(&txn);
+        's: {
+            if !self.subs.ensure_remote(ctx.pool, &ctx.accounts) {
+                break 's;
             }
+
+            let Some(secret) = &ctx.accounts.get_selected_account().key.secret_key else {
+                break 's;
+            };
+
+            ctx.ndb.add_key(&secret.secret_bytes());
+            let txn = Transaction::new(&ctx.ndb).expect("txn");
+            ctx.ndb.process_giftwraps(&txn);
+        }
+
+        if !cache.initialized_convos {
+            let txn = Transaction::new(&ctx.ndb).expect("txn");
             cache.init_conversations(&ctx.ndb, &txn, ctx.accounts.selected_account_pubkey());
+            cache.initialized_convos = true;
         }
 
         MessagesUi::new(cache, &mut self.states, &ctx.ndb).ui(ui);
@@ -110,7 +110,9 @@ impl ConversationSubs {
         }
     }
 
-    pub fn ensure(&mut self, pool: &mut RelayPool, accounts: &Accounts) {
+    /// Ensure we are subscribed remotely
+    /// return whether we switched & have nsec
+    pub fn ensure_remote(&mut self, pool: &mut RelayPool, accounts: &Accounts) -> bool {
         if self.acc == *accounts.selected_account_pubkey()
             && accounts
                 .get_selected_account()
@@ -119,7 +121,7 @@ impl ConversationSubs {
                 .is_some()
             && !self.remotes.is_empty()
         {
-            return;
+            return false;
         }
 
         if !self.remotes.is_empty() {
@@ -135,7 +137,7 @@ impl ConversationSubs {
             .secret_key
             .is_none()
         {
-            return;
+            return false;
         }
 
         let filter = remote_filters(accounts.selected_account_pubkey());
@@ -149,7 +151,9 @@ impl ConversationSubs {
         self.remotes = vec![RemoteFilter {
             remote_id: remote_sub(pool, filter.clone()),
             filter,
-        }]
+        }];
+
+        true
     }
 }
 
