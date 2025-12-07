@@ -4,7 +4,7 @@ use egui::{
 use egui_extras::{Size, StripBuilder};
 use enostr::{NoteId, Pubkey};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
-use notedeck::Images;
+use notedeck::{name::get_display_name, Images};
 use notedeck_ui::ProfilePic;
 
 use crate::cache::{
@@ -374,7 +374,7 @@ pub fn render_chat_message(
     img_cache: &mut Images,
     profile: Option<&ProfileRecord<'_>>,
 ) -> egui::Response {
-    let sender = short_pubkey_from_bytes(chat_msg.sender());
+    let sender = sender_label(profile, chat_msg.sender());
     let recipients = format_recipients(chat_msg.recipients());
     let reply = chat_msg.reply_to().map(short_note_id_from_bytes);
 
@@ -491,6 +491,17 @@ fn format_recipients(recipients: &[&[u8; 32]]) -> Option<String> {
             .collect::<Vec<_>>()
             .join(", "),
     )
+}
+
+fn sender_label(profile: Option<&ProfileRecord<'_>>, pubkey: &[u8; 32]) -> String {
+    if let Some(profile) = profile {
+        let display = get_display_name(Some(profile)).name();
+        if display != "??" {
+            return display.to_owned();
+        }
+    }
+
+    short_pubkey_from_bytes(pubkey)
 }
 
 fn short_pubkey(pk: &Pubkey) -> String {
