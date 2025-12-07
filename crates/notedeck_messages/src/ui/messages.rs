@@ -183,7 +183,22 @@ impl<'a> MessagesUi<'a> {
                     .size(Size::exact(102.0))
                     .vertical(|mut strip| {
                         strip.cell(|ui| {
-                            conversation_header(ui, &title, &meta_line);
+                            let partner = direct_chat_partner(
+                                summary.metadata.participants.as_slice(),
+                                self.selected_pubkey,
+                            );
+                            let txn = Transaction::new(self.ndb).expect("txn");
+                            let partner_profile = partner.and_then(|pk| {
+                                self.ndb.get_profile_by_pubkey(&txn, pk.bytes()).ok()
+                            });
+                            conversation_header(
+                                ui,
+                                &title,
+                                &meta_line,
+                                img_cache,
+                                partner.is_some(),
+                                partner_profile.as_ref(),
+                            );
                         });
 
                         strip.cell(|ui| {
@@ -214,16 +229,33 @@ impl<'a> MessagesUi<'a> {
     }
 }
 
-fn conversation_header(ui: &mut egui::Ui, title: &str, meta_line: &str) {
+fn conversation_header(
+    ui: &mut egui::Ui,
+    title: &str,
+    meta_line: &str,
+    img_cache: &mut Images,
+    show_partner_avatar: bool,
+    partner_profile: Option<&ProfileRecord<'_>>,
+) {
     Frame::new()
         .inner_margin(Margin::symmetric(16, 8))
         .show(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.heading(title);
-                if !meta_line.is_empty() {
-                    ui.label(RichText::new(meta_line).color(ui.visuals().weak_text_color()));
+            ui.horizontal(|ui| {
+                if show_partner_avatar {
+                    ui.add_space(4.0);
+                    let mut pic = ProfilePic::from_profile_or_default(img_cache, partner_profile)
+                        .size(ProfilePic::medium_size() as f32);
+                    ui.add(&mut pic);
+                    ui.add_space(8.0);
                 }
-            });
+
+                ui.vertical(|ui| {
+                    ui.heading(title);
+                    if !meta_line.is_empty() {
+                        ui.label(RichText::new(meta_line).color(ui.visuals().weak_text_color()));
+                    }
+                });
+            })
         });
     ui.separator();
 }
@@ -468,8 +500,8 @@ fn fallback_convo_title(
 
     let mut others: Vec<&Pubkey> = participants.iter().filter(|pk| *pk != current).collect();
 
-    if participants.len() == 2 && others.len() == 1 {
-        return participant_label(ndb, txn, others[0]);
+    if let Some(partner) = direct_chat_partner(participants, current) {
+        return participant_label(ndb, txn, partner);
     }
 
     if others.is_empty() {
@@ -531,6 +563,14 @@ fn format_recipients(recipients: &[&[u8; 32]]) -> Option<String> {
             .collect::<Vec<_>>()
             .join(", "),
     )
+}
+
+fn direct_chat_partner<'a>(participants: &'a [Pubkey], current: &Pubkey) -> Option<&'a Pubkey> {
+    if participants.len() != 2 {
+        return None;
+    }
+
+    participants.iter().find(|pk| *pk != current)
 }
 
 fn participant_label(ndb: &Ndb, txn: &Transaction, pk: &Pubkey) -> String {
