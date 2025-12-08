@@ -57,7 +57,9 @@ impl<'a> MessagesUi<'a> {
                 });
 
                 strip.cell(|ui| {
-                    let panel_action = self.render_conversation_view_panel(ui, img_cache);
+                    let panel_action = ScrollArea::vertical()
+                        .show(ui, |ui| self.render_conversation_view_panel(ui, img_cache))
+                        .inner;
                     if action.is_none() {
                         action = panel_action;
                     }

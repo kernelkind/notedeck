@@ -10,7 +10,7 @@ use nostr::{
     secp256k1::rand::{rngs::OsRng, Rng},
     JsonUtil,
 };
-use nostrdb::{Filter, Ndb, NoteBuilder, Transaction};
+use nostrdb::{Filter, NoteBuilder, Transaction};
 use notedeck::{try_process_events_core, Accounts, App, AppContext, AppResponse};
 
 use crate::{
@@ -245,17 +245,21 @@ fn send_conversation_message(
 
     let mut rng = OsRng;
     for participant in &conversation.metadata.participants {
-        if participant == selected_kp.pubkey {
+        let Some(giftwrap_json) =
+            giftwrap_message(&mut rng, sender_secret, participant, &rumor_json)
+        else {
             continue;
+        };
+        if participant == selected_kp.pubkey {
+            if let Err(e) = ctx.ndb.process_client_event(&giftwrap_json) {
+                tracing::error!("Could not ingest event: {e:?}");
+            }
+        } else {
+            match ClientMessage::event_json(giftwrap_json.clone()) {
+                Ok(msg) => ctx.pool.send(&msg),
+                Err(err) => tracing::error!("failed to build client message: {err}"),
+            };
         }
-        wrap_and_send_message(
-            &ctx.ndb,
-            ctx.pool,
-            &mut rng,
-            sender_secret,
-            participant,
-            &rumor_json,
-        );
     }
 }
 
@@ -278,17 +282,15 @@ fn build_rumor_json(
     Some(builder.build(sender).as_json())
 }
 
-fn wrap_and_send_message(
-    ndb: &Ndb,
-    pool: &mut RelayPool,
+fn giftwrap_message(
     rng: &mut OsRng,
     sender_secret: &SecretKey,
     recipient: &Pubkey,
     rumor_json: &str,
-) {
+) -> Option<String> {
     let Some(recipient_pk) = nostrcrate_pk(recipient) else {
         tracing::warn!("failed to convert recipient pubkey {}", recipient);
-        return;
+        return None;
     };
 
     let encrypted_rumor = match nip44::encrypt_with_rng(
@@ -301,14 +303,14 @@ fn wrap_and_send_message(
         Ok(payload) => payload,
         Err(err) => {
             tracing::error!("failed to encrypt rumor for {recipient}: {err}");
-            return;
+            return None;
         }
     };
 
     let seal_created = randomized_timestamp(rng);
     let Some(seal_json) = build_seal_json(&encrypted_rumor, sender_secret, seal_created) else {
         tracing::error!("failed to build seal for recipient {}", recipient);
-        return;
+        return None;
     };
 
     let wrap_keys = FullKeypair::generate();
@@ -322,25 +324,12 @@ fn wrap_and_send_message(
         Ok(payload) => payload,
         Err(err) => {
             tracing::error!("failed to encrypt seal for wrap: {err}");
-            return;
+            return None;
         }
     };
 
     let wrap_created = randomized_timestamp(rng);
-    let Some(wrap_json) = build_giftwrap_json(&encrypted_seal, &wrap_keys, recipient, wrap_created)
-    else {
-        tracing::error!("failed to build giftwrap event");
-        return;
-    };
-
-    if let Err(err) = ndb.process_client_event(&wrap_json) {
-        tracing::error!("failed to ingest giftwrap into ndb: {err:?}");
-    }
-
-    match ClientMessage::event_json(wrap_json.clone()) {
-        Ok(msg) => pool.send(&msg),
-        Err(err) => tracing::error!("failed to build client message: {err}"),
-    };
+    build_giftwrap_json(&encrypted_seal, &wrap_keys, recipient, wrap_created)
 }
 
 fn build_seal_json(
