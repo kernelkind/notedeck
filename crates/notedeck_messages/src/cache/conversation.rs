@@ -36,6 +36,10 @@ impl ConversationCache {
         self.conversations.get(&id)
     }
 
+    pub fn get_mut(&mut self, id: ConversationId) -> Option<&mut Conversation> {
+        self.conversations.get_mut(&id)
+    }
+
     pub fn get_id_by_index(&self, i: usize) -> Option<&ConversationId> {
         Some(&self.order.get(i)?.id)
     }

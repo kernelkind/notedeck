@@ -68,7 +68,25 @@ impl App for MessagesApp {
                 &mut *ctx.note_cache,
                 &mut *ctx.unknown_ids,
             );
+            if let Some(first) = cache.first_convo_id() {
+                cache.open_conversation(&ctx.ndb, &txn, first, ctx.note_cache, ctx.unknown_ids);
+            }
             cache.initialized_convos = true;
+        }
+
+        's: {
+            let Some(active_convo) = self.states.active else {
+                break 's;
+            };
+
+            let txn = Transaction::new(&ctx.ndb).expect("txn");
+            cache.check_for_updates(
+                &ctx.ndb,
+                &txn,
+                active_convo,
+                ctx.note_cache,
+                ctx.unknown_ids,
+            );
         }
 
         let selected_pubkey = ctx.accounts.selected_account_pubkey();
