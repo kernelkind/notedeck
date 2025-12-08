@@ -413,28 +413,9 @@ fn conversation_filter(cur_acc: &Pubkey) -> Vec<Filter> {
 }
 
 fn chatroom_filter(participants: Vec<&[u8; 32]>) -> Vec<Filter> {
-    let num_participants = participants.len();
     vec![FilterBuilder::new()
         .kinds([14])
         .pubkey(participants)
-        .custom(move |note| {
-            let mut p_tags = 0;
-            for tag in note.tags() {
-                if tag.get_str(0) != Some("p") {
-                    continue;
-                }
-                p_tags += 1;
-
-                if p_tags > num_participants {
-                    return false;
-                }
-            }
-            if p_tags != num_participants {
-                return false;
-            }
-
-            true
-        })
         .build()]
 }
 

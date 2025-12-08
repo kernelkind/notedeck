@@ -1,6 +1,7 @@
 use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use egui::{
-    vec2, Align, Button, CornerRadius, Frame, Key, Layout, Margin, RichText, ScrollArea, TextEdit,
+    vec2, Align, Button, Color32, CornerRadius, Frame, Key, Layout, Margin, RichText, ScrollArea,
+    TextEdit,
 };
 use egui_extras::{Size, StripBuilder};
 use enostr::{NoteId, Pubkey};
@@ -57,9 +58,7 @@ impl<'a> MessagesUi<'a> {
                 });
 
                 strip.cell(|ui| {
-                    let panel_action = ScrollArea::vertical()
-                        .show(ui, |ui| self.render_conversation_view_panel(ui, img_cache))
-                        .inner;
+                    let panel_action = self.render_conversation_view_panel(ui, img_cache);
                     if action.is_none() {
                         action = panel_action;
                     }
@@ -234,15 +233,17 @@ impl<'a> MessagesUi<'a> {
                         });
 
                         strip.cell(|ui| {
-                            conversation_history(
-                                ui,
-                                conversation,
-                                state,
-                                self.ndb,
-                                &txn,
-                                img_cache,
-                                self.selected_pubkey,
-                            );
+                            ScrollArea::vertical().show(ui, |ui| {
+                                conversation_history(
+                                    ui,
+                                    conversation,
+                                    state,
+                                    self.ndb,
+                                    &txn,
+                                    img_cache,
+                                    self.selected_pubkey,
+                                );
+                            });
                         });
 
                         strip.cell(|ui| {
@@ -404,9 +405,8 @@ fn conversation_composer(
     Frame::new().inner_margin(margin).show(ui, |ui| {
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
             let text_height = ui.spacing().item_spacing.y * 1.4;
-            let button_width = 78.0;
             let spacing = ui.spacing().item_spacing.x;
-            let text_width = (ui.available_width() - button_width - spacing).max(0.0);
+            let text_width = (ui.available_width() - spacing).max(0.0);
             let size = vec2(text_width, text_height);
             // TODO(kernelkind): ideally this will be multiline, but the default multiline impl doesn't work the way
             // signal's multiline works... TBC
@@ -431,18 +431,18 @@ fn conversation_composer(
                 }
             }
 
-            let can_send = !state.composer.trim().is_empty();
-            let send_clicked = ui
-                .add_enabled(
-                    can_send,
-                    Button::new("Send").min_size(vec2(button_width, text_height + 8.0)),
-                )
-                .clicked();
-            if send_clicked {
-                if action.is_none() {
-                    action = prepare_send_action(conversation_id, state);
-                }
-            }
+            // let can_send = !state.composer.trim().is_empty();
+            // let send_clicked = ui
+            //     .add_enabled(
+            //         can_send,
+            //         Button::new("Send").min_size(vec2(button_width, text_height + 8.0)),
+            //     )
+            //     .clicked();
+            // if send_clicked {
+            //     if action.is_none() {
+            //         action = prepare_send_action(conversation_id, state);
+            //     }
+            // }
         });
     });
 
@@ -587,46 +587,20 @@ pub fn render_chat_message(
     } else {
         ui.visuals().extreme_bg_color
     };
-    let bubble_stroke = if is_self {
-        ui.visuals().selection.stroke
-    } else {
-        ui.visuals().widgets.noninteractive.bg_stroke
-    };
-    let text_color = if is_self {
-        ui.visuals().selection.stroke.color
-    } else {
-        ui.visuals().text_color()
-    };
+    let text_color = ui.visuals().text_color();
     let secondary_color = ui.visuals().weak_text_color();
     let reply_ref = reply.as_deref();
-    let bubble = |ui: &mut egui::Ui| {
-        Frame::new()
-            .fill(bubble_fill)
-            .stroke(bubble_stroke)
-            .corner_radius(CornerRadius::same(18))
-            .inner_margin(Margin::symmetric(14, 10))
-            .show(ui, |ui| {
-                ui.set_max_width(ui.available_width().min(360.0));
-                chat_bubble_contents(
-                    ui,
-                    show_sender_name.then_some(sender_name),
-                    reply_ref,
-                    message,
-                    timestamp_label,
-                    text_color,
-                    secondary_color,
-                );
-            })
-            .response
-    };
 
     if is_self {
-        ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-            let inner = ui.vertical(|ui| {
-                ui.add_space(8.0);
-                bubble(ui)
-            });
-            inner.inner
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+            your_chat_bubble(
+                ui,
+                bubble_fill,
+                message,
+                timestamp_label,
+                text_color,
+                secondary_color,
+            )
         })
         .inner
     } else {
@@ -642,7 +616,16 @@ pub fn render_chat_message(
             ui.add_space(8.0);
             let inner = ui.vertical(|ui| {
                 ui.add_space(4.0);
-                bubble(ui)
+                other_chat_bubble(
+                    ui,
+                    bubble_fill,
+                    show_sender_name.then_some(sender_name),
+                    reply_ref,
+                    message,
+                    timestamp_label,
+                    text_color,
+                    secondary_color,
+                )
             });
             inner.inner
         })
@@ -659,6 +642,54 @@ pub fn login_nsec_prompt(ui: &mut egui::Ui) {
             );
         });
     });
+}
+
+fn other_chat_bubble(
+    ui: &mut egui::Ui,
+    bubble_fill: Color32,
+    sender_name: Option<&str>,
+    reply_ref: Option<&str>,
+    message: &str,
+    timestamp_label: &str,
+    text_color: egui::Color32,
+    secondary_color: egui::Color32,
+) -> egui::Response {
+    Frame::new()
+        .fill(bubble_fill)
+        .corner_radius(CornerRadius::same(18))
+        .inner_margin(Margin::symmetric(14, 10))
+        .show(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(360.0));
+            other_chat_bubble_contents(
+                ui,
+                sender_name,
+                reply_ref,
+                message,
+                timestamp_label,
+                text_color,
+                secondary_color,
+            );
+        })
+        .response
+}
+
+fn your_chat_bubble(
+    ui: &mut egui::Ui,
+    bubble_fill: Color32,
+    message: &str,
+    timestamp_label: &str,
+    text_color: egui::Color32,
+    secondary_color: egui::Color32,
+) -> egui::Response {
+    Frame::new()
+        .fill(bubble_fill)
+        .corner_radius(CornerRadius::same(18))
+        .inner_margin(Margin::symmetric(14, 10))
+        .show(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(360.0));
+            your_chat_bubble_contents(ui, message, timestamp_label, text_color, secondary_color);
+        })
+        .response
 }
 
 fn fallback_convo_title(
@@ -774,7 +805,7 @@ fn sender_label(profile: Option<&ProfileRecord<'_>>, pubkey: &[u8; 32]) -> Strin
     short_pubkey_from_bytes(pubkey)
 }
 
-fn chat_bubble_contents(
+fn other_chat_bubble_contents(
     ui: &mut egui::Ui,
     sender_name: Option<&str>,
     reply_to: Option<&str>,
@@ -811,6 +842,24 @@ fn chat_bubble_contents(
                     .color(secondary_color),
             );
         });
+    });
+}
+
+fn your_chat_bubble_contents(
+    ui: &mut egui::Ui,
+    message: &str,
+    timestamp_label: &str,
+    text_color: egui::Color32,
+    secondary_color: egui::Color32,
+) {
+    ui.with_layout(Layout::top_down(Align::Max), |ui| {
+        ui.label(RichText::new(message).color(text_color));
+
+        ui.label(
+            RichText::new(timestamp_label)
+                .small()
+                .color(secondary_color),
+        );
     });
 }
 
