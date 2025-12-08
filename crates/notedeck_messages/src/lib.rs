@@ -2,15 +2,15 @@ pub mod cache;
 pub mod nip17;
 pub mod ui;
 
-use enostr::{ClientMessage, Pubkey, RelayEvent, RelayPool};
+use enostr::{ClientMessage, FullKeypair, Pubkey, RelayEvent, RelayPool, SecretKey};
 use hashbrown::HashMap;
 use nostr::{
     nips::nip44,
-    prelude::{EventBuilder, Keys, Kind, PublicKey, Tag, Timestamp, UnsignedEvent},
+    prelude::{EventBuilder, Kind, PublicKey, Tag},
     secp256k1::rand::{rngs::OsRng, Rng},
-    util::JsonUtil,
+    JsonUtil,
 };
-use nostrdb::{Filter, NoteBuilder, Transaction};
+use nostrdb::{Filter, Ndb, NoteBuilder, Transaction};
 use notedeck::{try_process_events_core, Accounts, App, AppContext, AppResponse};
 
 use crate::{
@@ -207,69 +207,75 @@ fn send_conversation_message(
         return;
     };
 
-    let Some(filled) = ctx.accounts.selected_filled() else {
+    let Some(selected_kp) = ctx.accounts.selected_filled() else {
         tracing::warn!("cannot send message without a full keypair");
         return;
     };
 
-    let sender_secret = filled.secret_key.clone();
-    let sender_enostr_pk = *filled.pubkey;
-    let Some(sender_pubkey) = nostr_public_key(filled.pubkey) else {
-        tracing::error!("invalid sender pubkey for conversation {conversation_id}");
+    let Some(rumor_json) = build_rumor_json(
+        &content,
+        &conversation.metadata.participants,
+        selected_kp.pubkey,
+    ) else {
+        tracing::error!("failed to build rumor for conversation {conversation_id}");
         return;
     };
-    let sender_keys = Keys::new(sender_secret);
-    let rumor = build_rumor_event(&content, &conversation.metadata.participants, sender_pubkey);
 
-    let rumor_json = rumor.as_json();
+    let Some(sender_secret) = ctx.accounts.selected_filled().map(|f| f.secret_key) else {
+        return;
+    };
 
     let mut rng = OsRng;
-    let mut sent_any = false;
     for participant in &conversation.metadata.participants {
-        if participant == &sender_enostr_pk {
+        if participant == selected_kp.pubkey {
             continue;
         }
-        sent_any |= wrap_and_store_message(ctx, &mut rng, &sender_keys, participant, &rumor_json);
-    }
-
-    if sent_any {
-        if let Ok(txn) = Transaction::new(&ctx.ndb) {
-            ctx.ndb.process_giftwraps(&txn);
-        }
+        wrap_and_send_message(
+            &ctx.ndb,
+            ctx.pool,
+            &mut rng,
+            sender_secret,
+            participant,
+            &rumor_json,
+        );
     }
 }
 
-fn build_rumor_event(message: &str, participants: &[Pubkey], sender: PublicKey) -> UnsignedEvent {
+fn build_rumor_json(
+    message: &str,
+    participants: &[Pubkey],
+    sender_pubkey: &Pubkey,
+) -> Option<String> {
+    let sender = nostrcrate_pk(sender_pubkey)?;
     let mut tags = Vec::new();
     for participant in participants {
-        if let Some(pk) = nostr_public_key(participant) {
+        if let Some(pk) = nostrcrate_pk(participant) {
             tags.push(Tag::public_key(pk));
         } else {
-            tracing::warn!("invalid participant pubkey {}", participant);
+            tracing::warn!("invalid participant {}", participant);
         }
     }
 
-    let builder = EventBuilder::new(Kind::PrivateDirectMessage, message)
-        .custom_created_at(Timestamp::now())
-        .tags(tags);
-    builder.build(sender)
+    let builder = EventBuilder::new(Kind::PrivateDirectMessage, message).tags(tags);
+    Some(builder.build(sender).as_json())
 }
 
-fn wrap_and_store_message(
-    ctx: &mut AppContext<'_>,
+fn wrap_and_send_message(
+    ndb: &Ndb,
+    pool: &mut RelayPool,
     rng: &mut OsRng,
-    sender_keys: &Keys,
+    sender_secret: &SecretKey,
     recipient: &Pubkey,
     rumor_json: &str,
-) -> bool {
-    let Some(recipient_pk) = nostr_public_key(recipient) else {
+) {
+    let Some(recipient_pk) = nostrcrate_pk(recipient) else {
         tracing::warn!("failed to convert recipient pubkey {}", recipient);
-        return false;
+        return;
     };
 
     let encrypted_rumor = match nip44::encrypt_with_rng(
         rng,
-        sender_keys.secret_key(),
+        sender_secret,
         &recipient_pk,
         rumor_json,
         nip44::Version::V2,
@@ -277,27 +283,20 @@ fn wrap_and_store_message(
         Ok(payload) => payload,
         Err(err) => {
             tracing::error!("failed to encrypt rumor for {recipient}: {err}");
-            return false;
+            return;
         }
     };
 
-    let seal_event = match EventBuilder::new(Kind::Seal, encrypted_rumor)
-        .custom_created_at(randomized_timestamp(rng))
-        .sign_with_keys(sender_keys)
-    {
-        Ok(event) => event,
-        Err(err) => {
-            tracing::error!("failed to build seal for {recipient}: {err}");
-            return false;
-        }
+    let seal_created = randomized_timestamp(rng);
+    let Some(seal_json) = build_seal_json(&encrypted_rumor, sender_secret, seal_created) else {
+        tracing::error!("failed to build seal for recipient {}", recipient);
+        return;
     };
 
-    let seal_json = seal_event.as_json();
-
-    let wrap_keys = Keys::generate_with_rng(rng);
+    let wrap_keys = FullKeypair::generate();
     let encrypted_seal = match nip44::encrypt_with_rng(
         rng,
-        wrap_keys.secret_key(),
+        &wrap_keys.secret_key,
         &recipient_pk,
         &seal_json,
         nip44::Version::V2,
@@ -305,46 +304,83 @@ fn wrap_and_store_message(
         Ok(payload) => payload,
         Err(err) => {
             tracing::error!("failed to encrypt seal for wrap: {err}");
-            return false;
+            return;
         }
     };
 
-    let wrap_event = match EventBuilder::new(Kind::GiftWrap, encrypted_seal)
-        .custom_created_at(randomized_timestamp(rng))
-        .tags([Tag::public_key(recipient_pk)])
-        .sign_with_keys(&wrap_keys)
-    {
-        Ok(event) => event,
-        Err(err) => {
-            tracing::error!("failed to build giftwrap event: {err}");
-            return false;
-        }
+    let wrap_created = randomized_timestamp(rng);
+    let Some(wrap_json) = build_giftwrap_json(&encrypted_seal, &wrap_keys, recipient, wrap_created)
+    else {
+        tracing::error!("failed to build giftwrap event");
+        return;
     };
 
-    let wrap_json = &wrap_event.as_json();
-
-    if let Err(e) = ctx.ndb.process_client_event(&wrap_json) {
-        tracing::error!("failed to ingest giftwrap into ndb: {e:?}");
+    if let Err(err) = ndb.process_client_event(&wrap_json) {
+        tracing::error!("failed to ingest giftwrap into ndb: {err:?}");
     }
 
     match ClientMessage::event_json(wrap_json.clone()) {
-        Ok(msg) => ctx.pool.send(&msg),
+        Ok(msg) => pool.send(&msg),
         Err(err) => tracing::error!("failed to build client message: {err}"),
     };
-
-    true
 }
 
-fn nostr_public_key(pk: &Pubkey) -> Option<PublicKey> {
+fn build_seal_json(
+    content_ciphertext: &str,
+    sender_secret: &SecretKey,
+    created_at: u64,
+) -> Option<String> {
+    let builder = NoteBuilder::new()
+        .kind(13)
+        .content(content_ciphertext)
+        .created_at(created_at);
+
+    builder
+        .sign(&sender_secret.secret_bytes())
+        .build()?
+        .json()
+        .ok()
+}
+
+fn build_giftwrap_json(
+    content: &str,
+    wrap_keys: &FullKeypair,
+    recipient: &Pubkey,
+    created_at: u64,
+) -> Option<String> {
+    let builder = NoteBuilder::new()
+        .kind(1059)
+        .content(content)
+        .created_at(created_at)
+        .start_tag()
+        .tag_str("p")
+        .tag_str(&recipient.hex());
+
+    builder
+        .sign(&wrap_keys.secret_key.secret_bytes())
+        .build()?
+        .json()
+        .ok()
+}
+
+fn nostrcrate_pk(pk: &Pubkey) -> Option<PublicKey> {
     PublicKey::from_slice(pk.bytes()).ok()
 }
 
-fn randomized_timestamp(rng: &mut OsRng) -> Timestamp {
+fn current_timestamp() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn randomized_timestamp(rng: &mut OsRng) -> u64 {
     const MAX_SKEW_SECS: u64 = 2 * 24 * 60 * 60;
-    let mut secs = Timestamp::now().as_u64();
-    let tweak = rng.gen_range(0..MAX_SKEW_SECS);
-    secs = secs.saturating_sub(tweak);
-    Timestamp::from_secs(secs)
+    let now = current_timestamp();
+    let tweak = rng.gen_range(0..=MAX_SKEW_SECS);
+    now.saturating_sub(tweak)
 }
 
 fn try_process_events_messages(
