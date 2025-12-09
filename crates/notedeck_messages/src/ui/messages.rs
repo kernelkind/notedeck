@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use egui::{
     vec2, Align, Button, Color32, CornerRadius, Frame, Key, Layout, Margin, RichText, ScrollArea,
-    Sense, TextEdit, UiBuilder,
+    Sense, TextEdit,
 };
 use egui_extras::{Size, StripBuilder};
 use enostr::{NoteId, Pubkey};
@@ -533,59 +533,56 @@ pub fn render_summary(
         visuals.widgets.noninteractive.bg_stroke
     };
 
-    ui.allocate_new_ui(UiBuilder::new().sense(Sense::click()), |ui| {
-        let frame_resp = Frame::new()
-            .fill(fill)
-            .corner_radius(CornerRadius::same(12))
-            .stroke(stroke)
-            .inner_margin(Margin::symmetric(12, 8))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if show_partner_avatar {
-                        let mut pic =
-                            ProfilePic::from_profile_or_default(img_cache, partner_profile)
-                                .size(ProfilePic::medium_size() as f32);
-                        ui.add(&mut pic);
-                        ui.add_space(8.0);
+    Frame::new()
+        .fill(fill)
+        .corner_radius(CornerRadius::same(12))
+        .stroke(stroke)
+        .inner_margin(Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if show_partner_avatar {
+                    let mut pic = ProfilePic::from_profile_or_default(img_cache, partner_profile)
+                        .size(ProfilePic::medium_size() as f32);
+                    ui.add(&mut pic);
+                    ui.add_space(8.0);
+                }
+
+                ui.vertical(|ui| {
+                    ui.add(egui::Label::new(RichText::new(title).strong()).selectable(false));
+
+                    if !meta_line.is_empty() {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(meta_line).color(ui.visuals().weak_text_color()),
+                            )
+                            .selectable(false),
+                        );
                     }
-
-                    ui.vertical(|ui| {
-                        ui.add(egui::Label::new(RichText::new(title).strong()).selectable(false));
-
-                        if !meta_line.is_empty() {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(meta_line).color(ui.visuals().weak_text_color()),
-                                )
-                                .selectable(false),
-                            );
-                        }
-                    });
-
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if unread > 0 {
-                            Frame::new()
-                                .fill(ui.visuals().selection.bg_fill)
-                                .stroke(ui.visuals().selection.stroke)
-                                .corner_radius(CornerRadius::same(12))
-                                .inner_margin(Margin::symmetric(8, 2))
-                                .show(ui, |ui| {
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(unread.to_string())
-                                                .color(ui.visuals().selection.stroke.color)
-                                                .strong(),
-                                        )
-                                        .selectable(false),
-                                    );
-                                });
-                        }
-                    });
                 });
-            })
-            .response;
-    })
-    .response
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if unread > 0 {
+                        Frame::new()
+                            .fill(ui.visuals().selection.bg_fill)
+                            .stroke(ui.visuals().selection.stroke)
+                            .corner_radius(CornerRadius::same(12))
+                            .inner_margin(Margin::symmetric(8, 2))
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(unread.to_string())
+                                            .color(ui.visuals().selection.stroke.color)
+                                            .strong(),
+                                    )
+                                    .selectable(false),
+                                );
+                            });
+                    }
+                });
+            });
+        })
+        .response
+        .interact(Sense::click())
 }
 
 pub fn render_chat_message(
