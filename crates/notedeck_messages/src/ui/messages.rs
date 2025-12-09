@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use egui::{
     vec2, Align, Button, Color32, CornerRadius, Frame, Key, Layout, Margin, RichText, ScrollArea,
-    TextEdit,
+    Sense, TextEdit, UiBuilder,
 };
 use egui_extras::{Size, StripBuilder};
 use enostr::{NoteId, Pubkey};
@@ -116,13 +116,13 @@ impl<'a> MessagesUi<'a> {
                                             let Some(id) =
                                                 self.cache.get_id_by_index(index).copied()
                                             else {
-                                                return 0;
+                                                return 1;
                                             };
 
                                             let Some(summary) =
                                                 self.cache.get_summary_by_index(index)
                                             else {
-                                                return 0;
+                                                return 1;
                                             };
 
                                             let title = conversation_title(
@@ -142,6 +142,11 @@ impl<'a> MessagesUi<'a> {
                                                     .ok()
                                             });
 
+                                            // tracing::info!(
+                                            //     "click: {:?}, did click: {:?}",
+                                            //     ui.ctx().input(|i| i.pointer.interact_pos()),
+                                            //     ui.ctx().input(|i| i.pointer.any_click())
+                                            // );
                                             let response = render_summary(
                                                 ui,
                                                 summary,
@@ -153,6 +158,7 @@ impl<'a> MessagesUi<'a> {
                                             );
 
                                             if response.clicked() {
+                                                tracing::info!("CLICKED SUMMARY {id}");
                                                 self.states.active = Some(id);
                                                 active = Some(id);
                                             }
@@ -527,47 +533,59 @@ pub fn render_summary(
         visuals.widgets.noninteractive.bg_stroke
     };
 
-    Frame::new()
-        .fill(fill)
-        .corner_radius(CornerRadius::same(12))
-        .stroke(stroke)
-        .inner_margin(Margin::symmetric(12, 8))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if show_partner_avatar {
-                    let mut pic = ProfilePic::from_profile_or_default(img_cache, partner_profile)
-                        .size(ProfilePic::medium_size() as f32);
-                    ui.add(&mut pic);
-                    ui.add_space(8.0);
-                }
-
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(title).strong());
-
-                    if !meta_line.is_empty() {
-                        ui.label(RichText::new(meta_line).color(ui.visuals().weak_text_color()));
+    ui.allocate_new_ui(UiBuilder::new().sense(Sense::click()), |ui| {
+        let frame_resp = Frame::new()
+            .fill(fill)
+            .corner_radius(CornerRadius::same(12))
+            .stroke(stroke)
+            .inner_margin(Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if show_partner_avatar {
+                        let mut pic =
+                            ProfilePic::from_profile_or_default(img_cache, partner_profile)
+                                .size(ProfilePic::medium_size() as f32);
+                        ui.add(&mut pic);
+                        ui.add_space(8.0);
                     }
-                });
 
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if unread > 0 {
-                        Frame::new()
-                            .fill(ui.visuals().selection.bg_fill)
-                            .stroke(ui.visuals().selection.stroke)
-                            .corner_radius(CornerRadius::same(12))
-                            .inner_margin(Margin::symmetric(8, 2))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new(unread.to_string())
-                                        .color(ui.visuals().selection.stroke.color)
-                                        .strong(),
-                                );
-                            });
-                    }
+                    ui.vertical(|ui| {
+                        ui.add(egui::Label::new(RichText::new(title).strong()).selectable(false));
+
+                        if !meta_line.is_empty() {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(meta_line).color(ui.visuals().weak_text_color()),
+                                )
+                                .selectable(false),
+                            );
+                        }
+                    });
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if unread > 0 {
+                            Frame::new()
+                                .fill(ui.visuals().selection.bg_fill)
+                                .stroke(ui.visuals().selection.stroke)
+                                .corner_radius(CornerRadius::same(12))
+                                .inner_margin(Margin::symmetric(8, 2))
+                                .show(ui, |ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(unread.to_string())
+                                                .color(ui.visuals().selection.stroke.color)
+                                                .strong(),
+                                        )
+                                        .selectable(false),
+                                    );
+                                });
+                        }
+                    });
                 });
-            });
-        })
-        .response
+            })
+            .response;
+    })
+    .response
 }
 
 pub fn render_chat_message(
