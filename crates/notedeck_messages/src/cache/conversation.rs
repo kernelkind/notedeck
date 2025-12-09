@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use crate::cache::registry::{
-    ConversationIdentifierUnowned, ConversationParticipantsUnowned, ConversationRegistry,
+    ConversationIdentifierUnowned, ConversationRegistry, ParticipantSetUnowned,
 };
 
 use super::message_store::MessageStore;
@@ -13,7 +13,7 @@ use notedeck::{note::event_tag, NoteCache, NoteRef, UnknownIds};
 pub type ConversationId = u32;
 
 pub struct ConversationCache {
-    registry: ConversationRegistry,
+    pub registry: ConversationRegistry,
     conversations: HashMap<ConversationId, Conversation>,
     order: Vec<ConversationOrder>,
     pub initialized_convos: bool,
@@ -81,7 +81,7 @@ impl ConversationCache {
         let participants: Vec<&[u8; 32]> = pubkeys.iter().map(|p| p.bytes()).collect();
 
         let chatroom_filter = chatroom_filter(participants);
-        let results = match ndb.query(txn, &chatroom_filter, 200) {
+        let results = match ndb.query(txn, &chatroom_filter, 500) {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("problem with chatroom filter ndb::query: {e:?}");
@@ -91,6 +91,17 @@ impl ConversationCache {
 
         let mut updated = false;
         for res in results {
+            let participants = get_participants(&res.note);
+            let parts = ParticipantSetUnowned::new(participants);
+            let cur_id = self
+                .registry
+                .get_or_insert(ConversationIdentifierUnowned::Nip17(parts));
+
+            if cur_id != id {
+                // this note isn't relevant to the current conversation, unfortunately...
+                continue;
+            }
+
             UnknownIds::update_from_note(txn, ndb, unknown_ids, note_cache, &res.note);
             updated |= conversation.ingest_kind_14(res);
         }
@@ -137,6 +148,17 @@ impl ConversationCache {
                 continue;
             };
 
+            let participants = get_participants(&note);
+            let parts = ParticipantSetUnowned::new(participants);
+            let cur_id = self
+                .registry
+                .get_or_insert(ConversationIdentifierUnowned::Nip17(parts));
+
+            if cur_id != id {
+                // this note isn't relevant to the current conversation, unfortunately...
+                continue;
+            }
+
             UnknownIds::update_from_note(txn, ndb, unknown_ids, note_cache, &note);
             updated |= conversation.messages.insert(NoteRef {
                 key,
@@ -166,12 +188,7 @@ impl ConversationCache {
         tracing::trace!("Received {} conversations from ndb", results.len());
 
         for res in results {
-            let mut participants = get_p_tags(&res.note);
-            let chat_message_sender = res.note.pubkey();
-            if !participants.contains(&chat_message_sender) {
-                // the chat message sender must be in the participants set
-                participants.push(chat_message_sender);
-            }
+            let participants = get_participants(&res.note);
 
             {
                 let parts: Vec<Pubkey> = participants.iter().map(|i| Pubkey::new(**i)).collect();
@@ -184,7 +201,7 @@ impl ConversationCache {
             let id = self
                 .registry
                 .get_or_insert(ConversationIdentifierUnowned::Nip17(
-                    ConversationParticipantsUnowned(participants.clone()),
+                    ParticipantSetUnowned::new(participants.clone()),
                 ));
 
             let conversation = self.conversations.entry(id).or_insert_with(|| {
@@ -218,6 +235,16 @@ fn refresh_order(order: &mut Vec<ConversationOrder>, id: ConversationId, latest:
         Ok(idx) | Err(idx) => idx,
     };
     order.insert(idx, entry);
+}
+
+fn get_participants<'a>(note: &Note<'a>) -> Vec<&'a [u8; 32]> {
+    let mut participants = get_p_tags(&note);
+    let chat_message_sender = note.pubkey();
+    if !participants.contains(&chat_message_sender) {
+        // the chat message sender must be in the participants set
+        participants.push(chat_message_sender);
+    }
+    participants
 }
 
 fn get_p_tags<'a>(note: &Note<'a>) -> Vec<&'a [u8; 32]> {
@@ -396,22 +423,13 @@ fn get_conversations<'a>(
 }
 
 fn conversation_filter(cur_acc: &Pubkey) -> Vec<Filter> {
-    // vec![
-    //     FilterBuilder::new()
-    //         .authors([cur_acc.bytes()])
-    //         .kinds([14])
-    //         .build(),
-    //     FilterBuilder::new()
-    //         .kinds([14])
-    //         .pubkey([cur_acc.bytes()])
-    //         .build(),
-    // ]
     vec![FilterBuilder::new()
         .kinds([14])
         .pubkey([cur_acc.bytes()])
         .build()]
 }
 
+/// Unfortunately this gives an OR across participants
 fn chatroom_filter(participants: Vec<&[u8; 32]>) -> Vec<Filter> {
     vec![FilterBuilder::new()
         .kinds([14])

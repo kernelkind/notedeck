@@ -1,5 +1,9 @@
+use enostr::Pubkey;
 use hashbrown::{hash_map::RawEntryMut, HashMap};
-use std::hash::{BuildHasher, Hash, Hasher};
+use std::{
+    fmt::Debug,
+    hash::{BuildHasher, Hash, Hasher},
+};
 
 use crate::cache::ConversationId;
 
@@ -11,34 +15,33 @@ pub struct ConversationRegistry {
 
 impl ConversationRegistry {
     pub fn get(&self, id: ConversationIdentifierUnowned) -> Option<ConversationId> {
-        let mut normalized = id;
-        normalized.normalize();
-        let hash = normalized.hash(self.conversation_ids.hasher());
+        let hash = id.hash(self.conversation_ids.hasher());
         self.conversation_ids
             .raw_entry()
-            .from_hash(hash, |existing| normalized.matches(existing))
+            .from_hash(hash, |existing| id.matches(existing))
             .map(|(_, v)| *v)
     }
 
     pub fn get_or_insert(&mut self, id: ConversationIdentifierUnowned) -> ConversationId {
-        let mut normalized = id;
-        normalized.normalize();
-        let hash = normalized.hash(self.conversation_ids.hasher());
+        let hash = id.hash(self.conversation_ids.hasher());
+        let id_c = id.clone();
 
-        match self
+        let uid = match self
             .conversation_ids
             .raw_entry_mut()
-            .from_hash(hash, |existing| normalized.matches(existing))
+            .from_hash(hash, |existing| id.matches(existing))
         {
             RawEntryMut::Occupied(entry) => *entry.get(),
             RawEntryMut::Vacant(entry) => {
-                let owned = normalized.into_owned();
+                let owned = id.into_owned();
                 let uid = self.next_id;
                 entry.insert(owned, uid);
                 self.next_id = self.next_id.wrapping_add(1);
                 uid
             }
-        }
+        };
+        tracing::info!("normalized conversation id: {id_c:?} | uid: {uid}");
+        uid
     }
 
     pub fn insert(&mut self, id: ConversationIdentifier) -> ConversationId {
@@ -52,18 +55,19 @@ impl ConversationRegistry {
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone)]
 pub enum ConversationIdentifier {
-    Nip17(ConversationParticipants),
+    Nip17(ParticipantSet),
 }
 
+#[derive(Debug, Clone)]
 pub enum ConversationIdentifierUnowned<'a> {
-    Nip17(ConversationParticipantsUnowned<'a>),
+    Nip17(ParticipantSetUnowned<'a>),
 }
 
 // Set of Pubkeys, sorted and deduplicated
 #[derive(Hash, Eq, PartialEq, Debug, Clone)]
-struct ConversationParticipants(Vec<[u8; 32]>);
+pub struct ParticipantSet(Vec<[u8; 32]>);
 
-impl ConversationParticipants {
+impl ParticipantSet {
     pub fn new(mut items: Vec<[u8; 32]>) -> Self {
         items.sort();
         items.dedup();
@@ -71,10 +75,17 @@ impl ConversationParticipants {
     }
 }
 
-pub struct ConversationParticipantsUnowned<'a>(pub Vec<&'a [u8; 32]>);
+#[derive(Clone)]
+pub struct ParticipantSetUnowned<'a>(Vec<&'a [u8; 32]>);
 
-impl<'a> ConversationParticipantsUnowned<'a> {
-    fn normalize(&mut self) {
+impl<'a> ParticipantSetUnowned<'a> {
+    pub fn new(mut items: Vec<&'a [u8; 32]>) -> Self {
+        items.sort();
+        items.dedup();
+        Self(items)
+    }
+
+    pub fn normalize(&mut self) {
         self.0.sort_unstable();
         self.0.dedup();
     }
@@ -85,7 +96,7 @@ impl<'a> ConversationParticipantsUnowned<'a> {
         hasher.finish()
     }
 
-    fn matches(&self, owned: &ConversationParticipants) -> bool {
+    fn matches(&self, owned: &ParticipantSet) -> bool {
         if self.0.len() != owned.0.len() {
             return false;
         }
@@ -96,19 +107,27 @@ impl<'a> ConversationParticipantsUnowned<'a> {
             .all(|(left, right)| *left == right)
     }
 
-    fn into_owned(self) -> ConversationParticipants {
+    fn into_owned(self) -> ParticipantSet {
         let owned = self.0.into_iter().map(|pk| *pk).collect();
-        ConversationParticipants::new(owned)
+        ParticipantSet::new(owned)
+    }
+}
+
+impl<'a> Debug for ParticipantSetUnowned<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let hexes: Vec<String> = self
+            .0
+            .iter()
+            .map(|bytes| Pubkey::new(**bytes).hex())
+            .collect();
+
+        f.debug_tuple("ConversationParticipantsUnowned")
+            .field(&hexes)
+            .finish()
     }
 }
 
 impl<'a> ConversationIdentifierUnowned<'a> {
-    fn normalize(&mut self) {
-        match self {
-            Self::Nip17(participants) => participants.normalize(),
-        }
-    }
-
     fn hash<S: BuildHasher>(&self, build_hasher: &S) -> u64 {
         match self {
             Self::Nip17(participants) => participants.hash_with(build_hasher),

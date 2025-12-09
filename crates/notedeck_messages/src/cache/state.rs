@@ -12,6 +12,15 @@ pub struct ConversationStates {
 }
 
 impl ConversationStates {
+    pub fn new() -> Self {
+        let mut convos_list = VirtualList::new();
+        convos_list.hide_on_resize(None);
+        Self {
+            cache: Default::default(),
+            convos_list,
+            active: None,
+        }
+    }
     pub fn get_or_insert(&mut self, id: ConversationId) -> &mut ConversationState {
         self.cache
             .entry(id)
