@@ -8,7 +8,6 @@ use egui_virtual_list::VirtualList;
 pub struct ConversationStates {
     cache: HashMap<ConversationId, ConversationState>,
     pub convos_list: VirtualList,
-    pub active: Option<ConversationId>,
 }
 
 impl ConversationStates {
@@ -18,7 +17,6 @@ impl ConversationStates {
         Self {
             cache: Default::default(),
             convos_list,
-            active: None,
         }
     }
     pub fn get_or_insert(&mut self, id: ConversationId) -> &mut ConversationState {

@@ -75,7 +75,7 @@ impl App for MessagesApp {
         }
 
         's: {
-            let Some(active_convo) = self.states.active else {
+            let Some(active_convo) = cache.active else {
                 break 's;
             };
 
@@ -102,13 +102,23 @@ impl App for MessagesApp {
 fn handle_messages_action(
     action: MessagesAction,
     ctx: &mut AppContext<'_>,
-    cache: &ConversationCache,
+    cache: &mut ConversationCache,
 ) {
     match action {
         MessagesAction::SendMessage {
             conversation_id,
             content,
         } => send_conversation_message(conversation_id, content, cache, ctx),
+        MessagesAction::Open(conversation_id) => {
+            let txn = Transaction::new(&ctx.ndb).expect("txn");
+            cache.open_conversation(
+                &ctx.ndb,
+                &txn,
+                conversation_id,
+                ctx.note_cache,
+                ctx.unknown_ids,
+            );
+        }
     }
 }
 

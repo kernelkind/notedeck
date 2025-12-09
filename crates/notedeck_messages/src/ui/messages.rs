@@ -20,6 +20,7 @@ pub enum MessagesAction {
         conversation_id: ConversationId,
         content: String,
     },
+    Open(ConversationId),
 }
 
 pub struct MessagesUi<'a> {
@@ -46,7 +47,6 @@ impl<'a> MessagesUi<'a> {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, img_cache: &mut Images) -> Option<MessagesAction> {
         // Ensure we have a selected conversation when any exist so both panels stay in sync.
-        let _ = self.active_conversation_id();
         let mut action = None;
 
         StripBuilder::new(ui)
@@ -54,7 +54,9 @@ impl<'a> MessagesUi<'a> {
             .size(Size::remainder())
             .horizontal(|mut strip| {
                 strip.cell(|ui| {
-                    self.render_conversation_list_panel(ui, img_cache);
+                    if let Some(cur_action) = self.render_conversation_list_panel(ui, img_cache) {
+                        action = Some(cur_action);
+                    }
                 });
 
                 strip.cell(|ui| {
@@ -68,7 +70,12 @@ impl<'a> MessagesUi<'a> {
         action
     }
 
-    fn render_conversation_list_panel(&mut self, ui: &mut egui::Ui, img_cache: &mut Images) {
+    fn render_conversation_list_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        img_cache: &mut Images,
+    ) -> Option<MessagesAction> {
+        let mut action = None;
         Frame::new()
             .fill(ui.visuals().faint_bg_color)
             .inner_margin(Margin::symmetric(12, 10))
@@ -105,7 +112,7 @@ impl<'a> MessagesUi<'a> {
                                 .auto_shrink([false, false])
                                 .show(ui, |ui| {
                                     let num_convos = self.cache.len();
-                                    let mut active = self.states.active;
+                                    let mut active = self.cache.active;
                                     let txn = Transaction::new(self.ndb).expect("txn");
                                     let txn_ref = &txn;
 
@@ -159,8 +166,7 @@ impl<'a> MessagesUi<'a> {
 
                                             if response.clicked() {
                                                 tracing::info!("CLICKED SUMMARY {id}");
-                                                self.states.active = Some(id);
-                                                active = Some(id);
+                                                action = Some(MessagesAction::Open(id));
                                             }
 
                                             1
@@ -170,6 +176,7 @@ impl<'a> MessagesUi<'a> {
                         });
                     });
             });
+        action
     }
 
     fn render_conversation_view_panel(
@@ -177,7 +184,7 @@ impl<'a> MessagesUi<'a> {
         ui: &mut egui::Ui,
         img_cache: &mut Images,
     ) -> Option<MessagesAction> {
-        let Some(conversation_id) = self.active_conversation_id() else {
+        let Some(conversation_id) = self.cache.active else {
             Frame::new()
                 .fill(ui.visuals().panel_fill)
                 .inner_margin(Margin::same(24))
@@ -262,22 +269,6 @@ impl<'a> MessagesUi<'a> {
             });
 
         action
-    }
-
-    fn active_conversation_id(&mut self) -> Option<ConversationId> {
-        if let Some(id) = self.states.active {
-            if self.cache.get(id).is_some() {
-                return Some(id);
-            }
-
-            self.states.active = None;
-        }
-
-        let Some(first) = self.cache.first_convo_id() else {
-            return None;
-        };
-        self.states.active = Some(first);
-        Some(first)
     }
 }
 

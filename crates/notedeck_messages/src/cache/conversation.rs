@@ -17,6 +17,7 @@ pub struct ConversationCache {
     conversations: HashMap<ConversationId, Conversation>,
     order: Vec<ConversationOrder>,
     pub initialized_convos: bool,
+    pub active: Option<ConversationId>,
 }
 
 impl ConversationCache {
@@ -120,6 +121,7 @@ impl ConversationCache {
         };
 
         conversation.state = ConversationActivity::Active(sub);
+        self.active = Some(id);
     }
 
     /// check for updates on an already opened conversation
@@ -404,6 +406,7 @@ impl Default for ConversationCache {
             conversations: HashMap::new(),
             order: Vec::new(),
             initialized_convos: false,
+            active: None,
         }
     }
 }
