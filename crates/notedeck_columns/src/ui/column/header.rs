@@ -15,6 +15,7 @@ use nostrdb::{Ndb, Transaction};
 use notedeck::tr;
 use notedeck::{Images, Localization, NotedeckTextStyle};
 use notedeck_ui::app_images;
+use notedeck_ui::header::NavHeaderCore;
 use notedeck_ui::{
     anim::{AnimationHelper, ICON_EXPANSION_MULTIPLE},
     ProfilePic,
@@ -56,30 +57,11 @@ impl<'a> NavTitle<'a> {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<RenderNavAction> {
-        notedeck_ui::padding(8.0, ui, |ui| {
-            let mut rect = ui.available_rect_before_wrap();
-            rect.set_height(48.0);
-
-            let mut child_ui = ui.new_child(
-                UiBuilder::new()
-                    .max_rect(rect)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            );
-
-            let interact_rect = child_ui.interact(rect, child_ui.id().with("drag"), Sense::drag());
-            if interact_rect.drag_started_by(egui::PointerButton::Primary) {
-                child_ui
-                    .ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
-
-            let r = self.title_bar(&mut child_ui);
-
-            ui.advance_cursor_after_rect(rect);
-
-            r
-        })
-        .inner
+        let mut r = None;
+        NavHeaderCore::show(ui, |ui| {
+            r = self.title_bar(ui);
+        });
+        r
     }
 
     fn title_bar(&mut self, ui: &mut egui::Ui) -> Option<RenderNavAction> {

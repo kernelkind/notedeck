@@ -1,6 +1,7 @@
 use enostr::Pubkey;
 use nostrdb::Ndb;
 use notedeck::{Router, Settings};
+use notedeck_ui::header::NavHeaderCore;
 
 use crate::cache::{ConversationCache, ConversationStates};
 
@@ -30,4 +31,17 @@ pub fn render_nav(
             }
 
         });
+}
+
+pub struct NavTitle<'a> {
+    routes: &'a [Route]
+}
+
+impl<'a> NavTitle<'a> {
+    pub fn show(ui: &mut egui::Ui) {
+        NavHeaderCore::show(ui, |ui| {
+
+        });
+
+    }
 }

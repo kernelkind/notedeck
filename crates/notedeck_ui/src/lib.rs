@@ -4,6 +4,7 @@ pub mod colors;
 pub mod constants;
 pub mod context_menu;
 pub mod debug;
+pub mod header;
 pub mod icons;
 pub mod images;
 pub mod media;
