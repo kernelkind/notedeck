@@ -3852,6 +3852,7 @@ dependencies = [
  "chrono",
  "egui",
  "egui_extras",
+ "egui_nav",
  "egui_virtual_list",
  "enostr",
  "hashbrown 0.15.4",

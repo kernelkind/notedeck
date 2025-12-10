@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod nav;
 pub mod nip17;
 pub mod ui;
 
@@ -11,10 +12,11 @@ use nostr::{
     JsonUtil,
 };
 use nostrdb::{Filter, NoteBuilder, Transaction};
-use notedeck::{try_process_events_core, Accounts, App, AppContext, AppResponse};
+use notedeck::{try_process_events_core, Accounts, App, AppContext, AppResponse, Router};
 
 use crate::{
     cache::{ConversationCache, ConversationId, ConversationStates},
+    nav::Route,
     nip17::{giftwrap_filter, remote_sub},
     ui::messages::{login_nsec_prompt, MessagesAction, MessagesUi},
 };
@@ -23,6 +25,7 @@ pub struct MessagesApp {
     messages: ConversationsCtx,
     states: ConversationStates,
     subs: ConversationSubs,
+    router: Router<Route>,
 }
 
 impl MessagesApp {
@@ -31,6 +34,7 @@ impl MessagesApp {
             messages: ConversationsCtx::default(),
             subs: ConversationSubs::new(&ctx.accounts),
             states: ConversationStates::default(),
+            router: Router::new(Vec::new()),
         }
     }
 }
