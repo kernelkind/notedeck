@@ -6,7 +6,7 @@ use crate::{
 };
 
 use enostr::Pubkey;
-use notedeck::{BodyResponse, JobsCache, NoteContext};
+use notedeck::{DragResponse, JobsCache, NoteContext};
 use notedeck_ui::NoteOptions;
 
 #[allow(clippy::too_many_arguments)]
@@ -20,7 +20,7 @@ pub fn render_timeline_route(
     note_context: &mut NoteContext,
     jobs: &mut JobsCache,
     scroll_to_top: bool,
-) -> BodyResponse<RenderNavAction> {
+) -> DragResponse<RenderNavAction> {
     match kind {
         TimelineKind::List(_)
         | TimelineKind::Search(_)
@@ -75,7 +75,7 @@ pub fn render_thread_route(
     ui: &mut egui::Ui,
     note_context: &mut NoteContext,
     jobs: &mut JobsCache,
-) -> BodyResponse<RenderNavAction> {
+) -> DragResponse<RenderNavAction> {
     // don't truncate thread notes for now, since they are
     // default truncated everywher eelse
     note_options.set(NoteOptions::Truncate, false);
@@ -104,7 +104,7 @@ pub fn render_profile_route(
     note_options: NoteOptions,
     note_context: &mut NoteContext,
     jobs: &mut JobsCache,
-) -> BodyResponse<RenderNavAction> {
+) -> DragResponse<RenderNavAction> {
     let profile_view = ProfileView::new(
         pubkey,
         col,

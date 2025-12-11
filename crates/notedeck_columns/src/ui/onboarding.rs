@@ -2,7 +2,7 @@ use std::mem;
 
 use egui::{Layout, ScrollArea};
 use nostrdb::Ndb;
-use notedeck::{BodyResponse, Images, JobPool, JobsCache, Localization, tr};
+use notedeck::{DragResponse, Images, JobPool, JobsCache, Localization, tr};
 use notedeck_ui::{
     colors,
     nip51_set::{Nip51SetUiCache, Nip51SetWidget, Nip51SetWidgetAction, Nip51SetWidgetFlags},
@@ -56,9 +56,9 @@ impl<'a> FollowPackOnboardingView<'a> {
         egui::Id::new("follow_pack_onboarding")
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) -> BodyResponse<OnboardingResponse> {
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> DragResponse<OnboardingResponse> {
         let Some(follow_pack_state) = self.onboarding.get_follow_packs() else {
-            return BodyResponse::output(Some(OnboardingResponse::FollowPacks(
+            return DragResponse::output(Some(OnboardingResponse::FollowPacks(
                 FollowPacksResponse::NoFollowPacks,
             )));
         };
@@ -114,6 +114,6 @@ impl<'a> FollowPackOnboardingView<'a> {
             }
         });
 
-        BodyResponse::output(action).scroll_raw(scroll_out.id)
+        DragResponse::output(action).scroll_raw(scroll_out.id)
     }
 }

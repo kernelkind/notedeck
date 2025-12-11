@@ -6,7 +6,7 @@ use egui_extras::{Size, StripBuilder};
 use enostr::NoteId;
 use nostrdb::Transaction;
 use notedeck::{
-    tr, ui::richtext_small, BodyResponse, Images, JobsCache, LanguageIdentifier, Localization,
+    tr, ui::richtext_small, DragResponse, Images, JobsCache, LanguageIdentifier, Localization,
     NoteContext, NotedeckTextStyle, Settings, SettingsHandler, DEFAULT_MAX_HASHTAGS_PER_NOTE,
     DEFAULT_NOTE_BODY_FONT_SIZE,
 };
@@ -717,7 +717,7 @@ impl<'a> SettingsView<'a> {
         action
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) -> BodyResponse<SettingsAction> {
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> DragResponse<SettingsAction> {
         let scroll_out = Frame::default()
             .inner_margin(Margin::symmetric(10, 10))
             .show(ui, |ui| {
@@ -753,7 +753,7 @@ impl<'a> SettingsView<'a> {
             })
             .inner;
 
-        BodyResponse::scroll(scroll_out)
+        DragResponse::scroll(scroll_out)
     }
 }
 

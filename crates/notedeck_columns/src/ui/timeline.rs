@@ -16,7 +16,7 @@ use crate::timeline::{
     CompositeType, CompositeUnit, NoteUnit, ReactionUnit, RepostUnit, TimelineCache, TimelineKind,
     TimelineTab,
 };
-use notedeck::BodyResponse;
+use notedeck::DragResponse;
 use notedeck::{
     note::root_note_id_from_selected_id, tr, Localization, NoteAction, NoteContext, ScrollInfo,
 };
@@ -57,7 +57,7 @@ impl<'a, 'd> TimelineView<'a, 'd> {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) -> BodyResponse<NoteAction> {
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> DragResponse<NoteAction> {
         timeline_ui(
             ui,
             self.timeline_id,
@@ -96,7 +96,7 @@ fn timeline_ui(
     jobs: &mut JobsCache,
     col: usize,
     scroll_to_top: bool,
-) -> BodyResponse<NoteAction> {
+) -> DragResponse<NoteAction> {
     //padding(4.0, ui, |ui| ui.heading("Notifications"));
     /*
     let font_id = egui::TextStyle::Body.resolve(ui.style());
@@ -105,7 +105,7 @@ fn timeline_ui(
     */
 
     let Some(scroll_id) = TimelineView::scroll_id(timeline_cache, timeline_id, col) else {
-        return BodyResponse::none();
+        return DragResponse::none();
     };
 
     {
@@ -115,7 +115,7 @@ fn timeline_ui(
             error!("tried to render timeline in column, but timeline was missing");
             // TODO (jb55): render error when timeline is missing?
             // this shouldn't happen...
-            return BodyResponse::none();
+            return DragResponse::none();
         };
 
         timeline.selected_view = tabs_ui(
@@ -223,7 +223,7 @@ fn timeline_ui(
         }
     });
 
-    BodyResponse::output(action).scroll_raw(scroll_id)
+    DragResponse::output(action).scroll_raw(scroll_id)
 }
 
 fn goto_top_button(center: Pos2) -> impl egui::Widget {
