@@ -4,9 +4,10 @@ use egui::{
     Sense, TextEdit,
 };
 use egui_extras::{Size, StripBuilder};
+use egui_nav::NavResponse;
 use enostr::{NoteId, Pubkey};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
-use notedeck::{name::get_display_name, Images, Router, Settings};
+use notedeck::{name::get_display_name, ui::is_narrow, Images, Router, Settings};
 use notedeck_ui::ProfilePic;
 
 use crate::{
@@ -176,7 +177,8 @@ impl<'a> ConversationUi<'a> {
             img_cache,
         }
     }
-    fn ui(&mut self, ui: &mut egui::Ui, selected_pubkey: &Pubkey) -> Option<MessagesAction> {
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, selected_pubkey: &Pubkey) -> Option<MessagesAction> {
         let Some(conversation_id) = self.cache.active else {
             Frame::new()
                 .fill(ui.visuals().panel_fill)
@@ -272,16 +274,16 @@ pub fn desktop_messages_ui(
     img_cache: &mut Images,
     router: &Router<Route>,
     settings: &Settings,
-) -> Option<MessagesAction> {
-    // Ensure we have a selected conversation when any exist so both panels stay in sync.
-    let mut action = None;
+) -> MessagesUiResponse {
+    let mut nav_resp = None;
+    let mut convo_resp = None;
 
     StripBuilder::new(ui)
         .size(Size::exact(300.0))
         .size(Size::remainder())
         .horizontal(|mut strip| {
             strip.cell(|ui| {
-                let nav = render_nav(
+                nav_resp = Some(render_nav(
                     ui,
                     router,
                     settings,
@@ -290,25 +292,86 @@ pub fn desktop_messages_ui(
                     ndb,
                     selected_pubkey,
                     img_cache,
-                );
-                //     action = Some(cur_action);
-                // }
+                ));
             });
 
             strip.cell(|ui| {
-                let panel_action =
+                convo_resp =
                     ConversationUi::new(cache, states, ndb, img_cache).ui(ui, selected_pubkey);
-                if action.is_none() {
-                    action = panel_action;
-                }
             });
         });
 
-    action
+    MessagesUiResponse {
+        nav_response: nav_resp,
+        conversation_panel_response: convo_resp,
+    }
 }
 
-struct MessagesUiResponse {
+pub fn narrow_messages_ui(
+    cache: &ConversationCache,
+    states: &mut ConversationStates,
+    ndb: &Ndb,
+    selected_pubkey: &Pubkey,
+    ui: &mut egui::Ui,
+    img_cache: &mut Images,
+    router: &Router<Route>,
+    settings: &Settings,
+) -> MessagesUiResponse {
+    let nav = render_nav(
+        ui,
+        router,
+        settings,
+        cache,
+        states,
+        ndb,
+        selected_pubkey,
+        img_cache,
+    );
 
+    MessagesUiResponse {
+        nav_response: Some(nav),
+        conversation_panel_response: None,
+    }
+}
+
+pub fn messages_ui(
+    cache: &ConversationCache,
+    states: &mut ConversationStates,
+    ndb: &Ndb,
+    selected_pubkey: &Pubkey,
+    ui: &mut egui::Ui,
+    img_cache: &mut Images,
+    router: &Router<Route>,
+    settings: &Settings,
+) -> MessagesUiResponse {
+    if is_narrow(ui.ctx()) {
+        narrow_messages_ui(
+            cache,
+            states,
+            ndb,
+            selected_pubkey,
+            ui,
+            img_cache,
+            router,
+            settings,
+        )
+    } else {
+        desktop_messages_ui(
+            cache,
+            states,
+            ndb,
+            selected_pubkey,
+            ui,
+            img_cache,
+            router,
+            settings,
+        )
+    }
+}
+
+pub struct MessagesUiResponse {
+    pub nav_response: Option<NavResponse<Option<MessagesAction>>>,
+    pub conversation_panel_response: Option<MessagesAction>,
 }
 
 fn conversation_header(
@@ -685,6 +748,15 @@ pub fn login_nsec_prompt(ui: &mut egui::Ui) {
             ui.label(
                 "Messages are end-to-end encrypted. Add your nsec in Accounts to read and send chats.",
             );
+        });
+    });
+}
+
+pub fn select_convo_prompt(ui: &mut egui::Ui) {
+    ui.centered_and_justified(|ui| {
+        ui.vertical(|ui| {
+            ui.heading("Select or create a new conversation");
+            ui.label("Select an existing conversation from the left panel, or create a new one.");
         });
     });
 }

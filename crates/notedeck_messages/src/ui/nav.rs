@@ -7,7 +7,7 @@ use notedeck_ui::header::NavHeaderCore;
 use crate::{
     cache::{ConversationCache, ConversationStates},
     route::Route,
-    ui::messages::{ConversationListUi, MessagesAction},
+    ui::messages::{ConversationListUi, ConversationUi, MessagesAction},
     MessagesApp,
 };
 
@@ -58,6 +58,9 @@ fn render_nav_body(
             ConversationListUi::new(cache, states, ndb, img_cache).ui(ui, selected_pubkey)
         }
         Route::CreateConvo => todo!(),
+        Route::Conversation => {
+            ConversationUi::new(cache, states, ndb, img_cache).ui(ui, selected_pubkey)
+        }
     };
 
     RouteResponse {

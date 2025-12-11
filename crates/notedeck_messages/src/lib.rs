@@ -3,6 +3,7 @@ pub mod nip17;
 pub mod route;
 pub mod ui;
 
+use egui_nav::{NavAction, NavResponse};
 use enostr::{ClientMessage, FullKeypair, Pubkey, RelayEvent, RelayPool, SecretKey};
 use hashbrown::HashMap;
 use nostr::{
@@ -12,13 +13,15 @@ use nostr::{
     JsonUtil,
 };
 use nostrdb::{Filter, NoteBuilder, Transaction};
-use notedeck::{try_process_events_core, Accounts, App, AppContext, AppResponse, Router};
+use notedeck::{
+    try_process_events_core, ui::is_narrow, Accounts, App, AppContext, AppResponse, Router,
+};
 
 use crate::{
     cache::{ConversationCache, ConversationId, ConversationStates},
     nip17::{giftwrap_filter, remote_sub},
     route::Route,
-    ui::messages::{login_nsec_prompt, ConversationUi, MessagesAction},
+    ui::messages::{login_nsec_prompt, messages_ui, MessagesAction, MessagesUiResponse},
 };
 
 pub struct MessagesApp {
@@ -34,7 +37,7 @@ impl MessagesApp {
             messages: ConversationsCtx::default(),
             subs: ConversationSubs::new(&ctx.accounts),
             states: ConversationStates::default(),
-            router: Router::new(Vec::new()),
+            router: Router::new(vec![Route::ConvoList]),
         }
     }
 }
@@ -94,13 +97,68 @@ impl App for MessagesApp {
         }
 
         let selected_pubkey = ctx.accounts.selected_account_pubkey();
-        
-        let action = ConversationUi::new(cache, &mut self.states, &ctx.ndb, selected_pubkey)
-            .ui(ui, &mut *ctx.img_cache);
-        if let Some(action) = action {
-            handle_messages_action(action, ctx, cache);
-        }
+
+        let resp = messages_ui(
+            cache,
+            &mut self.states,
+            &ctx.ndb,
+            selected_pubkey,
+            ui,
+            ctx.img_cache,
+            &self.router,
+            ctx.settings.get_settings_mut(),
+        );
+        process_messages_ui_response(resp, ctx, cache, &mut self.router, is_narrow(ui.ctx()));
+
         AppResponse::none()
+    }
+}
+
+fn process_messages_ui_response(
+    resp: MessagesUiResponse,
+    ctx: &mut AppContext,
+    cache: &mut ConversationCache,
+    router: &mut Router<Route>,
+    is_narrow: bool,
+) {
+    if let Some(convo_resp) = resp.conversation_panel_response {
+        handle_messages_action(convo_resp, ctx, cache, router, is_narrow);
+    }
+
+    let Some(nav) = resp.nav_response else {
+        return;
+    };
+
+    process_nav_resp(nav, ctx, cache, router, is_narrow);
+}
+
+fn process_nav_resp(
+    nav: NavResponse<Option<MessagesAction>>,
+    ctx: &mut AppContext,
+    cache: &mut ConversationCache,
+    router: &mut Router<Route>,
+    is_narrow: bool,
+) {
+    if let Some(action) = nav.response.or(nav.title_response) {
+        handle_messages_action(action, ctx, cache, router, is_narrow);
+    }
+
+    let Some(action) = nav.action else {
+        return;
+    };
+
+    match action {
+        NavAction::Returning(_) => {}
+        NavAction::Resetting => {}
+        NavAction::Dragging => {}
+        NavAction::Returned(_) => {
+            router.pop();
+            cache.active = None;
+        }
+        NavAction::Navigating => {}
+        NavAction::Navigated => {
+            router.navigating = false;
+        }
     }
 }
 
@@ -108,6 +166,8 @@ fn handle_messages_action(
     action: MessagesAction,
     ctx: &mut AppContext<'_>,
     cache: &mut ConversationCache,
+    router: &mut Router<Route>,
+    is_narrow: bool,
 ) {
     match action {
         MessagesAction::SendMessage {
@@ -123,6 +183,10 @@ fn handle_messages_action(
                 ctx.note_cache,
                 ctx.unknown_ids,
             );
+
+            if is_narrow {
+                router.route_to(Route::Conversation);
+            }
         }
     }
 }
