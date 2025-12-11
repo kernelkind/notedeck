@@ -201,6 +201,9 @@ fn handle_messages_action(
         MessagesAction::Creating => {
             router.route_to(Route::CreateConvo);
         }
+        MessagesAction::Back => {
+            router.go_back();
+        }
     }
 }
 

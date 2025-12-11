@@ -2,7 +2,7 @@ use std::mem;
 
 use egui::{Layout, ScrollArea};
 use nostrdb::Ndb;
-use notedeck::{DragResponse, Images, JobPool, JobsCache, Localization, tr};
+use notedeck::{tr, DragResponse, Images, JobPool, JobsCache, Localization};
 use notedeck_ui::{
     colors,
     nip51_set::{Nip51SetUiCache, Nip51SetWidget, Nip51SetWidgetAction, Nip51SetWidgetFlags},

@@ -3,7 +3,7 @@ use egui::{
 };
 use enostr::Pubkey;
 use nostrdb::{Ndb, Transaction};
-use notedeck::{Accounts, DragResponse, Images, Localization, tr};
+use notedeck::{tr, Accounts, DragResponse, Images, Localization};
 use notedeck_ui::colors::PINK;
 use notedeck_ui::profile::preview::SimpleProfilePreview;
 

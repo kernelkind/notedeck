@@ -1,7 +1,9 @@
 use enostr::{FullKeypair, Pubkey};
 use nostrdb::{Ndb, Transaction};
 
-use notedeck::{Accounts, AppContext, DragResponse, JobsCache, Localization, SingleUnkIdAction, UnknownIds};
+use notedeck::{
+    Accounts, AppContext, DragResponse, JobsCache, Localization, SingleUnkIdAction, UnknownIds,
+};
 use notedeck_ui::nip51_set::Nip51SetUiCache;
 
 pub use crate::accounts::route::AccountsResponse;

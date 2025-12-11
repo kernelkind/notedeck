@@ -1,14 +1,15 @@
 use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use egui::{
-    vec2, Align, Color32, CornerRadius, CursorIcon, Frame, Key, Layout, Margin, RichText,
-    ScrollArea, Sense, TextEdit,
+    vec2, Align, Color32, CornerRadius, Frame, Key, Layout, Margin, RichText, ScrollArea, Sense,
+    TextEdit,
 };
 use egui_extras::{Size, StripBuilder};
 use egui_nav::NavResponse;
 use enostr::{NoteId, Pubkey};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
 use notedeck::{name::get_display_name, ui::is_narrow, ContactState, Images, Router, Settings};
-use notedeck_ui::{app_images, ProfilePic};
+use notedeck_ui::ProfilePic;
+use std::borrow::Cow;
 
 use crate::{
     cache::{
@@ -27,6 +28,7 @@ pub enum MessagesAction {
     },
     Open(ConversationId),
     Creating,
+    Back,
     Create {
         recipient: Pubkey,
     },
@@ -61,108 +63,69 @@ impl<'a> ConversationListUi<'a> {
             .inner_margin(Margin::symmetric(12, 10))
             .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
             .show(ui, |ui| {
-                StripBuilder::new(ui)
-                    .size(Size::exact(32.0))
-                    .size(Size::exact(60.0))
-                    .size(Size::remainder())
-                    .vertical(|mut strip| {
-                        strip.empty();
-                        strip.cell(|ui| {
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.heading("Chats");
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        let new_msg_icon = app_images::new_message_image();
-                                        if ui
-                                            .add(new_msg_icon)
-                                            .on_hover_cursor(CursorIcon::PointingHand)
-                                            .interact(Sense::click())
-                                            .clicked()
-                                        {
-                                            tracing::info!("CLICKED NEW MSG");
-                                            action = Some(MessagesAction::Creating);
-                                        }
-                                    });
+                if self.cache.is_empty() {
+                    ui.centered_and_justified(|ui| {
+                        ui.label("No conversations yet");
+                    });
+                    return;
+                }
+
+                ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let num_convos = self.cache.len();
+                        let active = self.cache.active;
+                        let txn = Transaction::new(self.ndb).expect("txn");
+                        let txn_ref = &txn;
+
+                        self.states
+                            .convos_list
+                            .ui_custom_layout(ui, num_convos, |ui, index| {
+                                let Some(id) = self.cache.get_id_by_index(index).copied() else {
+                                    return 1;
+                                };
+
+                                let Some(summary) = self.cache.get_summary_by_index(index) else {
+                                    return 1;
+                                };
+
+                                let title = conversation_title(
+                                    summary.metadata,
+                                    txn_ref,
+                                    self.ndb,
+                                    selected_pubkey,
+                                );
+
+                                let partner = direct_chat_partner(
+                                    summary.metadata.participants.as_slice(),
+                                    selected_pubkey,
+                                );
+                                let partner_profile = partner.and_then(|pk| {
+                                    self.ndb.get_profile_by_pubkey(txn_ref, pk.bytes()).ok()
                                 });
-                                ui.add_space(4.0);
-                                ui.separator();
+
+                                // tracing::info!(
+                                //     "click: {:?}, did click: {:?}",
+                                //     ui.ctx().input(|i| i.pointer.interact_pos()),
+                                //     ui.ctx().input(|i| i.pointer.any_click())
+                                // );
+                                let response = render_summary(
+                                    ui,
+                                    summary,
+                                    Some(id) == active,
+                                    title.as_ref(),
+                                    partner.is_some(),
+                                    partner_profile.as_ref(),
+                                    self.img_cache,
+                                );
+
+                                if response.clicked() {
+                                    tracing::info!("CLICKED SUMMARY {id}");
+                                    action = Some(MessagesAction::Open(id));
+                                }
+
+                                1
                             });
-                        });
-
-                        strip.cell(|ui| {
-                            if self.cache.is_empty() {
-                                ui.centered_and_justified(|ui| {
-                                    ui.label("No conversations yet");
-                                });
-                                return;
-                            }
-
-                            ScrollArea::vertical()
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    let num_convos = self.cache.len();
-                                    let active = self.cache.active;
-                                    let txn = Transaction::new(self.ndb).expect("txn");
-                                    let txn_ref = &txn;
-
-                                    self.states.convos_list.ui_custom_layout(
-                                        ui,
-                                        num_convos,
-                                        |ui, index| {
-                                            let Some(id) =
-                                                self.cache.get_id_by_index(index).copied()
-                                            else {
-                                                return 1;
-                                            };
-
-                                            let Some(summary) =
-                                                self.cache.get_summary_by_index(index)
-                                            else {
-                                                return 1;
-                                            };
-
-                                            let title = conversation_title(
-                                                summary.metadata,
-                                                txn_ref,
-                                                self.ndb,
-                                                selected_pubkey,
-                                            );
-
-                                            let partner = direct_chat_partner(
-                                                summary.metadata.participants.as_slice(),
-                                                selected_pubkey,
-                                            );
-                                            let partner_profile = partner.and_then(|pk| {
-                                                self.ndb
-                                                    .get_profile_by_pubkey(txn_ref, pk.bytes())
-                                                    .ok()
-                                            });
-
-                                            // tracing::info!(
-                                            //     "click: {:?}, did click: {:?}",
-                                            //     ui.ctx().input(|i| i.pointer.interact_pos()),
-                                            //     ui.ctx().input(|i| i.pointer.any_click())
-                                            // );
-                                            let response = render_summary(
-                                                ui,
-                                                summary,
-                                                Some(id) == active,
-                                                &title,
-                                                partner.is_some(),
-                                                partner_profile.as_ref(),
-                                                self.img_cache,
-                                            );
-
-                                            if response.clicked() {
-                                                tracing::info!("CLICKED SUMMARY {id}");
-                                                action = Some(MessagesAction::Open(id));
-                                            }
-
-                                            1
-                                        },
-                                    );
-                                });
-                        });
                     });
             });
         action
@@ -243,7 +206,7 @@ impl<'a> ConversationUi<'a> {
                         strip.cell(|ui| {
                             conversation_header(
                                 ui,
-                                &title,
+                                title.as_ref(),
                                 &meta_line,
                                 self.img_cache,
                                 partner.is_some(),
@@ -861,17 +824,22 @@ fn fallback_convo_title(
     names.join(", ")
 }
 
-fn conversation_title(
-    metadata: &ConversationMetadata,
+pub(crate) fn conversation_title<'a>(
+    metadata: &'a ConversationMetadata,
     txn: &Transaction,
     ndb: &Ndb,
     current: &Pubkey,
-) -> String {
-    metadata
-        .title
-        .as_ref()
-        .map(|t| t.title.clone())
-        .unwrap_or_else(|| fallback_convo_title(&metadata.participants, txn, ndb, current))
+) -> Cow<'a, str> {
+    if let Some(title) = metadata.title.as_ref() {
+        Cow::Borrowed(title.title.as_str())
+    } else {
+        Cow::Owned(fallback_convo_title(
+            &metadata.participants,
+            txn,
+            ndb,
+            current,
+        ))
+    }
 }
 
 fn conversation_meta_line(summary: &ConversationSummary<'_>) -> String {
@@ -912,7 +880,10 @@ fn format_timestamp_label(dt: &DateTime<Local>) -> String {
     dt.format("%-I:%M %p").to_string()
 }
 
-fn direct_chat_partner<'a>(participants: &'a [Pubkey], current: &Pubkey) -> Option<&'a Pubkey> {
+pub(crate) fn direct_chat_partner<'a>(
+    participants: &'a [Pubkey],
+    current: &Pubkey,
+) -> Option<&'a Pubkey> {
     if participants.len() != 2 {
         return None;
     }
