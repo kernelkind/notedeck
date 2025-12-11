@@ -1,4 +1,4 @@
-use egui::{Align, CornerRadius, CursorIcon, Layout, Response, RichText, Stroke};
+use egui::{Align, CursorIcon, Frame, Layout, Response, RichText, Stroke};
 use egui_nav::{NavResponse, RouteResponse};
 use enostr::Pubkey;
 use nostrdb::{Ndb, Transaction};
@@ -127,17 +127,14 @@ impl<'a> NavTitle<'a> {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<MessagesAction> {
-        ui.painter().rect(
-            ui.available_rect_before_wrap(),
-            CornerRadius::ZERO,
-            ui.visuals().faint_bg_color,
-            Stroke::NONE,
-            egui::StrokeKind::Inside,
-        );
         let mut action = None;
-        NavHeaderCore::show(ui, |ui| {
-            action = self.title_bar(ui);
-        });
+        Frame::new()
+            .fill(ui.visuals().faint_bg_color)
+            .show(ui, |ui| {
+                NavHeaderCore::show(ui, |ui| {
+                    action = self.title_bar(ui);
+                });
+            });
         action
     }
 
