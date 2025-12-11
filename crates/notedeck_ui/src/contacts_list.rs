@@ -15,7 +15,7 @@ pub struct ContactsListView<'a, 'txn> {
 
 #[derive(Clone)]
 pub enum ContactsListAction {
-    OpenProfile(Pubkey),
+    Select(Pubkey),
 }
 
 pub enum ContactsCollection<'a> {
@@ -112,7 +112,7 @@ impl<'a, 'txn> ContactsListView<'a, 'txn> {
                 });
 
                 if resp.clicked() {
-                    action = Some(ContactsListAction::OpenProfile(*contact_pubkey));
+                    action = Some(ContactsListAction::Select(*contact_pubkey));
                 }
             }
         });
