@@ -58,74 +58,63 @@ impl<'a> ConversationListUi<'a> {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, selected_pubkey: &Pubkey) -> Option<MessagesAction> {
         let mut action = None;
-        Frame::new()
-            .fill(ui.visuals().faint_bg_color)
-            .inner_margin(Margin::symmetric(12, 10))
-            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+        if self.cache.is_empty() {
+            ui.centered_and_justified(|ui| {
+                ui.label("No conversations yet");
+            });
+            return None;
+        }
+
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
             .show(ui, |ui| {
-                if self.cache.is_empty() {
-                    ui.centered_and_justified(|ui| {
-                        ui.label("No conversations yet");
-                    });
-                    return;
-                }
+                let num_convos = self.cache.len();
+                let active = self.cache.active;
+                let txn = Transaction::new(self.ndb).expect("txn");
+                let txn_ref = &txn;
 
-                ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let num_convos = self.cache.len();
-                        let active = self.cache.active;
-                        let txn = Transaction::new(self.ndb).expect("txn");
-                        let txn_ref = &txn;
+                self.states
+                    .convos_list
+                    .ui_custom_layout(ui, num_convos, |ui, index| {
+                        let Some(id) = self.cache.get_id_by_index(index).copied() else {
+                            return 1;
+                        };
 
-                        self.states
-                            .convos_list
-                            .ui_custom_layout(ui, num_convos, |ui, index| {
-                                let Some(id) = self.cache.get_id_by_index(index).copied() else {
-                                    return 1;
-                                };
+                        let Some(summary) = self.cache.get_summary_by_index(index) else {
+                            return 1;
+                        };
 
-                                let Some(summary) = self.cache.get_summary_by_index(index) else {
-                                    return 1;
-                                };
+                        let title = conversation_title(
+                            summary.metadata,
+                            txn_ref,
+                            self.ndb,
+                            selected_pubkey,
+                        );
 
-                                let title = conversation_title(
-                                    summary.metadata,
-                                    txn_ref,
-                                    self.ndb,
-                                    selected_pubkey,
-                                );
+                        let partner = direct_chat_partner(
+                            summary.metadata.participants.as_slice(),
+                            selected_pubkey,
+                        );
+                        let partner_profile = partner.and_then(|pk| {
+                            self.ndb.get_profile_by_pubkey(txn_ref, pk.bytes()).ok()
+                        });
 
-                                let partner = direct_chat_partner(
-                                    summary.metadata.participants.as_slice(),
-                                    selected_pubkey,
-                                );
-                                let partner_profile = partner.and_then(|pk| {
-                                    self.ndb.get_profile_by_pubkey(txn_ref, pk.bytes()).ok()
-                                });
+                        let response = render_summary(
+                            ui,
+                            summary,
+                            Some(id) == active,
+                            title.as_ref(),
+                            partner.is_some(),
+                            partner_profile.as_ref(),
+                            self.img_cache,
+                        );
 
-                                // tracing::info!(
-                                //     "click: {:?}, did click: {:?}",
-                                //     ui.ctx().input(|i| i.pointer.interact_pos()),
-                                //     ui.ctx().input(|i| i.pointer.any_click())
-                                // );
-                                let response = render_summary(
-                                    ui,
-                                    summary,
-                                    Some(id) == active,
-                                    title.as_ref(),
-                                    partner.is_some(),
-                                    partner_profile.as_ref(),
-                                    self.img_cache,
-                                );
+                        if response.clicked() {
+                            tracing::info!("CLICKED SUMMARY {id}");
+                            action = Some(MessagesAction::Open(id));
+                        }
 
-                                if response.clicked() {
-                                    tracing::info!("CLICKED SUMMARY {id}");
-                                    action = Some(MessagesAction::Open(id));
-                                }
-
-                                1
-                            });
+                        1
                     });
             });
         action
@@ -603,16 +592,10 @@ pub fn render_summary(
     } else {
         visuals.extreme_bg_color
     };
-    let stroke = if selected {
-        visuals.selection.stroke
-    } else {
-        visuals.widgets.noninteractive.bg_stroke
-    };
 
     Frame::new()
         .fill(fill)
         .corner_radius(CornerRadius::same(12))
-        .stroke(stroke)
         .inner_margin(Margin::symmetric(12, 8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -659,6 +642,7 @@ pub fn render_summary(
         })
         .response
         .interact(Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 pub fn render_chat_message(

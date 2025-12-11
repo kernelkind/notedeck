@@ -1,4 +1,6 @@
-use egui::{Align, CursorIcon, Frame, Layout, Response, RichText, Stroke};
+use egui::{
+    Align, Color32, CornerRadius, CursorIcon, Frame, Layout, Margin, Response, RichText, Stroke,
+};
 use egui_nav::{NavResponse, RouteResponse};
 use enostr::Pubkey;
 use nostrdb::{Ndb, Transaction};
@@ -32,39 +34,58 @@ pub fn render_nav(
     img_cache: &mut Images,
     contacts: &ContactState,
 ) -> NavResponse<Option<MessagesAction>> {
-    egui_nav::Nav::new(router.routes())
-        .navigating(router.navigating)
-        .returning(router.returning)
-        .animate_transitions(settings.animate_nav_transitions)
-        .show_mut(ui, |ui, render_type, nav| match render_type {
-            egui_nav::NavUiType::Title => {
-                let mut nav_title =
-                    NavTitle::new(nav.routes(), cache, ndb, selected_pubkey, img_cache);
-                RouteResponse {
-                    response: nav_title.show(ui),
-                    can_take_drag_from: Vec::new(),
-                }
-            }
-            egui_nav::NavUiType::Body => {
-                let Some(top) = nav.routes().last() else {
-                    return RouteResponse {
-                        response: None,
-                        can_take_drag_from: Vec::new(),
-                    };
-                };
+    ui.painter().rect(
+        ui.available_rect_before_wrap(),
+        CornerRadius::ZERO,
+        ui.visuals().faint_bg_color,
+        Stroke::NONE,
+        egui::StrokeKind::Inside,
+    );
 
-                render_nav_body(
-                    top,
-                    cache,
-                    states,
-                    ndb,
-                    selected_pubkey,
-                    ui,
-                    img_cache,
-                    contacts,
-                )
-            }
+    if cfg!(target_os = "macos") {
+        ui.add_space(16.0);
+    }
+
+    Frame::new()
+        .fill(egui::Color32::TRANSPARENT)
+        .inner_margin(Margin::symmetric(12, 10))
+        .stroke(Stroke::NONE)
+        .show(ui, |ui| {
+            egui_nav::Nav::new(router.routes())
+                .navigating(router.navigating)
+                .returning(router.returning)
+                .animate_transitions(settings.animate_nav_transitions)
+                .show_mut(ui, |ui, render_type, nav| match render_type {
+                    egui_nav::NavUiType::Title => {
+                        let mut nav_title =
+                            NavTitle::new(nav.routes(), cache, ndb, selected_pubkey, img_cache);
+                        RouteResponse {
+                            response: nav_title.show(ui),
+                            can_take_drag_from: Vec::new(),
+                        }
+                    }
+                    egui_nav::NavUiType::Body => {
+                        let Some(top) = nav.routes().last() else {
+                            return RouteResponse {
+                                response: None,
+                                can_take_drag_from: Vec::new(),
+                            };
+                        };
+
+                        render_nav_body(
+                            top,
+                            cache,
+                            states,
+                            ndb,
+                            selected_pubkey,
+                            ui,
+                            img_cache,
+                            contacts,
+                        )
+                    }
+                })
         })
+        .inner
 }
 
 fn render_nav_body(
@@ -129,7 +150,13 @@ impl<'a> NavTitle<'a> {
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<MessagesAction> {
         let mut action = None;
         Frame::new()
-            .fill(ui.visuals().faint_bg_color)
+            .inner_margin(Margin {
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: 8,
+            })
+            .fill(Color32::TRANSPARENT)
             .show(ui, |ui| {
                 NavHeaderCore::show(ui, |ui| {
                     action = self.title_bar(ui);
@@ -143,30 +170,21 @@ impl<'a> NavTitle<'a> {
             return None;
         }
 
-        let spacing = 8.0;
-        ui.spacing_mut().item_spacing.x = spacing;
+        let mut action = None;
+        let mut back_resp = None;
 
-        let chev_width = 8.0;
-        let back_resp = prev(self.routes).map(|_| {
-            self.back_button(ui, egui::vec2(chev_width, 15.0))
-                .on_hover_cursor(CursorIcon::PointingHand)
+        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+            let chev_width = 12.0;
+            back_resp = prev(self.routes).map(|_| {
+                back_button(ui, egui::vec2(chev_width, 20.0))
+                    .on_hover_cursor(CursorIcon::PointingHand)
+            });
+
+            let top = self.routes.last().expect("routes can't be empty");
+            action = self.title(ui, top);
         });
 
-        if back_resp.is_none() {
-            ui.add_space(chev_width + spacing);
-        }
-
-        let top = self.routes.last().expect("routes can't be empty");
-        let action = self.title(ui, top);
-
         action.or(back_resp.and_then(|resp| resp.clicked().then_some(MessagesAction::Back)))
-    }
-
-    fn back_button(&self, ui: &mut egui::Ui, chev_size: egui::Vec2) -> egui::Response {
-        let color = ui.style().visuals.noninteractive().fg_stroke.color;
-        let chev_resp = chevron(ui, 2.0, chev_size, egui::Stroke::new(2.0, color));
-
-        chev_resp
     }
 
     fn route_label(&self, route: &Route) -> &'static str {
@@ -247,6 +265,13 @@ impl<'a> NavTitle<'a> {
     }
 }
 
+fn back_button(ui: &mut egui::Ui, chev_size: egui::Vec2) -> egui::Response {
+    let color = ui.style().visuals.noninteractive().fg_stroke.color;
+    let chev_resp = chevron(ui, 2.0, chev_size, egui::Stroke::new(2.0, color));
+
+    chev_resp
+}
+
 fn prev<R>(xs: &[R]) -> Option<&R> {
     xs.get(xs.len().checked_sub(2)?)
 }
@@ -255,7 +280,7 @@ fn chats_header(ui: &mut egui::Ui) -> Option<MessagesAction> {
     let mut action = None;
     ui.heading("Chats");
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        let new_msg_icon = app_images::new_message_image();
+        let new_msg_icon = app_images::new_message_image().max_height(24.0);
         if ui
             .add(new_msg_icon)
             .on_hover_cursor(CursorIcon::PointingHand)

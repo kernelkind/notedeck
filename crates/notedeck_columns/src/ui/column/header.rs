@@ -17,6 +17,7 @@ use notedeck::{Images, Localization, NotedeckTextStyle};
 use notedeck_ui::app_images;
 use notedeck_ui::header::chevron;
 use notedeck_ui::header::NavHeaderCore;
+use notedeck_ui::padding;
 use notedeck_ui::{
     anim::{AnimationHelper, ICON_EXPANSION_MULTIPLE},
     ProfilePic,
@@ -59,9 +60,12 @@ impl<'a> NavTitle<'a> {
 
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<RenderNavAction> {
         let mut r = None;
-        NavHeaderCore::show(ui, |ui| {
-            r = self.title_bar(ui);
+        padding(8.0, ui, |ui| {
+            NavHeaderCore::show(ui, |ui| {
+                r = self.title_bar(ui);
+            })
         });
+
         r
     }
 
