@@ -1,6 +1,4 @@
 use egui::{Sense, UiBuilder};
-use nostrdb::Ndb;
-use notedeck::{Images, Localization};
 
 pub struct NavHeaderCore {}
 

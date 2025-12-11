@@ -1,6 +1,6 @@
 pub mod cache;
-pub mod nav;
 pub mod nip17;
+pub mod route;
 pub mod ui;
 
 use enostr::{ClientMessage, FullKeypair, Pubkey, RelayEvent, RelayPool, SecretKey};
@@ -16,9 +16,9 @@ use notedeck::{try_process_events_core, Accounts, App, AppContext, AppResponse, 
 
 use crate::{
     cache::{ConversationCache, ConversationId, ConversationStates},
-    nav::Route,
     nip17::{giftwrap_filter, remote_sub},
-    ui::messages::{login_nsec_prompt, MessagesAction, MessagesUi},
+    route::Route,
+    ui::messages::{login_nsec_prompt, ConversationUi, MessagesAction},
 };
 
 pub struct MessagesApp {
@@ -94,7 +94,8 @@ impl App for MessagesApp {
         }
 
         let selected_pubkey = ctx.accounts.selected_account_pubkey();
-        let action = MessagesUi::new(cache, &mut self.states, &ctx.ndb, selected_pubkey)
+        
+        let action = ConversationUi::new(cache, &mut self.states, &ctx.ndb, selected_pubkey)
             .ui(ui, &mut *ctx.img_cache);
         if let Some(action) = action {
             handle_messages_action(action, ctx, cache);

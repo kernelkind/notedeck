@@ -6,12 +6,16 @@ use egui::{
 use egui_extras::{Size, StripBuilder};
 use enostr::{NoteId, Pubkey};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
-use notedeck::{name::get_display_name, Images};
+use notedeck::{name::get_display_name, Images, Router, Settings};
 use notedeck_ui::ProfilePic;
 
-use crate::cache::{
-    parse_chat_message, Conversation, ConversationCache, ConversationId, ConversationMetadata,
-    ConversationState, ConversationStates, ConversationSummary, Nip17ChatMessage,
+use crate::{
+    cache::{
+        parse_chat_message, Conversation, ConversationCache, ConversationId, ConversationMetadata,
+        ConversationState, ConversationStates, ConversationSummary, Nip17ChatMessage,
+    },
+    route::Route,
+    ui::nav::render_nav,
 };
 
 #[derive(Debug)]
@@ -23,58 +27,29 @@ pub enum MessagesAction {
     Open(ConversationId),
 }
 
-pub struct MessagesUi<'a> {
+pub struct ConversationListUi<'a> {
     cache: &'a ConversationCache,
     states: &'a mut ConversationStates,
     ndb: &'a Ndb,
-    selected_pubkey: &'a Pubkey,
+    img_cache: &'a mut Images,
 }
 
-impl<'a> MessagesUi<'a> {
+impl<'a> ConversationListUi<'a> {
     pub fn new(
         cache: &'a ConversationCache,
         states: &'a mut ConversationStates,
         ndb: &'a Ndb,
-        selected_pubkey: &'a Pubkey,
+        img_cache: &'a mut Images,
     ) -> Self {
         Self {
             cache,
             states,
             ndb,
-            selected_pubkey,
+            img_cache,
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, img_cache: &mut Images) -> Option<MessagesAction> {
-        // Ensure we have a selected conversation when any exist so both panels stay in sync.
-        let mut action = None;
-
-        StripBuilder::new(ui)
-            .size(Size::exact(300.0))
-            .size(Size::remainder())
-            .horizontal(|mut strip| {
-                strip.cell(|ui| {
-                    if let Some(cur_action) = self.render_conversation_list_panel(ui, img_cache) {
-                        action = Some(cur_action);
-                    }
-                });
-
-                strip.cell(|ui| {
-                    let panel_action = self.render_conversation_view_panel(ui, img_cache);
-                    if action.is_none() {
-                        action = panel_action;
-                    }
-                });
-            });
-
-        action
-    }
-
-    fn render_conversation_list_panel(
-        &mut self,
-        ui: &mut egui::Ui,
-        img_cache: &mut Images,
-    ) -> Option<MessagesAction> {
+    pub fn ui(&mut self, ui: &mut egui::Ui, selected_pubkey: &Pubkey) -> Option<MessagesAction> {
         let mut action = None;
         Frame::new()
             .fill(ui.visuals().faint_bg_color)
@@ -136,12 +111,12 @@ impl<'a> MessagesUi<'a> {
                                                 summary.metadata,
                                                 txn_ref,
                                                 self.ndb,
-                                                self.selected_pubkey,
+                                                selected_pubkey,
                                             );
 
                                             let partner = direct_chat_partner(
                                                 summary.metadata.participants.as_slice(),
-                                                self.selected_pubkey,
+                                                selected_pubkey,
                                             );
                                             let partner_profile = partner.and_then(|pk| {
                                                 self.ndb
@@ -161,7 +136,7 @@ impl<'a> MessagesUi<'a> {
                                                 &title,
                                                 partner.is_some(),
                                                 partner_profile.as_ref(),
-                                                img_cache,
+                                                self.img_cache,
                                             );
 
                                             if response.clicked() {
@@ -178,12 +153,30 @@ impl<'a> MessagesUi<'a> {
             });
         action
     }
+}
 
-    fn render_conversation_view_panel(
-        &mut self,
-        ui: &mut egui::Ui,
-        img_cache: &mut Images,
-    ) -> Option<MessagesAction> {
+pub struct ConversationUi<'a> {
+    cache: &'a ConversationCache,
+    states: &'a mut ConversationStates,
+    ndb: &'a Ndb,
+    img_cache: &'a mut Images,
+}
+
+impl<'a> ConversationUi<'a> {
+    pub fn new(
+        cache: &'a ConversationCache,
+        states: &'a mut ConversationStates,
+        ndb: &'a Ndb,
+        img_cache: &'a mut Images,
+    ) -> Self {
+        Self {
+            cache,
+            states,
+            ndb,
+            img_cache,
+        }
+    }
+    fn ui(&mut self, ui: &mut egui::Ui, selected_pubkey: &Pubkey) -> Option<MessagesAction> {
         let Some(conversation_id) = self.cache.active else {
             Frame::new()
                 .fill(ui.visuals().panel_fill)
@@ -207,12 +200,10 @@ impl<'a> MessagesUi<'a> {
             total_messages: conversation.messages.len(),
         };
         let txn = Transaction::new(self.ndb).expect("txn");
-        let title = conversation_title(summary.metadata, &txn, self.ndb, self.selected_pubkey);
+        let title = conversation_title(summary.metadata, &txn, self.ndb, selected_pubkey);
         let meta_line = conversation_meta_line(&summary);
-        let partner = direct_chat_partner(
-            summary.metadata.participants.as_slice(),
-            self.selected_pubkey,
-        );
+        let partner =
+            direct_chat_partner(summary.metadata.participants.as_slice(), selected_pubkey);
         let partner_profile =
             partner.and_then(|pk| self.ndb.get_profile_by_pubkey(&txn, pk.bytes()).ok());
 
@@ -239,7 +230,7 @@ impl<'a> MessagesUi<'a> {
                                 ui,
                                 &title,
                                 &meta_line,
-                                img_cache,
+                                self.img_cache,
                                 partner.is_some(),
                                 partner_profile.as_ref(),
                             );
@@ -253,8 +244,8 @@ impl<'a> MessagesUi<'a> {
                                     state,
                                     self.ndb,
                                     &txn,
-                                    img_cache,
-                                    self.selected_pubkey,
+                                    self.img_cache,
+                                    selected_pubkey,
                                 );
                             });
                         });
@@ -270,6 +261,54 @@ impl<'a> MessagesUi<'a> {
 
         action
     }
+}
+
+pub fn desktop_messages_ui(
+    cache: &ConversationCache,
+    states: &mut ConversationStates,
+    ndb: &Ndb,
+    selected_pubkey: &Pubkey,
+    ui: &mut egui::Ui,
+    img_cache: &mut Images,
+    router: &Router<Route>,
+    settings: &Settings,
+) -> Option<MessagesAction> {
+    // Ensure we have a selected conversation when any exist so both panels stay in sync.
+    let mut action = None;
+
+    StripBuilder::new(ui)
+        .size(Size::exact(300.0))
+        .size(Size::remainder())
+        .horizontal(|mut strip| {
+            strip.cell(|ui| {
+                let nav = render_nav(
+                    ui,
+                    router,
+                    settings,
+                    cache,
+                    states,
+                    ndb,
+                    selected_pubkey,
+                    img_cache,
+                );
+                //     action = Some(cur_action);
+                // }
+            });
+
+            strip.cell(|ui| {
+                let panel_action =
+                    ConversationUi::new(cache, states, ndb, img_cache).ui(ui, selected_pubkey);
+                if action.is_none() {
+                    action = panel_action;
+                }
+            });
+        });
+
+    action
+}
+
+struct MessagesUiResponse {
+
 }
 
 fn conversation_header(
