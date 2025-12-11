@@ -2,13 +2,13 @@ use std::mem;
 
 use egui::{Layout, ScrollArea};
 use nostrdb::Ndb;
-use notedeck::{tr, Images, JobPool, JobsCache, Localization};
+use notedeck::{BodyResponse, Images, JobPool, JobsCache, Localization, tr};
 use notedeck_ui::{
     colors,
     nip51_set::{Nip51SetUiCache, Nip51SetWidget, Nip51SetWidgetAction, Nip51SetWidgetFlags},
 };
 
-use crate::{nav::BodyResponse, onboarding::Onboarding, ui::widgets::styled_button};
+use crate::{onboarding::Onboarding, ui::widgets::styled_button};
 
 /// Display Follow Packs for the user to choose from authors trusted by the Damus team
 pub struct FollowPackOnboardingView<'a> {

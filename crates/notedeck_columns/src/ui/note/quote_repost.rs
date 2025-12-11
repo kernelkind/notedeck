@@ -1,13 +1,12 @@
 use super::{PostResponse, PostType};
 use crate::{
     draft::Draft,
-    nav::BodyResponse,
     ui::{self},
 };
 
 use egui::ScrollArea;
 use enostr::{FilledKeypair, NoteId};
-use notedeck::{JobsCache, NoteContext};
+use notedeck::{BodyResponse, JobsCache, NoteContext};
 use notedeck_ui::NoteOptions;
 
 pub struct QuoteRepostView<'a, 'd> {

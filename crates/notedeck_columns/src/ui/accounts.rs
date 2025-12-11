@@ -3,13 +3,11 @@ use egui::{
 };
 use enostr::Pubkey;
 use nostrdb::{Ndb, Transaction};
-use notedeck::{tr, Accounts, Images, Localization};
+use notedeck::{Accounts, BodyResponse, Images, Localization, tr};
 use notedeck_ui::colors::PINK;
 use notedeck_ui::profile::preview::SimpleProfilePreview;
 
 use notedeck_ui::app_images;
-
-use crate::nav::BodyResponse;
 
 pub struct AccountsView<'a> {
     ndb: &'a Ndb,

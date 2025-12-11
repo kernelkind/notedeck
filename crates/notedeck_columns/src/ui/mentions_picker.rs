@@ -1,7 +1,7 @@
 use egui::{vec2, FontId, Layout, Pos2, Rect, ScrollArea, UiBuilder, Vec2b};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
 use notedeck::{
-    fonts::get_font_size, name::get_display_name, profile::get_profile_url, Images,
+    fonts::get_font_size, name::get_display_name, profile::get_profile_url, BodyResponse, Images,
     NotedeckTextStyle,
 };
 use notedeck_ui::{
@@ -10,8 +10,6 @@ use notedeck_ui::{
     ProfilePic,
 };
 use tracing::error;
-
-use crate::nav::BodyResponse;
 
 /// Displays user profiles for the user to pick from.
 /// Useful for manually typing a username and selecting the profile desired
