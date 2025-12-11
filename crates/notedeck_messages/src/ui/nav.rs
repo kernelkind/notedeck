@@ -71,7 +71,7 @@ fn render_nav_body(
             ConversationListUi::new(cache, states, ndb, img_cache).ui(ui, selected_pubkey)
         }
         Route::CreateConvo => 's: {
-            let Some(r) = CreateConvoUi::new(cache, states, ndb, img_cache, contacts).ui(ui) else {
+            let Some(r) = CreateConvoUi::new(ndb, img_cache, contacts).ui(ui) else {
                 break 's None;
             };
 

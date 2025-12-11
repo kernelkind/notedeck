@@ -1,13 +1,10 @@
+use egui::{Label, RichText};
 use enostr::Pubkey;
 use nostrdb::{Ndb, Transaction};
-use notedeck::{ContactState, Images};
+use notedeck::{ContactState, Images, NotedeckTextStyle};
 use notedeck_ui::{contacts_list::ContactsCollection, ContactsListView};
 
-use crate::cache::{ConversationCache, ConversationStates};
-
 pub struct CreateConvoUi<'a> {
-    cache: &'a ConversationCache,
-    states: &'a mut ConversationStates,
     ndb: &'a Ndb,
     img_cache: &'a mut Images,
     contacts: &'a ContactState,
@@ -18,16 +15,8 @@ pub struct CreateConvoResponse {
 }
 
 impl<'a> CreateConvoUi<'a> {
-    pub fn new(
-        cache: &'a ConversationCache,
-        states: &'a mut ConversationStates,
-        ndb: &'a Ndb,
-        img_cache: &'a mut Images,
-        contacts: &'a ContactState,
-    ) -> Self {
+    pub fn new(ndb: &'a Ndb, img_cache: &'a mut Images, contacts: &'a ContactState) -> Self {
         Self {
-            cache,
-            states,
             ndb,
             img_cache,
             contacts,
@@ -41,7 +30,11 @@ impl<'a> CreateConvoUi<'a> {
         };
 
         let txn = Transaction::new(self.ndb).expect("txn");
-        ContactsListView::new(
+
+        ui.add(Label::new(
+            RichText::new("Contacts").text_style(NotedeckTextStyle::Heading.text_style()),
+        ));
+        let resp = ContactsListView::new(
             ContactsCollection::Set(contacts),
             self.ndb,
             self.img_cache,
@@ -49,6 +42,10 @@ impl<'a> CreateConvoUi<'a> {
         )
         .ui(ui);
 
-        unimplemented!()
+        resp.output.map(|a| match a {
+            notedeck_ui::ContactsListAction::Select(pubkey) => {
+                CreateConvoResponse { recipient: pubkey }
+            }
+        })
     }
 }

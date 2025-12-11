@@ -198,6 +198,9 @@ fn handle_messages_action(
 
             open_coversation_action(id, ctx, cache, router, is_narrow);
         }
+        MessagesAction::Creating => {
+            router.route_to(Route::CreateConvo);
+        }
     }
 }
 

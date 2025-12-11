@@ -1,14 +1,14 @@
 use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use egui::{
-    vec2, Align, Button, Color32, CornerRadius, Frame, Key, Layout, Margin, RichText, ScrollArea,
-    Sense, TextEdit,
+    vec2, Align, Color32, CornerRadius, CursorIcon, Frame, Key, Layout, Margin, RichText,
+    ScrollArea, Sense, TextEdit,
 };
 use egui_extras::{Size, StripBuilder};
 use egui_nav::NavResponse;
 use enostr::{NoteId, Pubkey};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
 use notedeck::{name::get_display_name, ui::is_narrow, ContactState, Images, Router, Settings};
-use notedeck_ui::ProfilePic;
+use notedeck_ui::{app_images, ProfilePic};
 
 use crate::{
     cache::{
@@ -26,6 +26,7 @@ pub enum MessagesAction {
         content: String,
     },
     Open(ConversationId),
+    Creating,
     Create {
         recipient: Pubkey,
     },
@@ -71,7 +72,16 @@ impl<'a> ConversationListUi<'a> {
                                 ui.horizontal(|ui| {
                                     ui.heading("Chats");
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        ui.add_enabled(false, Button::new("+ New"));
+                                        let new_msg_icon = app_images::new_message_image();
+                                        if ui
+                                            .add(new_msg_icon)
+                                            .on_hover_cursor(CursorIcon::PointingHand)
+                                            .interact(Sense::click())
+                                            .clicked()
+                                        {
+                                            tracing::info!("CLICKED NEW MSG");
+                                            action = Some(MessagesAction::Creating);
+                                        }
                                     });
                                 });
                                 ui.add_space(4.0);
