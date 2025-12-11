@@ -1,14 +1,16 @@
 use egui_nav::{NavResponse, RouteResponse};
 use enostr::Pubkey;
 use nostrdb::Ndb;
-use notedeck::{AppContext, Images, Router, Settings};
+use notedeck::{ContactState, Images, Router, Settings};
 use notedeck_ui::header::NavHeaderCore;
 
 use crate::{
     cache::{ConversationCache, ConversationStates},
     route::Route,
-    ui::messages::{ConversationListUi, ConversationUi, MessagesAction},
-    MessagesApp,
+    ui::{
+        create_convo::CreateConvoUi,
+        messages::{ConversationListUi, ConversationUi, MessagesAction},
+    },
 };
 
 pub fn render_nav(
@@ -20,6 +22,7 @@ pub fn render_nav(
     ndb: &Ndb,
     selected_pubkey: &Pubkey,
     img_cache: &mut Images,
+    contacts: &ContactState,
 ) -> NavResponse<Option<MessagesAction>> {
     egui_nav::Nav::new(router.routes())
         .navigating(router.navigating)
@@ -39,7 +42,16 @@ pub fn render_nav(
                     };
                 };
 
-                render_nav_body(top, cache, states, ndb, selected_pubkey, ui, img_cache)
+                render_nav_body(
+                    top,
+                    cache,
+                    states,
+                    ndb,
+                    selected_pubkey,
+                    ui,
+                    img_cache,
+                    contacts,
+                )
             }
         })
 }
@@ -52,12 +64,21 @@ fn render_nav_body(
     selected_pubkey: &Pubkey,
     ui: &mut egui::Ui,
     img_cache: &mut Images,
+    contacts: &ContactState,
 ) -> RouteResponse<Option<MessagesAction>> {
     let response = match top {
         Route::ConvoList => {
             ConversationListUi::new(cache, states, ndb, img_cache).ui(ui, selected_pubkey)
         }
-        Route::CreateConvo => todo!(),
+        Route::CreateConvo => 's: {
+            let Some(r) = CreateConvoUi::new(cache, states, ndb, img_cache, contacts).ui(ui) else {
+                break 's None;
+            };
+
+            Some(MessagesAction::Create {
+                recipient: r.recipient,
+            })
+        }
         Route::Conversation => {
             ConversationUi::new(cache, states, ndb, img_cache).ui(ui, selected_pubkey)
         }
@@ -77,12 +98,4 @@ impl<'a> NavTitle<'a> {
     pub fn show(ui: &mut egui::Ui) {
         NavHeaderCore::show(ui, |ui| {});
     }
-}
-
-fn process_nav_response(
-    app: &mut MessagesApp,
-    ctx: &mut AppContext<'_>,
-    ui: &mut egui::Ui,
-    response: NavResponse<Option<MessagesAction>>,
-) {
 }

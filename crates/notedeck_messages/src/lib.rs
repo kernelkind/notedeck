@@ -18,7 +18,10 @@ use notedeck::{
 };
 
 use crate::{
-    cache::{ConversationCache, ConversationId, ConversationStates},
+    cache::{
+        ConversationCache, ConversationId, ConversationIdentifierUnowned, ConversationStates,
+        ParticipantSetUnowned,
+    },
     nip17::{giftwrap_filter, remote_sub},
     route::Route,
     ui::messages::{login_nsec_prompt, messages_ui, MessagesAction, MessagesUiResponse},
@@ -98,6 +101,12 @@ impl App for MessagesApp {
 
         let selected_pubkey = ctx.accounts.selected_account_pubkey();
 
+        let contacts_state = ctx
+            .accounts
+            .get_selected_account()
+            .data
+            .contacts
+            .get_state();
         let resp = messages_ui(
             cache,
             &mut self.states,
@@ -107,6 +116,7 @@ impl App for MessagesApp {
             ctx.img_cache,
             &self.router,
             ctx.settings.get_settings_mut(),
+            contacts_state,
         );
         process_messages_ui_response(resp, ctx, cache, &mut self.router, is_narrow(ui.ctx()));
 
@@ -175,19 +185,34 @@ fn handle_messages_action(
             content,
         } => send_conversation_message(conversation_id, content, cache, ctx),
         MessagesAction::Open(conversation_id) => {
-            let txn = Transaction::new(&ctx.ndb).expect("txn");
-            cache.open_conversation(
-                &ctx.ndb,
-                &txn,
-                conversation_id,
-                ctx.note_cache,
-                ctx.unknown_ids,
-            );
-
-            if is_narrow {
-                router.route_to(Route::Conversation);
-            }
+            open_coversation_action(conversation_id, ctx, cache, router, is_narrow);
         }
+        MessagesAction::Create { recipient } => {
+            let selected = ctx.accounts.selected_account_pubkey();
+            let participants = vec![recipient.bytes(), selected.bytes()];
+            let id = cache
+                .registry
+                .get_or_insert(ConversationIdentifierUnowned::Nip17(
+                    ParticipantSetUnowned::new(participants),
+                ));
+
+            open_coversation_action(id, ctx, cache, router, is_narrow);
+        }
+    }
+}
+
+fn open_coversation_action(
+    id: ConversationId,
+    ctx: &mut AppContext<'_>,
+    cache: &mut ConversationCache,
+    router: &mut Router<Route>,
+    is_narrow: bool,
+) {
+    let txn = Transaction::new(&ctx.ndb).expect("txn");
+    cache.open_conversation(&ctx.ndb, &txn, id, ctx.note_cache, ctx.unknown_ids);
+
+    if is_narrow {
+        router.route_to(Route::Conversation);
     }
 }
 

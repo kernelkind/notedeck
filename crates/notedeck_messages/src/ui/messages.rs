@@ -7,7 +7,7 @@ use egui_extras::{Size, StripBuilder};
 use egui_nav::NavResponse;
 use enostr::{NoteId, Pubkey};
 use nostrdb::{Ndb, ProfileRecord, Transaction};
-use notedeck::{name::get_display_name, ui::is_narrow, Images, Router, Settings};
+use notedeck::{name::get_display_name, ui::is_narrow, ContactState, Images, Router, Settings};
 use notedeck_ui::ProfilePic;
 
 use crate::{
@@ -26,6 +26,9 @@ pub enum MessagesAction {
         content: String,
     },
     Open(ConversationId),
+    Create {
+        recipient: Pubkey,
+    },
 }
 
 pub struct ConversationListUi<'a> {
@@ -88,7 +91,7 @@ impl<'a> ConversationListUi<'a> {
                                 .auto_shrink([false, false])
                                 .show(ui, |ui| {
                                     let num_convos = self.cache.len();
-                                    let mut active = self.cache.active;
+                                    let active = self.cache.active;
                                     let txn = Transaction::new(self.ndb).expect("txn");
                                     let txn_ref = &txn;
 
@@ -274,6 +277,7 @@ pub fn desktop_messages_ui(
     img_cache: &mut Images,
     router: &Router<Route>,
     settings: &Settings,
+    contacts: &ContactState,
 ) -> MessagesUiResponse {
     let mut nav_resp = None;
     let mut convo_resp = None;
@@ -292,6 +296,7 @@ pub fn desktop_messages_ui(
                     ndb,
                     selected_pubkey,
                     img_cache,
+                    contacts,
                 ));
             });
 
@@ -316,6 +321,7 @@ pub fn narrow_messages_ui(
     img_cache: &mut Images,
     router: &Router<Route>,
     settings: &Settings,
+    contacts: &ContactState,
 ) -> MessagesUiResponse {
     let nav = render_nav(
         ui,
@@ -326,6 +332,7 @@ pub fn narrow_messages_ui(
         ndb,
         selected_pubkey,
         img_cache,
+        contacts,
     );
 
     MessagesUiResponse {
@@ -343,6 +350,7 @@ pub fn messages_ui(
     img_cache: &mut Images,
     router: &Router<Route>,
     settings: &Settings,
+    contacts: &ContactState,
 ) -> MessagesUiResponse {
     if is_narrow(ui.ctx()) {
         narrow_messages_ui(
@@ -354,6 +362,7 @@ pub fn messages_ui(
             img_cache,
             router,
             settings,
+            contacts,
         )
     } else {
         desktop_messages_ui(
@@ -365,6 +374,7 @@ pub fn messages_ui(
             img_cache,
             router,
             settings,
+            contacts,
         )
     }
 }

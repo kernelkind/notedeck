@@ -1,5 +1,7 @@
+use std::collections::HashSet;
+
 use crate::ProfilePic;
-use egui::{ahash::HashSet, RichText, Sense};
+use egui::{RichText, Sense};
 use enostr::Pubkey;
 use nostrdb::{Ndb, Transaction};
 use notedeck::{name::get_display_name, profile::get_profile_url, DragResponse, Images};

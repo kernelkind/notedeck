@@ -8,5 +8,5 @@ pub use conversation::{
     ConversationSummary, Nip17ChatMessage,
 };
 pub use message_store::MessageStore;
-pub use registry::ConversationIdentifier;
+pub use registry::{ConversationIdentifier, ConversationIdentifierUnowned, ParticipantSetUnowned};
 pub use state::{ConversationState, ConversationStates};
