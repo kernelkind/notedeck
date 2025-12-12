@@ -65,56 +65,56 @@ impl HorizontalHeader {
         left_priority: i8, // lower the value, higher the priority
         center_priority: i8,
         right_priority: i8,
-        left_to_right: &mut impl FnMut(&mut egui::Ui),
+        left_aligned: &mut impl FnMut(&mut egui::Ui),
         centered: &mut impl FnMut(&mut egui::Ui),
-        right_to_left: &mut impl FnMut(&mut egui::Ui),
+        right_aligned: &mut impl FnMut(&mut egui::Ui),
     ) {
-        let max_width = ui.available_width();
+        let item_spacing = 6.0 * ui.spacing().item_spacing.x;
+        let max_width = ui.available_width() - item_spacing;
+        tracing::info!(
+            "item spacing: {item_spacing}, avail width: {}, total len: {}",
+            ui.available_width(),
+            max_width
+        );
 
-        let left_width = measure_width(ui, left_to_right);
+        let left_width = measure_width(ui, left_aligned);
         let center_width = measure_width(ui, centered);
-        let right_width = measure_width(ui, right_to_left);
+        let right_width = measure_width(ui, right_aligned);
 
         let half_max = max_width / 2.0;
         let half_center = center_width / 2.0;
-        let mut sizes = Vec::new();
         let left_spacing = half_max - left_width - half_center;
-
-        let mut left_center = 0.0;
-
-        if left_spacing > 0.0 {
-            sizes.push(Size::exact(left_width));
-            sizes.push(Size::exact(left_spacing));
-        } else {
-            // not enough room for left and center to both render cleanly
-            if left_priority < center_priority {
-                // left is prioritized more than center
-                sizes.push(Size::exact(left_width));
-                left_center = half_center + left_spacing; // left_spacing is negative
-            } else {
-                // left is less of a priority than center, so it gets the remaining area
-                sizes.push(Size::remainder());
-                left_center = half_center;
-            }
-        }
-
         let right_spacing = half_max - right_width - half_center;
 
-        if right_spacing > 0.0 {
-            sizes.push(Size::exact(left_center + half_center));
-            sizes.push(Size::exact(right_spacing));
-            sizes.push(Size::exact(right_width));
+        let mut left_center = half_center;
+        let mut left_cell = if left_spacing > 0.0 || left_priority < center_priority {
+            Size::exact(left_width)
         } else {
-            // not enough room for center and right to both render cleanly
-            if center_priority < right_priority {
-                // center is prioritized more than right
-                sizes.push(Size::exact(left_center + half_center));
-                sizes.push(Size::remainder());
-            } else {
-                sizes.push(Size::remainder());
-                sizes.push(Size::exact(right_width));
+            Size::remainder()
+        };
+        let mut left_gap = Size::exact(left_spacing.max(0.0));
+
+        if left_spacing <= 0.0 {
+            left_gap = Size::exact(0.0);
+            if left_priority < center_priority {
+                left_center = (half_center + left_spacing).max(0.0);
             }
         }
+
+        let mut center_cell = Size::exact((left_center + half_center).max(0.0));
+        let mut right_gap = Size::exact(right_spacing.max(0.0));
+        let mut right_cell = Size::exact(right_width);
+
+        if right_spacing <= 0.0 {
+            right_gap = Size::exact(0.0);
+            if center_priority < right_priority {
+                right_cell = Size::remainder();
+            } else {
+                center_cell = Size::remainder();
+            }
+        }
+
+        let sizes = [left_cell, left_gap, center_cell, right_gap, right_cell];
 
         StripBuilder::new(ui)
             .cell_layout(Layout::left_to_right(egui::Align::Center))
@@ -126,11 +126,11 @@ impl HorizontalHeader {
                     }
 
                     builder.horizontal(|mut strip| {
-                        strip.cell(left_to_right);
+                        strip.cell(left_aligned);
                         strip.empty();
                         strip.cell(centered);
                         strip.empty();
-                        strip.cell(right_to_left);
+                        strip.cell(right_aligned);
                     });
                 });
             });
@@ -148,7 +148,5 @@ fn measure_width(ui: &mut egui::Ui, render: &mut impl FnMut(&mut egui::Ui)) -> f
     });
     let end_width = measure_ui.next_widget_position();
 
-    let added_width = end_width.x - start_width.x + ui.spacing().item_spacing.x;
-
-    added_width
+    (end_width.x - start_width.x).max(0.0)
 }
