@@ -7,7 +7,7 @@ use nostrdb::{Ndb, Transaction};
 use notedeck::{ContactState, Images, NotedeckTextStyle, Router, Settings};
 use notedeck_ui::{
     app_images,
-    header::{chevron, NavHeaderCore},
+    header::{chevron, HorizontalHeader, NavHeaderCore},
     ProfilePic,
 };
 
@@ -158,9 +158,7 @@ impl<'a> NavTitle<'a> {
             })
             .fill(Color32::TRANSPARENT)
             .show(ui, |ui| {
-                NavHeaderCore::show(ui, |ui| {
-                    action = self.title_bar(ui);
-                });
+                action = self.title_bar(ui);
             });
         action
     }
@@ -173,16 +171,35 @@ impl<'a> NavTitle<'a> {
         let mut action = None;
         let mut back_resp = None;
 
-        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-            let chev_width = 12.0;
-            back_resp = prev(self.routes).map(|_| {
-                back_button(ui, egui::vec2(chev_width, 20.0))
+        HorizontalHeader::new(48.0).ui(
+            ui,
+            0,
+            1,
+            2,
+            &mut |ui| {
+                let chev_width = 12.0;
+                back_resp = prev(self.routes).map(|_| {
+                    back_button(ui, egui::vec2(chev_width, 20.0))
+                        .on_hover_cursor(CursorIcon::PointingHand)
+                });
+            },
+            &mut |ui| {
+                let top = self.routes.last().expect("routes can't be empty");
+                self.title(ui, top);
+            },
+            &mut |ui| {
+                let new_msg_icon = app_images::new_message_image().max_height(24.0);
+                if ui
+                    .add(new_msg_icon)
                     .on_hover_cursor(CursorIcon::PointingHand)
-            });
-
-            let top = self.routes.last().expect("routes can't be empty");
-            action = self.title(ui, top);
-        });
+                    .interact(egui::Sense::click())
+                    .clicked()
+                {
+                    tracing::info!("CLICKED NEW MSG");
+                    action = Some(MessagesAction::Creating);
+                }
+            },
+        );
 
         action.or(back_resp.and_then(|resp| resp.clicked().then_some(MessagesAction::Back)))
     }
@@ -195,30 +212,25 @@ impl<'a> NavTitle<'a> {
         }
     }
 
-    fn title(&mut self, ui: &mut egui::Ui, route: &Route) -> Option<MessagesAction> {
+    fn title(&mut self, ui: &mut egui::Ui, route: &Route) {
         match route {
-            Route::ConvoList => chats_header(ui),
+            Route::ConvoList => {
+                self.title_label(ui, "Chats");
+            }
             Route::CreateConvo => {
-                self.title_label(ui, "New chat");
-                None
+                self.title_label(ui, "New Chat");
             }
-            Route::Conversation => {
-                self.conversation_title_section(ui);
-                None
-            }
+            Route::Conversation => self.conversation_title_section(ui),
         }
     }
 
     fn title_label(&mut self, ui: &mut egui::Ui, text: &str) -> egui::Response {
-        ui.with_layout(Layout::top_down(egui::Align::Center), |ui| {
-            ui.add(
-                egui::Label::new(
-                    RichText::new(text).text_style(NotedeckTextStyle::Heading.text_style()),
-                )
-                .selectable(false),
+        ui.add(
+            egui::Label::new(
+                RichText::new(text).text_style(NotedeckTextStyle::Heading.text_style()),
             )
-        })
-        .inner
+            .selectable(false),
+        )
     }
 
     fn conversation_title_section(&mut self, ui: &mut egui::Ui) {
