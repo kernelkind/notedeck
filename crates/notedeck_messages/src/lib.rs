@@ -192,13 +192,17 @@ fn handle_messages_action(
         MessagesAction::Create { recipient } => {
             let selected = ctx.accounts.selected_account_pubkey();
             let participants = vec![recipient.bytes(), selected.bytes()];
+            let parts: Vec<Pubkey> = participants.iter().map(|p| Pubkey::new(**p)).collect();
             let id = cache
                 .registry
                 .get_or_insert(ConversationIdentifierUnowned::Nip17(
                     ParticipantSetUnowned::new(participants),
                 ));
 
+            cache.initialize_conversation(id, vec![recipient, *selected]);
+
             open_coversation_action(id, ctx, cache, router, is_narrow);
+            router.go_back();
         }
         MessagesAction::Creating => {
             router.route_to(Route::CreateConvo);

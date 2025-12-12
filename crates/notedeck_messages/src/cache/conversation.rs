@@ -109,7 +109,7 @@ impl ConversationCache {
 
         if updated {
             let latest = conversation.last_activity();
-            refresh_order(&mut self.order, id, latest);
+            refresh_order(&mut self.order, id, LatestMessage::Latest(latest));
         }
 
         // TODO(kernelkind): I'm not sure a sub here makes sense. We will already need
@@ -124,6 +124,7 @@ impl ConversationCache {
 
         conversation.state = ConversationActivity::Active(sub);
         self.active = Some(id);
+        tracing::info!("Set active to {id}");
     }
 
     /// check for updates on an already opened conversation
@@ -172,7 +173,7 @@ impl ConversationCache {
 
         if updated {
             let latest = conversation.last_activity();
-            refresh_order(&mut self.order, id, latest);
+            refresh_order(&mut self.order, id, LatestMessage::Latest(latest));
         }
     }
 
@@ -219,9 +220,18 @@ impl ConversationCache {
             UnknownIds::update_from_note(txn, ndb, unknown_ids, note_cache, &res.note);
             if conversation.ingest_kind_14(res) {
                 let latest = conversation.last_activity();
-                refresh_order(&mut self.order, id, latest);
+                refresh_order(&mut self.order, id, LatestMessage::Latest(latest));
             }
         }
+    }
+
+    pub fn initialize_conversation(&mut self, id: ConversationId, participants: Vec<Pubkey>) {
+        if self.conversations.contains_key(&id) {
+            return;
+        }
+
+        self.conversations
+            .insert(id, Conversation::new(participants));
     }
 
     pub fn first_convo_id(&self) -> Option<ConversationId> {
@@ -229,7 +239,7 @@ impl ConversationCache {
     }
 }
 
-fn refresh_order(order: &mut Vec<ConversationOrder>, id: ConversationId, latest: u64) {
+fn refresh_order(order: &mut Vec<ConversationOrder>, id: ConversationId, latest: LatestMessage) {
     if let Some(pos) = order.iter().position(|entry| entry.id == id) {
         order.remove(pos);
     }
@@ -275,7 +285,13 @@ fn get_p_tags<'a>(note: &Note<'a>) -> Vec<&'a [u8; 32]> {
 #[derive(Clone, Copy, Debug)]
 struct ConversationOrder {
     id: ConversationId,
-    latest: u64,
+    latest: LatestMessage,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum LatestMessage {
+    NoMessages,
+    Latest(u64),
 }
 
 // Equality is *only by id*.

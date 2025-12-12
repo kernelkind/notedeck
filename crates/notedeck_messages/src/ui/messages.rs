@@ -73,6 +73,8 @@ impl<'a> ConversationListUi<'a> {
                 let txn = Transaction::new(self.ndb).expect("txn");
                 let txn_ref = &txn;
 
+                tracing::info!("Num convos: {num_convos}");
+
                 self.states
                     .convos_list
                     .ui_custom_layout(ui, num_convos, |ui, index| {
