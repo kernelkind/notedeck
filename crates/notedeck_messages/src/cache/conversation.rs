@@ -232,6 +232,8 @@ impl ConversationCache {
 
         self.conversations
             .insert(id, Conversation::new(participants));
+
+        refresh_order(&mut self.order, id, LatestMessage::NoMessages);
     }
 
     pub fn first_convo_id(&self) -> Option<ConversationId> {
@@ -288,10 +290,27 @@ struct ConversationOrder {
     latest: LatestMessage,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LatestMessage {
     NoMessages,
     Latest(u64),
+}
+
+impl PartialOrd for LatestMessage {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for LatestMessage {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (LatestMessage::Latest(a), LatestMessage::Latest(b)) => a.cmp(b),
+            (LatestMessage::NoMessages, LatestMessage::NoMessages) => Ordering::Equal,
+            (LatestMessage::NoMessages, _) => Ordering::Greater,
+            (_, LatestMessage::NoMessages) => Ordering::Less,
+        }
+    }
 }
 
 // Equality is *only by id*.
