@@ -47,7 +47,7 @@ pub fn render_nav(
     }
 
     Frame::new()
-        .fill(egui::Color32::TRANSPARENT)
+        // .fill(ui.visuals().faint_bg_color)
         .inner_margin(Margin::symmetric(12, 10))
         .stroke(Stroke::NONE)
         .show(ui, |ui| {
@@ -156,7 +156,6 @@ impl<'a> NavTitle<'a> {
                 top: 0,
                 bottom: 8,
             })
-            .fill(Color32::TRANSPARENT)
             .show(ui, |ui| {
                 action = self.title_bar(ui);
             });
@@ -164,9 +163,9 @@ impl<'a> NavTitle<'a> {
     }
 
     fn title_bar(&mut self, ui: &mut egui::Ui) -> Option<MessagesAction> {
-        if self.routes.is_empty() {
+        let Some(top) = self.routes.last() else {
             return None;
-        }
+        };
 
         let mut action = None;
         let mut back_resp = None;
@@ -184,20 +183,23 @@ impl<'a> NavTitle<'a> {
                 });
             },
             &mut |ui| {
-                let top = self.routes.last().expect("routes can't be empty");
                 self.title(ui, top);
             },
-            &mut |ui| {
-                let new_msg_icon = app_images::new_message_image().max_height(24.0);
-                if ui
-                    .add(new_msg_icon)
-                    .on_hover_cursor(CursorIcon::PointingHand)
-                    .interact(egui::Sense::click())
-                    .clicked()
-                {
-                    tracing::info!("CLICKED NEW MSG");
-                    action = Some(MessagesAction::Creating);
+            &mut |ui| match top {
+                Route::ConvoList => {
+                    let new_msg_icon = app_images::new_message_image().max_height(24.0);
+                    if ui
+                        .add(new_msg_icon)
+                        .on_hover_cursor(CursorIcon::PointingHand)
+                        .interact(egui::Sense::click())
+                        .clicked()
+                    {
+                        tracing::info!("CLICKED NEW MSG");
+                        action = Some(MessagesAction::Creating);
+                    }
                 }
+                Route::CreateConvo => {}
+                Route::Conversation => {}
             },
         );
 
@@ -286,23 +288,4 @@ fn back_button(ui: &mut egui::Ui, chev_size: egui::Vec2) -> egui::Response {
 
 fn prev<R>(xs: &[R]) -> Option<&R> {
     xs.get(xs.len().checked_sub(2)?)
-}
-
-fn chats_header(ui: &mut egui::Ui) -> Option<MessagesAction> {
-    let mut action = None;
-    ui.heading("Chats");
-    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        let new_msg_icon = app_images::new_message_image().max_height(24.0);
-        if ui
-            .add(new_msg_icon)
-            .on_hover_cursor(CursorIcon::PointingHand)
-            .interact(egui::Sense::click())
-            .clicked()
-        {
-            tracing::info!("CLICKED NEW MSG");
-            action = Some(MessagesAction::Creating);
-        }
-    });
-
-    action
 }

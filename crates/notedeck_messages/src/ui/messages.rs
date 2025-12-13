@@ -590,7 +590,7 @@ pub fn render_summary(
     let fill = if selected {
         visuals.selection.bg_fill
     } else {
-        visuals.extreme_bg_color
+        Color32::TRANSPARENT
     };
 
     Frame::new()

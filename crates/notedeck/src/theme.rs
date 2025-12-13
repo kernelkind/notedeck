@@ -222,7 +222,8 @@ pub fn add_custom_style(is_mobile: bool, style: &mut Style) {
             "The `debug-interactive-widgets` feature requires a debug build, \
              release builds are unsupported."
         );
-        style.debug.show_interactive_widgets = true;
+        // style.debug.show_interactive_widgets = true;
+        style.debug.show_expand_width = true;
     }
 }
 

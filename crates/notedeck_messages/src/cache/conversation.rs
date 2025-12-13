@@ -112,6 +112,8 @@ impl ConversationCache {
             refresh_order(&mut self.order, id, latest);
         }
 
+        // TODO(kernelkind): I'm not sure a sub here makes sense. We will already need
+        // one for all kind 14 notes addressed to us, which would subsume this filter
         let sub = match ndb.subscribe(&chatroom_filter) {
             Ok(s) => s,
             Err(e) => {
@@ -436,6 +438,7 @@ fn conversation_filter(cur_acc: &Pubkey) -> Vec<Filter> {
 fn chatroom_filter(participants: Vec<&[u8; 32]>) -> Vec<Filter> {
     vec![FilterBuilder::new()
         .kinds([14])
+        .authors(participants.clone())
         .pubkey(participants)
         .build()]
 }

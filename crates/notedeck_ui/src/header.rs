@@ -71,11 +71,6 @@ impl HorizontalHeader {
     ) {
         let item_spacing = 6.0 * ui.spacing().item_spacing.x;
         let max_width = ui.available_width() - item_spacing;
-        tracing::info!(
-            "item spacing: {item_spacing}, avail width: {}, total len: {}",
-            ui.available_width(),
-            max_width
-        );
 
         let left_width = measure_width(ui, left_aligned);
         let center_width = measure_width(ui, centered);
@@ -87,7 +82,7 @@ impl HorizontalHeader {
         let right_spacing = half_max - right_width - half_center;
 
         let mut left_center = half_center;
-        let mut left_cell = if left_spacing > 0.0 || left_priority < center_priority {
+        let left_cell = if left_spacing > 0.0 || left_priority < center_priority {
             Size::exact(left_width)
         } else {
             Size::remainder()
@@ -137,9 +132,13 @@ impl HorizontalHeader {
     }
 }
 
-/// Taken from VirtualList::ui_custom_layout
+/// Inspired by VirtualList::ui_custom_layout
 fn measure_width(ui: &mut egui::Ui, render: &mut impl FnMut(&mut egui::Ui)) -> f32 {
-    let mut measure_ui = ui.new_child(UiBuilder::new().max_rect(ui.max_rect()));
+    let mut measure_ui = ui.new_child(
+        UiBuilder::new()
+            .max_rect(ui.max_rect())
+            .layout(Layout::left_to_right(egui::Align::Min)),
+    );
     measure_ui.set_invisible();
 
     let start_width = measure_ui.next_widget_position();
@@ -148,5 +147,5 @@ fn measure_width(ui: &mut egui::Ui, render: &mut impl FnMut(&mut egui::Ui)) -> f
     });
     let end_width = measure_ui.next_widget_position();
 
-    (end_width.x - start_width.x).max(0.0)
+    (end_width.x - start_width.x + ui.spacing().item_spacing.x).max(0.0)
 }

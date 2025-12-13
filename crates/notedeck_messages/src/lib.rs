@@ -163,7 +163,9 @@ fn process_nav_resp(
         NavAction::Dragging => {}
         NavAction::Returned(_) => {
             router.pop();
-            cache.active = None;
+            if is_narrow {
+                cache.active = None;
+            }
         }
         NavAction::Navigating => {}
         NavAction::Navigated => {
