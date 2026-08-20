@@ -2628,6 +2628,26 @@ pub const HEADWAY_KINDS: [u32; 10] = [
     KIND_RELATED,
 ];
 
+/// Whether `kind` is one of headway's addressable (latest-wins, keyed per
+/// `(kind, d-tag)`) kinds — every 30000-range kind headway publishes (board,
+/// placement, relation, sequence, blockers, related), as opposed to the
+/// immutable regular events (issue, label, cover, comment).
+///
+/// Used by the CLI's relay sync to push only the *winning* revision of each
+/// addressable coordinate rather than every stale one the append-only cache
+/// still holds (see `nostrdb_net::relay::sync::frames_where`). The local cache
+/// keeps every revision; a relay holds only the latest and rejects the rest as
+/// `replaced: have newer event`, so pushing stale revisions never converges and
+/// re-flushes on every run.
+///
+/// Range-based on purpose: NIP-01 defines 30000–39999 as addressable, so any
+/// addressable kind added to [`HEADWAY_KINDS`] later is covered automatically —
+/// a narrower per-kind list is exactly what silently re-broke this each time a
+/// new addressable kind landed.
+pub fn is_addressable(kind: u32) -> bool {
+    (30_000..40_000).contains(&kind)
+}
+
 /// A filter for every headway event authored by `author`.
 ///
 /// Headway is single-author per board for now, so filtering by author captures
@@ -3256,6 +3276,42 @@ pub fn rank_between(left: Option<&str>, right: Option<&str>) -> String {
 mod tests {
     use super::*;
     use enostr::FullKeypair;
+
+    /// The relay-sync dedup keys off [`is_addressable`]: an addressable kind is
+    /// deduped to its winning revision before the push, an immutable one is passed
+    /// through as-is. Getting this wrong is the recurring "CLI re-flushes
+    /// superseded edits every run" bug — a two-kind hardcode silently re-broke it
+    /// each time a new addressable kind (relation, sequence, blockers, related)
+    /// landed. Pin the contract against the real kind roster so a newly-added kind
+    /// can't slip through classified as immutable.
+    #[test]
+    fn is_addressable_covers_every_addressable_headway_kind() {
+        // Every 30000-range kind (parameterized-replaceable, NIP-01) is
+        // addressable; the immutable regular events are not.
+        for kind in HEADWAY_KINDS {
+            assert_eq!(
+                is_addressable(kind),
+                (30_000..40_000).contains(&kind),
+                "kind {kind} is classified against the wrong side of the addressable range"
+            );
+        }
+
+        // Spot-check the two classes explicitly so the intent is legible even if
+        // the roster changes.
+        for addressable in [
+            KIND_BOARD,
+            KIND_PLACEMENT,
+            KIND_RELATION,
+            KIND_SEQUENCE,
+            KIND_BLOCKERS,
+            KIND_RELATED,
+        ] {
+            assert!(is_addressable(addressable), "{addressable} is addressable");
+        }
+        for immutable in [KIND_ISSUE, KIND_LABEL, KIND_COVER_NOTE, KIND_COMMENT] {
+            assert!(!is_addressable(immutable), "{immutable} is immutable");
+        }
+    }
 
     #[test]
     fn board_coord_round_trips_and_rejects_other_kinds() {

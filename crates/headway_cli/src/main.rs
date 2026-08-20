@@ -353,7 +353,7 @@ async fn run() -> Result<()> {
     // relay as plaintext (see `plaintext_sync_filter`); their kind-1081 envelopes
     // ride the separate `sync_envelopes` leg below instead.
     let filter = plaintext_sync_filter(&author);
-    let is_addressable = |kind: u32| kind == event::KIND_BOARD || kind == event::KIND_PLACEMENT;
+    let is_addressable = event::is_addressable;
     // `connect_and_sync` speaks `nostrdb_net::Pubkey`; convert our enostr author
     // across the boundary (both are `[u8; 32]` newtypes).
     let author_nn = nostrdb_net::Pubkey::new(*author.bytes());
