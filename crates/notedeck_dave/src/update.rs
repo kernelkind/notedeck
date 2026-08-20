@@ -6,7 +6,7 @@
 use crate::agent_status::AgentStatus;
 use crate::backend::{AiBackend, BackendType, Model};
 use crate::config::AiMode;
-use crate::focus_queue::{FocusPriority, FocusQueue};
+use crate::focus_queue::{AutoStealState, FocusPriority, FocusQueue};
 use crate::messages::{
     AnswerSummary, AnswerSummaryEntry, Message, PermissionRequest, PermissionResponse,
     PermissionView, QuestionAnswer,
@@ -823,6 +823,27 @@ pub fn toggle_auto_steal(
     }
 
     new_state
+}
+
+/// Anchor auto-steal focus to a session the user just deliberately opened.
+///
+/// Records `id` as the home session so auto-steal returns there once any urgent
+/// (NeedsInput/Done) session is handled, and cancels a `Pending` steal so it
+/// doesn't fire on top of this navigation and immediately yank focus onto a
+/// *different* session. No-op while auto-steal is `Disabled` (the default),
+/// where `home_session` and the pending state are unused.
+pub fn anchor_auto_steal(
+    auto_steal: &mut AutoStealState,
+    home_session: &mut Option<SessionId>,
+    id: SessionId,
+) {
+    if !auto_steal.is_enabled() {
+        return;
+    }
+    *home_session = Some(id);
+    if *auto_steal == AutoStealState::Pending {
+        *auto_steal = AutoStealState::Idle;
+    }
 }
 
 /// Process auto-steal focus logic: switch to focus queue items as needed.
@@ -1863,6 +1884,39 @@ mod tests {
             focus_queue.current().map(|entry| entry.session_id),
             Some(visible_done)
         );
+    }
+
+    #[test]
+    fn anchor_auto_steal_cancels_pending_and_sets_home() {
+        // A deliberate open while a steal is pending: cancel the steal (so it
+        // doesn't yank onto another session) and make the opened session home.
+        let mut auto_steal = AutoStealState::Pending;
+        let mut home_session = Some(1);
+        anchor_auto_steal(&mut auto_steal, &mut home_session, 42);
+        assert_eq!(auto_steal, AutoStealState::Idle);
+        assert_eq!(home_session, Some(42));
+    }
+
+    #[test]
+    fn anchor_auto_steal_when_idle_keeps_idle() {
+        // Idle (enabled, nothing pending) stays Idle; home still updates so a
+        // later steal returns to the deliberately-opened session.
+        let mut auto_steal = AutoStealState::Idle;
+        let mut home_session = None;
+        anchor_auto_steal(&mut auto_steal, &mut home_session, 42);
+        assert_eq!(auto_steal, AutoStealState::Idle);
+        assert_eq!(home_session, Some(42));
+    }
+
+    #[test]
+    fn anchor_auto_steal_disabled_is_noop() {
+        // With auto-steal off (the default) there's nothing to fight, so neither
+        // the state nor the (unused) home session is touched.
+        let mut auto_steal = AutoStealState::Disabled;
+        let mut home_session = None;
+        anchor_auto_steal(&mut auto_steal, &mut home_session, 42);
+        assert_eq!(auto_steal, AutoStealState::Disabled);
+        assert_eq!(home_session, None);
     }
 
     #[test]

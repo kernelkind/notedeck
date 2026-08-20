@@ -1147,10 +1147,12 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
             if self.session_manager.switch_to(session_id) {
                 // Reveal the chat: clear any overlay (directory/session picker) and
                 // the mobile session-list drawer, and stop auto-steal fighting the
-                // switch.
+                // switch — dequeue this session's own entry and anchor auto-steal
+                // here so it doesn't immediately yank onto a *different* session.
                 self.active_overlay = DaveOverlay::None;
                 self.show_session_list = false;
                 self.focus_queue.dequeue(session_id);
+                self.anchor_focus(session_id);
             }
             return;
         }
@@ -1163,6 +1165,7 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
             self.session_manager.switch_to(placeholder_id);
             self.active_overlay = DaveOverlay::None;
             self.show_session_list = false;
+            self.anchor_focus(placeholder_id);
             return;
         }
 
@@ -1819,6 +1822,9 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
                     self.scene.clear_selection();
                 }
             }
+            SceneViewAction::SelectedSession(id) => {
+                self.anchor_focus(id);
+            }
             SceneViewAction::None => {}
         }
 
@@ -1851,6 +1857,7 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
                 SessionListAction::SwitchTo(id) => {
                     self.session_manager.switch_to(id);
                     self.focus_queue.dequeue(id);
+                    self.anchor_focus(id);
                 }
                 SessionListAction::Delete(id) => {
                     self.delete_session(id);
@@ -1940,6 +1947,7 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
                 SessionListAction::SwitchTo(id) => {
                     self.session_manager.switch_to(id);
                     self.focus_queue.dequeue(id);
+                    self.anchor_focus(id);
                     self.show_session_list = false;
                 }
                 SessionListAction::Delete(id) => {
@@ -2051,9 +2059,24 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
         hosts
     }
 
+    /// Anchor auto-steal focus to a session the user just deliberately opened.
+    ///
+    /// Creating, duplicating, or navigating to a session (a list-row click, an
+    /// `agentium:` chip clicked in another app) makes it the active session. But
+    /// with auto-steal enabled the very next focus-queue change re-arms it and it
+    /// yanks focus onto some *other* session that needs input — jarring right
+    /// after the user deliberately opened this one (e.g. jumping in from a
+    /// Headway chip). Record the opened session as the home session so auto-steal
+    /// returns here once anything urgent is handled, and cancel any pending steal
+    /// so it doesn't fire on top of this navigation. No-op when auto-steal is off
+    /// (the default), where `home_session` and the pending state are unused.
+    fn anchor_focus(&mut self, id: SessionId) {
+        update::anchor_auto_steal(&mut self.auto_steal, &mut self.home_session, id);
+    }
+
     /// Create a new session with the given cwd (called after directory picker selection)
     fn create_session_with_cwd(&mut self, cwd: PathBuf, backend_type: BackendType, model: Model) {
-        update::create_session_with_cwd(
+        let id = update::create_session_with_cwd(
             &mut self.session_manager,
             &mut self.directory_picker,
             &mut self.scene,
@@ -2064,6 +2087,7 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
             backend_type,
             model,
         );
+        self.anchor_focus(id);
     }
 
     /// Create a new session that resumes an existing Claude conversation
@@ -2074,7 +2098,7 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
         title: String,
         backend_type: BackendType,
     ) -> SessionId {
-        update::create_resumed_session_with_cwd(
+        let id = update::create_resumed_session_with_cwd(
             &mut self.session_manager,
             &mut self.directory_picker,
             &mut self.scene,
@@ -2085,13 +2109,15 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
             title,
             &self.hostname,
             backend_type,
-        )
+        );
+        self.anchor_focus(id);
+        id
     }
 
     /// Duplicate a session by ID, creating a new session with the same working directory.
     /// For remote sessions, sends a spawn command to the remote host.
     fn duplicate_session(&mut self, id: SessionId) {
-        if let Some(spawn) = update::clone_session(
+        match update::clone_session(
             &mut self.session_manager,
             &mut self.directory_picker,
             &mut self.scene,
@@ -2100,7 +2126,14 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
             &self.hostname,
             id,
         ) {
-            self.queue_spawn_command(&spawn.host, &spawn.cwd, spawn.backend);
+            // Remote: the clone is spawned on its host, no local session yet.
+            Some(spawn) => self.queue_spawn_command(&spawn.host, &spawn.cwd, spawn.backend),
+            // Local: the new session was created and made active — anchor to it.
+            None => {
+                if let Some(new_id) = self.session_manager.active_id() {
+                    self.anchor_focus(new_id);
+                }
+            }
         }
     }
 
@@ -2117,7 +2150,11 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
             return;
         };
 
-        // Drain all pending connections (non-blocking)
+        // Drain all pending connections (non-blocking). Track the last session
+        // created so we can anchor auto-steal focus to it after the loop — we
+        // can't call `anchor_focus` (a `&mut self` method) inside, since the
+        // `listener` borrow of `self.ipc_listener` is live across the loop.
+        let mut last_created: Option<SessionId> = None;
         while let Some(mut pending) = listener.try_recv() {
             // Create the session and get its ID
             let id = self.session_manager.new_session(
@@ -2139,6 +2176,7 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
                 }
             }
             self.session_manager.rebuild_cwd_groups();
+            last_created = Some(id);
 
             // Close directory picker if open
             if matches!(self.active_overlay, DaveOverlay::DirectoryPicker) {
@@ -2153,6 +2191,11 @@ You are an AI agent for the nostr protocol called Dave, created by Damus. nostr 
             }
 
             tracing::info!("Spawned agent via IPC (session {})", id);
+        }
+
+        // The newest session is the active one; anchor focus to it.
+        if let Some(id) = last_created {
+            self.anchor_focus(id);
         }
     }
 

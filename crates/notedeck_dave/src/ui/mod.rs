@@ -468,6 +468,9 @@ pub enum SceneViewAction {
     ToggleToListView,
     SpawnAgent,
     DeleteSelected(Vec<SessionId>),
+    /// The user selected a session node in the scene. Already switched to
+    /// inline; surfaced so the app can anchor auto-steal focus to it.
+    SelectedSession(SessionId),
 }
 
 /// Render the scene view with RTS-style agent visualization and chat side panel.
@@ -566,6 +569,7 @@ pub fn scene_ui(
                     if let Some(id) = ids.first() {
                         session_manager.switch_to(*id);
                         focus_queue.dequeue(*id);
+                        view_action = SceneViewAction::SelectedSession(*id);
                     }
                 }
                 SceneAction::SpawnAgent => {
