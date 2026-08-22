@@ -168,6 +168,14 @@ or a name case-insensitively, so `--col "in progress"`, `--col in-progress`, and
 | `label <card> [labels...]` | Set labels (no labels clears them) |
 | `priority <card> <level>` | Set priority: `none`/`low`/`medium`/`high`/`urgent` (`none` clears it) |
 | `parent <card> [parent]` | Make a card a subissue of `[parent]`; omit the parent to detach |
+| `block <card> --on <other>` | Mark `<card>` as blocked by `<other>` (see Dependencies) |
+| `unblock <card> --on <other>` | Remove the `<card>`-blocked-by-`<other>` edge |
+| `relate <card> --to <other>` | Relate two cards (an undirected "see also"; see Dependencies) |
+| `unrelate <card> --to <other>` | Remove the relation (from either endpoint) |
+| `due <card> <date>` | Set a due date (`YYYY-MM-DD`, or `none` to clear) |
+| `estimate <card> <n>` | Set an estimate — a number (or `none` to clear) |
+| `seq <card> <pos> [--in <c>]` | Position a card in a container's work-order (see Work order) |
+| `next [--in <c>] [--ready] [-n <k>]` | Print the ready frontier — what to work on next (see Work order) |
 | `comment <card> <text...> [--reply-to <c>]` | Comment on a card (NIP-22); `--reply-to` threads under another comment |
 | `delete <card>` | Remove a card (reversible tombstone) |
 | `archive <card>` | Archive a card off the board |
@@ -175,6 +183,7 @@ or a name case-insensitively, so `--col "in progress"`, `--col in-progress`, and
 | `link <card> --to <board>` | Also place the card on another board (it stays on this one) |
 | `move-board <card> --to <board>` | Move the card off this board onto another |
 | `board [id]` | Switch the current board to `id`, or (no arg) list boards and mark the current one |
+| `rename <title...>` | Rename the current board's display title (slug unchanged) |
 | `login <nsec>` | Store a signing key so later runs just work |
 | `logout` | Forget the stored signing key |
 
@@ -206,7 +215,10 @@ EOF
 
 Other flags: `--board <id>` (target another board for one run; see Multiple
 boards), `--db <path>` (cache dir),
-`--author <pk>` (read someone else's board), `-h`/`--help`.
+`--author <pk>` (read someone else's board), `-h`/`--help`. `--on <card>` names
+the blocker for `block`/`unblock`; `--to` is the target board for
+`link`/`move-board` and the partner card for `relate`/`unrelate`; `--in <c>` is
+the container for `seq`/`next`.
 
 When commenting a finished card's commit hash, a Dave agentic session should also
 quote its own `agentium:` session ref (from `$AGENTIUM_SESSION`) beside the hash —
@@ -248,6 +260,105 @@ How it renders:
 Notes: re-parenting that would create a cycle is refused; children may live on
 a different board than the parent; nesting works (a child can itself be a
 parent) but each rollup counts direct children only.
+
+## Work order: what to do next (`next` and `seq`)
+
+Beyond columns and subissues a board carries a **work-order** — a deliberate
+sequence over cards that answers "what should I pick up next?". Two commands read
+and write it:
+
+- `headway next` prints the **ready frontier**: the cards workable *right now*,
+  in work-order. `next` alone prints just the first (the single best next thing);
+  `next --ready` prints the whole frontier; `next -n <k>` caps it at `k`. More
+  than one card can be ready at once — that's the parallel-dispatch signal
+  (independent cards you could hand to different workers at the same time).
+- `headway seq <card> <pos>` positions a card in a container's work-order, which
+  is how you *curate* the order `next` reads. `<pos>` is `--first`, `--last`,
+  `--after <card>`, or `--before <card>`.
+
+`--in <c>` names the container whose order you mean: a **card ref** targets that
+card's subissues, a **board slug** targets the board root (its top-level cards);
+omitted, it's the board root. `next` refuses to guess the board — pass
+`--board <id>` or an `--in <headway:board/word-id>` ref (never the persisted
+current board).
+
+```bash
+headway --board dave next               # the single best next card
+headway --board dave next --ready       # the whole ready frontier, in order
+headway --board dave next -n 3          # the top 3
+headway seq <card> --first --in dave    # make <card> the first board-root task
+headway seq <epic-child> --after <sib> --in <epic>   # order within an epic
+```
+
+**What "ready" means.** A card is ready when it is *not done* (not sitting in the
+board's last column), *not blocked* (no `block` edge pointing at an unfinished
+card — see Dependencies), and *not a parent with unfinished subissues* (an epic's
+real work is its children, which are in the frontier themselves, so the epic card
+isn't dispatchable). Note a card in **In Review** still counts as ready/workable —
+only the last column (Done) reads as done — so `next` will resurface review-stage
+cards.
+
+**Ordering, and the priority caveat.** Within a container, members run in
+`seq`-order where a `seq` has been set, else creation order (the board root falls
+back to spatial column order). `next` does **not** sort by the `priority` field —
+priority is a human-facing label, not an input to the frontier. So a board where
+nobody has run `seq` has no real work-order: `next --ready` is just the board in
+default order, and you should judge the biggest win yourself rather than trust the
+first line. Curate with `seq` to make `next` meaningful.
+
+## Dependencies: `block` / `unblock` (and `relate`)
+
+A card can be **blocked by** any number of other cards — a directed dependency
+edge saying "don't start this until that is finished". It is a separate axis
+from parent/subissue: a card can be both a subissue and blocked, and an edge may
+point at a card on another board.
+
+```bash
+headway block <card> --on <blocker>      # <card> is blocked by <blocker>
+headway block <card> <blocker>           # same — the blocker may be a 2nd positional
+headway unblock <card> --on <blocker>    # drop the edge
+```
+
+Unlike `parent` (one parent, re-parenting replaces it), blockers **accumulate**:
+each `block` adds to the card's set, and `unblock` removes one edge.
+
+A `block` that would create a dependency cycle is refused, and one that re-adds
+an existing edge changes nothing. Both are no-ops, and both surface as
+`error: action produced no events (unknown card or column?)` — the generic
+"nothing to publish" message, not a resolution failure. If you see it from
+`block`, the edge is either already there or would close a cycle; re-read
+`show <card>` rather than retrying with a longer id.
+
+A blocker is **cleared** the same positional way a subissue is done — when it
+sits in the last column of its board (Done), or is archived. There's nothing to
+tick: moving the blocker *is* the unblock.
+
+How it renders:
+
+- The board listing (`show`) prefixes a blocked card with a dim `⊘` glyph. A card
+  whose blockers are all cleared loses the glyph, so `⊘` always means "held back
+  right now".
+- Card detail (`show <card>`) gains `blocked by` / `blocks` sections — the
+  forward edges and the reverse ones (cards this one is holding up) — with `x`
+  marking a cleared blocker so open ones stand out:
+
+  ```
+  blocked by (2)
+      [x] land the negentropy reconcile   headway:headway/mushroom-include-wolf
+      [ ] cap media cache size            headway:headway/extend-decrease-visit
+  ```
+
+- `show --json` gains `blocked` (bool — any unfinished blocker), plus
+  `blocked_by` and `blocks` arrays of `{id, ref, title, done}`.
+- **`next` and `next --ready` skip a card with an unfinished blocker** — this is
+  the main reason to record dependencies, since it keeps the frontier to work
+  that's actually startable (see Work order).
+
+`relate <card> --to <other>` is the third edge kind: an **undirected "see also"**
+between two cards. It's symmetric (both ends list each other, and `unrelate`
+works from either), may cross boards, and is purely informational — it carries no
+ordering and never affects `is_blocked`, the ready frontier, or any rollup. Card
+detail shows it as a `related` section and `show --json` as a `related` array.
 
 ## Cross-board cards: `link` and `move-board`
 
