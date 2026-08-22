@@ -25,17 +25,27 @@ pub struct MdTheme {
 impl MdTheme {
     pub fn from_visuals(visuals: &egui::Visuals) -> Self {
         let bg = visuals.panel_fill;
-        // Code bg: slightly lighter than panel background
+        // Code bg: slightly lighter than panel background. Still used behind
+        // fenced code blocks and table headers; inline code renders bare (see
+        // `code_fmt` in `render_inlines`).
         let code_bg = Color32::from_rgb(
             bg.r().saturating_add(25),
             bg.g().saturating_add(25),
             bg.b().saturating_add(25),
         );
+        // Inline code carries no background, so its color has to read against the
+        // panel in both themes: the light amber works on a dark panel, but a
+        // darker amber is needed for contrast on a light one.
+        let code_text = if visuals.dark_mode {
+            Color32::from_rgb(0xD4, 0xA5, 0x74) // Muted amber/sand
+        } else {
+            Color32::from_rgb(0x9A, 0x60, 0x2A) // Dark amber (matches code-block keywords)
+        };
         Self {
             heading_sizes: [24.0, 20.0, 18.0, 16.0, 14.0, 12.0],
             code_bg,
-            code_text: Color32::from_rgb(0xD4, 0xA5, 0x74), // Muted amber/sand
-            link_color: Color32::from_rgb(100, 149, 237),   // Cornflower blue
+            code_text,
+            link_color: Color32::from_rgb(100, 149, 237), // Cornflower blue
             blockquote_border: visuals.widgets.noninteractive.bg_stroke.color,
             blockquote_bg: visuals.faint_bg_color,
         }
@@ -685,10 +695,13 @@ fn render_inlines(
         ..Default::default()
     };
 
+    // Inline code: monospace + a muted tint, but no background. egui paints a
+    // TextFormat background as a tight, unpadded, square rectangle per run, which
+    // reads as muddy highlighter blocks in flowing prose; the font and color
+    // alone signal code and let it flow with the text.
     let code_fmt = TextFormat {
         font_id: FontId::new(font_size, FontFamily::Monospace),
         color: theme.code_text,
-        background: theme.code_bg,
         ..Default::default()
     };
 
