@@ -165,7 +165,7 @@ or a name case-insensitively, so `--col "in progress"`, `--col in-progress`, and
 | `move <card> --col <c> [--row <n>]` | Move a card to a column (optional position) |
 | `title <card> <title...>` | Edit a card's title |
 | `desc <card> <text...>` | Edit a card's description |
-| `label <card> [labels...]` | Set labels (no labels clears them) |
+| `label <card> [labels...]` | Set labels — positional, comma-separated, or `-l` (no labels clears them) |
 | `priority <card> <level>` | Set priority: `none`/`low`/`medium`/`high`/`urgent` (`none` clears it) |
 | `parent <card> [parent]` | Make a card a subissue of `[parent]`; omit the parent to detach |
 | `block <card> --on <other>` | Mark `<card>` as blocked by `<other>` (see Dependencies) |
@@ -193,6 +193,18 @@ repeatable and each value may be comma-separated, so `-l a,b --label c` and
 
 ```bash
 headway add "Fix the relay reconnect" --col todo -l bug,p1
+```
+
+`label <card>` takes the same spellings — separate positionals, one
+comma-separated positional, or the `-l`/`--label` flag — so these all set the
+same two labels. Note it *replaces* the card's set rather than adding to it, and
+`label <card>` with no labels at all is what clears:
+
+```bash
+headway label 1a2b3c4d… bug p1
+headway label 1a2b3c4d… bug,p1
+headway label 1a2b3c4d… -l bug,p1
+headway label 1a2b3c4d…              # clears
 ```
 
 `add` can also set the new card's description at creation, saving a follow-up

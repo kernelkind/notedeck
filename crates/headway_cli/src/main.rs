@@ -1679,13 +1679,7 @@ impl Cli {
                 "-l" | "--label" | "--labels" => {
                     // Repeatable, and each value may be a comma-separated list,
                     // so `-l a,b --label c` and `-l a -l b -l c` are equivalent.
-                    labels.extend(
-                        value("--label")?
-                            .split(',')
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_string),
-                    );
+                    labels.extend(split_labels(&value("--label")?));
                 }
                 "--row" => {
                     row = Some(
@@ -1795,6 +1789,21 @@ impl Cli {
     }
 }
 
+/// Split one label argument into the labels it names. A single argument may be a
+/// comma-separated list, so `-l a,b` and `label <card> a,b` each set two labels;
+/// surrounding whitespace is trimmed and empty entries (`a,,b`, a trailing comma)
+/// dropped. Shared by the `-l`/`--label` flag and `label`'s positionals so the two
+/// spellings can't disagree — a label containing a comma is deliberately
+/// unrepresentable rather than settable by only one of them.
+fn split_labels(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn parse_command(
     name: &str,
@@ -1839,9 +1848,20 @@ fn parse_command(
             card: card()?,
             text: joined(rest, 1, name)?,
         },
+        // Each positional may itself be a comma-separated list, so
+        // `label <card> a,b` and `label <card> a b` agree — and agree with the
+        // `add -l a,b` that may have set them. `-l`/`--label` flags are honoured
+        // too: they'd otherwise leave no positionals, silently *clearing* the
+        // card's labels (the no-labels-clears case) instead of setting them.
         "label" => Command::Label {
             card: card()?,
-            labels: rest.get(1..).unwrap_or_default().to_vec(),
+            labels: rest
+                .get(1..)
+                .unwrap_or_default()
+                .iter()
+                .flat_map(|l| split_labels(l))
+                .chain(labels)
+                .collect(),
         },
         "priority" => Command::Priority {
             card: card()?,
@@ -1983,7 +2003,8 @@ COMMANDS:
     move <card> --col <c>      Move a card to a column (--row to position)
     title <card> <title...>    Edit a card's title
     desc <card> <text...>      Edit a card's description
-    label <card> [labels...]   Set a card's labels (empty clears)
+    label <card> [labels...]   Set a card's labels (comma-separated allowed;
+                               empty clears)
     priority <card> <level>    Set priority (none/low/medium/high/urgent)
     due <card> <date>          Set a due date (YYYY-MM-DD, or none to clear)
     estimate <card> <n>        Set an estimate (a number, or none to clear)
@@ -2033,7 +2054,8 @@ OPTIONS:
                       and `headway board <id>` sets it persistently.
                       [default: {board}]
     --db <path>       nostrdb cache dir [default: <data-dir>/headway-cli]
-    -l, --label <l>   Label(s) for `add` (repeatable; comma-separated allowed)
+    -l, --label <l>   Label(s) for `add`/`label` (repeatable; comma-separated
+                      allowed)
     --col <c>         Column for `add`/`move` (id or name)
     --to <board>      Target board for `link`/`move-board`; or the partner card
                       for `relate`/`unrelate`
@@ -2099,6 +2121,37 @@ mod tests {
             }
             _ => panic!("expected a Priority command"),
         }
+    }
+
+    /// The labels of a `label` command, whatever spelling produced them.
+    fn labels_of(cli: Cli) -> Vec<String> {
+        match cli.command {
+            Command::Label { labels, .. } => labels,
+            _ => panic!("expected a Label command"),
+        }
+    }
+
+    /// `label` takes its labels the same ways `add -l` does: separate
+    /// positionals, one comma-separated positional, or the `-l`/`--label` flag —
+    /// all equivalent. The flag case used to leave `rest` empty and so *clear*
+    /// the card's labels instead of setting them.
+    #[test]
+    fn label_command_accepts_commas_and_the_label_flag() {
+        let expected = ["a".to_string(), "b".to_string()];
+        assert_eq!(labels_of(parse(&["label", "deadbeef", "a", "b"])), expected);
+        assert_eq!(labels_of(parse(&["label", "deadbeef", "a,b"])), expected);
+        assert_eq!(
+            labels_of(parse(&["label", "deadbeef", "-l", "a,b"])),
+            expected
+        );
+        assert_eq!(
+            labels_of(parse(&["label", "deadbeef", "--label", "a", "-l", "b"])),
+            expected
+        );
+        // Whitespace trimmed, empty entries dropped.
+        assert_eq!(labels_of(parse(&["label", "deadbeef", "a, ,b,"])), expected);
+        // No labels at all still clears — the one case that must stay empty.
+        assert!(labels_of(parse(&["label", "deadbeef"])).is_empty());
     }
 
     /// `add --desc <text>` folds the inline text into the card's description.
