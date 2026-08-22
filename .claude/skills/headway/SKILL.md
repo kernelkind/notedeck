@@ -334,12 +334,19 @@ headway unblock <card> --on <blocker>    # drop the edge
 Unlike `parent` (one parent, re-parenting replaces it), blockers **accumulate**:
 each `block` adds to the card's set, and `unblock` removes one edge.
 
-A `block` that would create a dependency cycle is refused, and one that re-adds
-an existing edge changes nothing. Both are no-ops, and both surface as
-`error: action produced no events (unknown card or column?)` — the generic
-"nothing to publish" message, not a resolution failure. If you see it from
-`block`, the edge is either already there or would close a cycle; re-read
-`show <card>` rather than retrying with a longer id.
+An edge edit that changes nothing says so, and never as a resolution failure —
+so don't retry with a longer id. Re-adding an edge that's already there (`block`,
+`relate`) or dropping one that isn't (`unblock`, `unrelate`) is idempotent
+success: exit 0 with `ok (0 events) — <card> is already blocked on <blocker>`
+(`--json` adds a `"noop"` field). A `block` or `parent` that would close a cycle
+is a real error, and names what it refused:
+
+```
+error: refused: blocking <card> on <blocker> would create a dependency cycle (…)
+```
+
+`error: action produced no events (unknown card or column?)` remains only for
+edits the reducer genuinely couldn't resolve.
 
 A blocker is **cleared** the same positional way a subissue is done — when it
 sits in the last column of its board (Done), or is archived. There's nothing to

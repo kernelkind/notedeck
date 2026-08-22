@@ -17,7 +17,7 @@ use serde_json::json;
 use headway::event::{
     self, BoardView, CardView, CommentView, Container, Date, Priority, resolve_card,
 };
-use headway::store::{self, BoardAction, Publisher};
+use headway::store::{self, BoardAction, DeclineReason, Publisher};
 use headway::{teams, traversal, wordid};
 
 use nostrdb_net::relay::sync::Result;
@@ -640,7 +640,7 @@ async fn run() -> Result<()> {
 
             let mut sink = Collect::default();
             let channel = roster.channel(&board);
-            store::apply(
+            let declined = store::apply(
                 &ndb,
                 &board,
                 &view,
@@ -649,6 +649,22 @@ async fn run() -> Result<()> {
                 action,
                 &mut sink,
             );
+            // A deliberate decline is not a resolution failure. Say which one it
+            // was, rather than letting the catch-all below send the caller off to
+            // hunt for a longer card id that would resolve identically forever.
+            if let Some(declined) = declined {
+                let msg = declined_message(&view, &declined);
+                if !declined.reason.is_noop() {
+                    return Err(format!("refused: {msg}").into());
+                }
+                // Already in the asked-for state: idempotent success, not an error.
+                if as_json {
+                    println!("{}", json!({ "ok": true, "events": 0, "noop": msg }));
+                } else {
+                    println!("ok (0 events) — {msg}");
+                }
+                return Ok(());
+            }
             if sink.0.is_empty() {
                 return Err("action produced no events (unknown card or column?)".into());
             }
@@ -1563,6 +1579,39 @@ fn blocked_prefix(card: &CardView) -> String {
     }
 }
 
+/// Say what the reducer declined, in words the caller can act on. An idempotent
+/// no-op ([`store::DeclineReason::is_noop`]) reads as a statement of the board's
+/// current shape — the caller's ask is already true — while a refusal names the
+/// invariant it would have broken. Undimmed: unlike a listing, this is the whole
+/// message, not a reference beside a title.
+fn declined_message(view: &BoardView, declined: &store::Declined) -> String {
+    let card = plain_ref(view, &declined.card);
+    let other = plain_ref(view, &declined.other);
+    match declined.reason {
+        DeclineReason::AlreadyBlocked => format!("{card} is already blocked on {other}"),
+        DeclineReason::NotBlocked => format!("{card} isn't blocked on {other}"),
+        DeclineReason::AlreadyRelated => format!("{card} is already related to {other}"),
+        DeclineReason::NotRelated => format!("{card} isn't related to {other}"),
+        // A self-block is the degenerate cycle; naming it as one reads as a typo
+        // report rather than a graph puzzle.
+        DeclineReason::BlockCycle if declined.card == declined.other => {
+            format!("{card} can't block itself")
+        }
+        DeclineReason::BlockCycle => format!(
+            "blocking {card} on {other} would create a dependency cycle \
+             ({other} is already blocked by {card})"
+        ),
+        DeclineReason::ParentCycle if declined.card == declined.other => {
+            format!("{card} can't be its own parent")
+        }
+        DeclineReason::ParentCycle => format!(
+            "parenting {card} under {other} would create a parent cycle \
+             ({other} is a descendant of {card}, or isn't a card on this board)"
+        ),
+        DeclineReason::SelfRelation => format!("{card} can't be related to itself"),
+    }
+}
+
 /// A card's human-friendly reference: `headway:<board>/<word-id>`, e.g.
 /// `headway:dave/maple-river-canyon` — a URI scheme so it reads as a reference
 /// inline (`Fixes: headway:dave/maple-river-canyon`) and in chat, survives
@@ -2355,6 +2404,62 @@ mod tests {
     fn migrate_board_explicitness() {
         assert!(!parse(&["migrate"]).board_explicit);
         assert!(parse(&["migrate", "--board", "commerce"]).board_explicit);
+    }
+
+    /// A declined edge edit reads as its own outcome: the already-done cases
+    /// state what's already true (and are reported as success), while a refusal
+    /// names the cycle. Neither may fall back to the generic "unknown card"
+    /// catch-all, which sends the caller hunting for a longer id.
+    #[test]
+    fn declined_edits_read_as_themselves() {
+        let view = BoardView {
+            id: "headway".to_string(),
+            author: [0u8; 32],
+            title: "Headway".to_string(),
+            description: String::new(),
+            created_at: 0,
+            columns: vec![],
+            archived: vec![],
+        };
+        let card = NoteId::new([1u8; 32]);
+        let other = NoteId::new([2u8; 32]);
+        let msg = |reason, card, other| {
+            declined_message(
+                &view,
+                &store::Declined {
+                    reason,
+                    card,
+                    other,
+                },
+            )
+        };
+        let card_ref = plain_ref(&view, &card);
+        let other_ref = plain_ref(&view, &other);
+
+        assert_eq!(
+            msg(DeclineReason::AlreadyBlocked, card, other),
+            format!("{card_ref} is already blocked on {other_ref}")
+        );
+        assert_eq!(
+            msg(DeclineReason::NotRelated, card, other),
+            format!("{card_ref} isn't related to {other_ref}")
+        );
+        assert!(
+            msg(DeclineReason::BlockCycle, card, other).contains("would create a dependency cycle")
+        );
+        // The degenerate cycles read as the typos they usually are.
+        assert_eq!(
+            msg(DeclineReason::BlockCycle, card, card),
+            format!("{card_ref} can't block itself")
+        );
+        assert_eq!(
+            msg(DeclineReason::ParentCycle, card, card),
+            format!("{card_ref} can't be its own parent")
+        );
+
+        // Only the already-done half is success.
+        assert!(DeclineReason::AlreadyBlocked.is_noop());
+        assert!(!DeclineReason::BlockCycle.is_noop());
     }
 
     #[test]
