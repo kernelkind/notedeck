@@ -203,38 +203,19 @@ pub struct ModeCommandPublish {
     pub mode: &'static str,
 }
 
-/// The next mode in the click / Ctrl+M cycle: Default → Plan → AcceptEdits →
-/// Default. These are the modes the CLI honors as a runtime switch.
-/// `BypassPermissions` is never used — dave can't enter it mid-session, and the
-/// dangerous "run everything" behaviour is instead handled dave-side by Auto
-/// Accept All (see [`toggle_auto_accept_all`]).
+/// The next mode in the click / Ctrl+M cycle: Manual (Default) → Plan →
+/// AcceptEdits → Auto → Manual. These are the modes the CLI honors as a runtime
+/// switch. `Auto` is Claude Code's classifier-gated auto-execution mode: safe
+/// tool calls run without prompting while flagged/dangerous ones still route to
+/// dave's permission UI. `BypassPermissions` is deliberately never in the cycle
+/// — dave can't enter it mid-session and it does no safety checking.
 fn next_cycle_permission_mode(mode: PermissionMode) -> PermissionMode {
     match mode {
         PermissionMode::Default => PermissionMode::Plan,
         PermissionMode::Plan => PermissionMode::AcceptEdits,
+        PermissionMode::AcceptEdits => PermissionMode::Auto,
         _ => PermissionMode::Default,
     }
-}
-
-/// Toggle dave-side "Auto Accept All" for the active session and return the new
-/// state. When on, every permission request is auto-accepted by dave (via
-/// [`should_runtime_allow`](crate::session::AgenticSessionData::should_runtime_allow)),
-/// regardless of backend — no CLI permission mode involved.
-pub fn toggle_auto_accept_all(session_manager: &mut SessionManager) -> bool {
-    let Some(session) = session_manager.get_active_mut() else {
-        return false;
-    };
-    let Some(agentic) = session.agentic.as_mut() else {
-        return false;
-    };
-    agentic.auto_accept_all = !agentic.auto_accept_all;
-    let now_on = agentic.auto_accept_all;
-    tracing::info!(
-        "Auto Accept All {} for session {}",
-        if now_on { "enabled" } else { "disabled" },
-        session.id,
-    );
-    now_on
 }
 
 pub fn cycle_permission_mode(
@@ -1466,10 +1447,10 @@ mod tests {
     use crate::session::{SessionId, SessionSource};
 
     #[test]
-    fn cycle_never_reaches_bypass_permissions() {
-        // The click / Ctrl+M cycle must be a closed 3-cycle over the modes the
-        // CLI honors at runtime, never landing on BypassPermissions (which dave
-        // can't enter mid-session anyway).
+    fn cycle_walks_manual_plan_edits_auto() {
+        // The click / Ctrl+M cycle is a closed 4-cycle over the modes the CLI
+        // honors at runtime: Manual (Default) → Plan → AcceptEdits → Auto →
+        // Manual.
         assert_eq!(
             next_cycle_permission_mode(PermissionMode::Default),
             PermissionMode::Plan
@@ -1480,14 +1461,24 @@ mod tests {
         );
         assert_eq!(
             next_cycle_permission_mode(PermissionMode::AcceptEdits),
+            PermissionMode::Auto
+        );
+        assert_eq!(
+            next_cycle_permission_mode(PermissionMode::Auto),
             PermissionMode::Default
         );
+    }
 
-        // Walking the cycle from every mode never yields BypassPermissions.
+    #[test]
+    fn cycle_never_reaches_bypass_permissions() {
+        // BypassPermissions does no safety checking and dave can't enter it
+        // mid-session, so it must never appear in the click / Ctrl+M cycle —
+        // not from any starting mode.
         for start in [
             PermissionMode::Default,
             PermissionMode::Plan,
             PermissionMode::AcceptEdits,
+            PermissionMode::Auto,
             PermissionMode::BypassPermissions,
         ] {
             let mut mode = start;
@@ -1501,7 +1492,8 @@ mod tests {
             }
         }
 
-        // Cycling out of Auto Execute exits to Default.
+        // Cycling out of BypassPermissions (should it ever be set) exits to
+        // Manual (Default).
         assert_eq!(
             next_cycle_permission_mode(PermissionMode::BypassPermissions),
             PermissionMode::Default
