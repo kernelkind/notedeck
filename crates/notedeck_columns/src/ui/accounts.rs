@@ -1,11 +1,12 @@
 use egui::{
     Align, Button, Frame, InnerResponse, Layout, RichText, ScrollArea, Ui, UiBuilder, Vec2,
 };
-use enostr::Pubkey;
+use enostr::{Keypair, Pubkey, ToBech32};
 use nostrdb::{Ndb, Transaction};
 use notedeck::{tr, Accounts, DragResponse, Images, Localization, MediaJobSender};
 use notedeck_ui::colors::PINK;
 use notedeck_ui::profile::preview::SimpleProfilePreview;
+use tracing::error;
 
 use notedeck_ui::app_images;
 
@@ -108,6 +109,7 @@ impl<'a> AccountsView<'a> {
                     let profile_peview_view = {
                         let max_size = egui::vec2(ui.available_width(), 77.0);
                         let resp = ui.allocate_response(max_size, egui::Sense::click());
+                        account_context_menu(&resp, &account.key, i18n);
                         ui.allocate_new_ui(UiBuilder::new().max_rect(resp.rect), |ui| {
                             let preview = SimpleProfilePreview::new(
                                 profile.as_ref(),
@@ -153,6 +155,55 @@ impl<'a> AccountsView<'a> {
             },
         )
     }
+}
+
+/// The `nsec1…` form of an account's secret key, or `None` for a pubkey-only
+/// (read-only) account.
+fn account_nsec(key: &Keypair) -> Option<String> {
+    key.secret_key.as_ref()?.to_bech32().ok()
+}
+
+/// Right-click menu on an account card: copy the account's `npub`, and — for
+/// accounts we hold the secret key for — its `nsec`, which otherwise has no way
+/// back out of the app once it's been added.
+fn account_context_menu(card_resp: &egui::Response, key: &Keypair, i18n: &mut Localization) {
+    notedeck_ui::context_menu::context_menu(card_resp, |ui| {
+        let copy_npub = ui.button(tr!(
+            i18n,
+            "Copy npub",
+            "Context menu item to copy an account's public key"
+        ));
+
+        if copy_npub.clicked() {
+            match key.pubkey.npub() {
+                Some(npub) => ui.ctx().copy_text(npub),
+                None => error!("could not encode pubkey as npub"),
+            }
+            ui.close_menu();
+        }
+
+        // Read-only accounts have no secret key to hand back.
+        if key.secret_key.is_none() {
+            return;
+        }
+
+        let copy_nsec = ui.button(
+            RichText::new(tr!(
+                i18n,
+                "Copy nsec",
+                "Context menu item to copy an account's secret key"
+            ))
+            .color(ui.visuals().warn_fg_color),
+        );
+
+        if copy_nsec.clicked() {
+            match account_nsec(key) {
+                Some(nsec) => ui.ctx().copy_text(nsec),
+                None => error!("could not encode secret key as nsec"),
+            }
+            ui.close_menu();
+        }
+    });
 }
 
 fn show_profile_card(
@@ -223,4 +274,113 @@ fn sign_out_button(i18n: &mut Localization) -> egui::Button<'static> {
         "Sign out",
         "Button label to sign out of account"
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use enostr::{FullKeypair, SecretKey};
+    use nostr::nips::nip19::FromBech32;
+
+    /// The nsec menu item hands back a bech32 secret key that round-trips to the
+    /// same account, and is only offered for accounts we hold the key for.
+    #[test]
+    fn nsec_is_bech32_and_signer_only() {
+        let full = FullKeypair::generate();
+        let key = full.to_keypair();
+
+        let nsec = account_nsec(&key).expect("nsec");
+        assert!(nsec.starts_with("nsec1"), "got {nsec}");
+        assert_eq!(
+            Keypair::from_secret(SecretKey::from_bech32(&nsec).expect("parse")).pubkey,
+            key.pubkey
+        );
+
+        // A pubkey-only (read-only) account has nothing secret to copy.
+        assert_eq!(account_nsec(&Keypair::only_pubkey(key.pubkey)), None);
+    }
+
+    /// Right-clicking an account card opens the menu and copies the account's
+    /// keys — the whole point of the feature, and the part a unit test on
+    /// [`account_nsec`] can't see (the menu hangs off a bare
+    /// `allocate_response`, which is easy to wire up so it never opens at all).
+    #[test]
+    fn right_click_card_copies_keys() {
+        use egui_kittest::{kittest::Queryable, Harness};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        struct Shared {
+            i18n: Localization,
+            /// The card's rect, so the test can aim a real pointer at it.
+            card: egui::Rect,
+            /// Text handed to the clipboard so far this run.
+            copied: Vec<String>,
+        }
+
+        let key = FullKeypair::generate().to_keypair();
+        let shared = Rc::new(RefCell::new(Shared {
+            i18n: Localization::default(),
+            card: egui::Rect::NOTHING,
+            copied: Vec::new(),
+        }));
+
+        let render_shared = shared.clone();
+        let menu_key = key.clone();
+        let mut harness = Harness::new_ui(move |ui| {
+            let mut sh = render_shared.borrow_mut();
+            let resp = ui.allocate_response(egui::vec2(200.0, 77.0), egui::Sense::click());
+            sh.card = resp.rect;
+            account_context_menu(&resp, &menu_key, &mut sh.i18n);
+
+            // Menu clicks land inside the call above, so drain the copy commands
+            // here while they're still on this frame's output.
+            ui.ctx().output(|out| {
+                sh.copied
+                    .extend(out.commands.iter().filter_map(|cmd| match cmd {
+                        egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                        _ => None,
+                    }));
+            });
+        });
+
+        harness.run_ok();
+        assert!(
+            harness.query_by_label("Copy nsec").is_none(),
+            "the menu should stay closed until it's asked for"
+        );
+
+        // Right-click the card, as a user reaching for their nsec would, then
+        // pick `item` out of the menu that opens.
+        let center = shared.borrow().card.center();
+        let copy_via_menu = |harness: &mut Harness<'_>, item: &str| {
+            harness
+                .input_mut()
+                .events
+                .push(egui::Event::PointerMoved(center));
+            for pressed in [true, false] {
+                harness.input_mut().events.push(egui::Event::PointerButton {
+                    pos: center,
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            harness.run_ok();
+            harness.get_by_label(item).click();
+            harness.run_ok();
+        };
+
+        copy_via_menu(&mut harness, "Copy npub");
+        copy_via_menu(&mut harness, "Copy nsec");
+
+        assert_eq!(
+            shared.borrow().copied,
+            vec![
+                key.pubkey.npub().expect("npub"),
+                account_nsec(&key).expect("nsec"),
+            ],
+            "each menu item should put its own key on the clipboard"
+        );
+    }
 }

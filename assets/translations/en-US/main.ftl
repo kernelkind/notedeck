@@ -139,8 +139,14 @@ Copy_Note_ID_6b45 = Copy Note ID
 # Copy the raw note data in JSON format to clipboard
 Copy_Note_JSON_9e4e = Copy Note JSON
 
+# Context menu item to copy an account's public key
+Copy_npub_7b3c = Copy npub
+
 # Tooltip text for copying npub to clipboard
 Copy_npub_to_clipboard_c105 = Copy npub to clipboard
+
+# Context menu item to copy an account's secret key
+Copy_nsec_6cf4 = Copy nsec
 
 # Copy the author's public key to clipboard
 Copy_Pubkey_9cc4 = Copy Pubkey

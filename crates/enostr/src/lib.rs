@@ -19,6 +19,10 @@ pub use error::Error;
 pub use filter::Filter;
 pub use keypair::{FilledKeypair, FullKeypair, Keypair, KeypairUnowned, SerializableKeypair};
 pub use nostr::SecretKey;
+// The trait that turns a `SecretKey` into its `nsec1…` form. Re-exported
+// alongside `SecretKey` itself so callers holding an enostr key don't have to
+// depend on `nostr` just to encode it.
+pub use nostr::nips::nip19::ToBech32;
 pub use note::{Note, NoteId};
 pub use profile::ProfileState;
 pub use pubkey::{Pubkey, PubkeyRef};
