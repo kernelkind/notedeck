@@ -818,9 +818,67 @@ pub fn seed_demo_board(
     ingested
 }
 
+/// Why the reducer deliberately emitted no events for an edge or parent edit,
+/// and which pair of cards it was about.
+///
+/// Returned by [`apply`] so a caller can tell an *idempotent no-op* (the board
+/// already says what the action asked for) from a *refusal* (the edit was
+/// well-formed but would break an invariant) — and both from a plain resolution
+/// failure, which also emits no events but yields no `Declined`. Without it a
+/// caller only sees "no events" and can't say why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Declined {
+    pub reason: DeclineReason,
+    /// The card the edit was applied to.
+    pub card: NoteId,
+    /// The other endpoint: the blocker, the related card, or the parent. Equal
+    /// to `card` for [`DeclineReason::SelfRelation`].
+    pub other: NoteId,
+}
+
+/// What [`Declined`] happened. See [`DeclineReason::is_noop`] for the split
+/// between "already done" and "refused".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclineReason {
+    /// [`BoardAction::Block`] on a blocker the card already has.
+    AlreadyBlocked,
+    /// [`BoardAction::Unblock`] on an edge that isn't there.
+    NotBlocked,
+    /// [`BoardAction::Relate`] on a pair already related (in either direction).
+    AlreadyRelated,
+    /// [`BoardAction::Unrelate`] on an edge that isn't there (on either endpoint).
+    NotRelated,
+    /// [`BoardAction::Block`] refused: the edge would close a dependency cycle
+    /// (see [`would_block_cycle`], which also refuses a self-block).
+    BlockCycle,
+    /// [`BoardAction::SetParent`] refused: the parent is the card itself or one
+    /// of its descendants, or it isn't resolvable on this board (see
+    /// [`would_cycle`]).
+    ParentCycle,
+    /// [`BoardAction::Relate`] refused: both endpoints are the same card.
+    SelfRelation,
+}
+
+impl DeclineReason {
+    /// Is this an idempotent no-op — the board already matching the request —
+    /// rather than a refusal? A no-op is success (nothing left to do); a
+    /// refusal is an error the caller should surface.
+    pub fn is_noop(self) -> bool {
+        matches!(
+            self,
+            Self::AlreadyBlocked | Self::NotBlocked | Self::AlreadyRelated | Self::NotRelated
+        )
+    }
+}
+
 /// Apply one [`BoardAction`] against the current `view`, ingesting the events it
 /// implies. `view` is the pre-action snapshot, used to compute insertion ranks
 /// and to reconstruct the column list for board-level edits.
+///
+/// Returns `Some(`[`Declined`]`)` when an edge or parent edit was deliberately
+/// skipped — already-done or refused — so the caller can say which. Every other
+/// path returns `None`, including the arms that silently drop an action they
+/// can't resolve.
 pub fn apply(
     ndb: &Ndb,
     board_id: &str,
@@ -829,7 +887,7 @@ pub fn apply(
     signer: &Signer,
     action: BoardAction,
     publisher: &mut dyn Publisher,
-) {
+) -> Option<Declined> {
     // The board `#a` coordinate is the *owner's*, not the signer's. On a shared
     // board the signer is a member, but the board (and every edit anchored to it)
     // lives under `30619:<owner>:<slug>`, which the folded `view` carries as
@@ -845,9 +903,7 @@ pub fn apply(
             to_col,
             to_row,
         } => {
-            let Some(col) = view.columns.get(to_col) else {
-                return;
-            };
+            let col = view.columns.get(to_col)?;
             let rank = rank_for_insert(
                 &col.cards,
                 |c| c.id,
@@ -871,16 +927,11 @@ pub fn apply(
             labels,
             parent,
         } => {
-            let Some(c) = view.columns.get(col) else {
-                return;
-            };
+            let c = view.columns.get(col)?;
             // A brand-new card can't be anyone's ancestor, so parenting it needs
             // no cycle check — just that the parent actually exists.
             let parent = parent.filter(|p| find_card_any(view, *p).is_some());
-            let Some(id) = ingest_signed(ndb, build_issue(&addr, &title, ""), signer, publisher)
-            else {
-                return;
-            };
+            let id = ingest_signed(ndb, build_issue(&addr, &title, ""), signer, publisher)?;
             let rank =
                 rank_for_insert(&c.cards, |c| c.id, |c| c.rank.as_str(), None, c.cards.len());
             ingest_signed(
@@ -976,7 +1027,11 @@ pub fn apply(
         BoardAction::SetParent { card, parent } => {
             if let Some(parent) = parent {
                 if would_cycle(view, card, parent) {
-                    return;
+                    return Some(Declined {
+                        reason: DeclineReason::ParentCycle,
+                        card,
+                        other: parent,
+                    });
                 }
                 ingest_signed(ndb, build_relation(&card, Some(&parent)), signer, publisher);
             } else {
@@ -987,7 +1042,11 @@ pub fn apply(
             // Refuse an edge that would close a dependency loop (same-board only;
             // see `would_block_cycle`).
             if would_block_cycle(view, card, on) {
-                return;
+                return Some(Declined {
+                    reason: DeclineReason::BlockCycle,
+                    card,
+                    other: on,
+                });
             }
             // Rebuild from the *raw* stored set, not the folded `blocked_by`: the
             // fold drops edges it couldn't resolve (e.g. a cross-board blocker),
@@ -998,7 +1057,11 @@ pub fn apply(
                 .map(|b| b.blockers.iter().map(|id| NoteId::new(*id)).collect())
                 .unwrap_or_default();
             if set.contains(&on) {
-                return;
+                return Some(Declined {
+                    reason: DeclineReason::AlreadyBlocked,
+                    card,
+                    other: on,
+                });
             }
             set.push(on);
             republish_blockers(ndb, &card, &set, cur, signer, publisher);
@@ -1012,14 +1075,22 @@ pub fn apply(
             let before = set.len();
             set.retain(|id| *id != on);
             if set.len() == before {
-                return;
+                return Some(Declined {
+                    reason: DeclineReason::NotBlocked,
+                    card,
+                    other: on,
+                });
             }
             republish_blockers(ndb, &card, &set, cur, signer, publisher);
         }
         BoardAction::Relate { card, other } => {
             // Self-relation is meaningless; the reducer skips it anyway.
             if card == other {
-                return;
+                return Some(Declined {
+                    reason: DeclineReason::SelfRelation,
+                    card,
+                    other,
+                });
             }
             // Symmetric: skip if the edge already exists on *either* endpoint, so
             // the pair is stored once. Rebuild from the raw stored set (the fold
@@ -1032,7 +1103,11 @@ pub fn apply(
             let reverse_has = event::current_related(ndb, author, &other)
                 .is_some_and(|r| r.related.contains(other.bytes()));
             if set.contains(&other) || reverse_has {
-                return;
+                return Some(Declined {
+                    reason: DeclineReason::AlreadyRelated,
+                    card,
+                    other,
+                });
             }
             set.push(other);
             republish_related(ndb, &card, &set, cur, signer, publisher);
@@ -1040,8 +1115,15 @@ pub fn apply(
         BoardAction::Unrelate { card, other } => {
             // Symmetric: the edge may live on either endpoint, so drop it from both
             // stored sets, republishing only the side(s) that actually change.
-            unrelate_endpoint(ndb, author, &card, &other, signer, publisher);
-            unrelate_endpoint(ndb, author, &other, &card, signer, publisher);
+            let forward = unrelate_endpoint(ndb, author, &card, &other, signer, publisher);
+            let reverse = unrelate_endpoint(ndb, author, &other, &card, signer, publisher);
+            if !forward && !reverse {
+                return Some(Declined {
+                    reason: DeclineReason::NotRelated,
+                    card,
+                    other,
+                });
+            }
         }
         BoardAction::AddComment {
             card,
@@ -1050,9 +1132,7 @@ pub fn apply(
         } => {
             // The comment is rooted on the issue, so we need the issue author
             // (the card's author) for the NIP-22 root `P`. Unknown card -> no-op.
-            let Some(c) = find_card_any(view, card) else {
-                return;
-            };
+            let c = find_card_any(view, card)?;
             let issue_author = Pubkey::new(c.author);
 
             // A reply additionally names the parent comment's author. If the
@@ -1061,9 +1141,7 @@ pub fn apply(
             let parent_author;
             let reply = match &reply_to {
                 Some(parent) => {
-                    let Some(pc) = c.comments.iter().find(|c| c.id == *parent) else {
-                        return;
-                    };
+                    let pc = c.comments.iter().find(|c| c.id == *parent)?;
                     parent_author = Pubkey::new(pc.author);
                     Some((parent, &parent_author))
                 }
@@ -1100,9 +1178,7 @@ pub fn apply(
         }
         BoardAction::ArchiveCard { card } => {
             // Capture the card's current column so a restore can return it there.
-            let Some((from_col, c)) = find_card_col(view, card) else {
-                return;
-            };
+            let (from_col, c) = find_card_col(view, card)?;
             let rank = non_empty_rank(&c.rank);
             ingest_signed(
                 ndb,
@@ -1113,19 +1189,14 @@ pub fn apply(
             );
         }
         BoardAction::RestoreCard { card } => {
-            let Some(entry) = view.archived.iter().find(|a| a.card.id == card) else {
-                return;
-            };
+            let entry = view.archived.iter().find(|a| a.card.id == card)?;
             // Restore to the origin column, falling back to the first column if
             // that column is gone (the reducer would reflow it there anyway).
             let to_col = entry
                 .from
                 .as_deref()
                 .filter(|id| view.columns.iter().any(|c| c.id == *id))
-                .or_else(|| view.columns.first().map(|c| c.id.as_str()));
-            let Some(to_col) = to_col else {
-                return;
-            };
+                .or_else(|| view.columns.first().map(|c| c.id.as_str()))?;
             let rank = non_empty_rank(&entry.card.rank);
             ingest_signed(
                 ndb,
@@ -1142,16 +1213,14 @@ pub fn apply(
         }
         BoardAction::RenameColumn { col, name } => {
             let mut cols = column_defs(view);
-            let Some(def) = cols.get_mut(col) else {
-                return;
-            };
+            let def = cols.get_mut(col)?;
             def.name = name;
             republish_board(ndb, board_id, view, signer, &cols, publisher);
         }
         BoardAction::RemoveColumn { col } => {
             let mut cols = column_defs(view);
             if col >= cols.len() {
-                return;
+                return None;
             }
             cols.remove(col);
             republish_board(ndb, board_id, view, signer, &cols, publisher);
@@ -1159,7 +1228,7 @@ pub fn apply(
         BoardAction::MoveColumn { from, to } => {
             let mut cols = column_defs(view);
             if from >= cols.len() || to >= cols.len() || from == to {
-                return;
+                return None;
             }
             let def = cols.remove(from);
             cols.insert(to, def);
@@ -1179,6 +1248,8 @@ pub fn apply(
             );
         }
     }
+
+    None
 }
 
 /// A board to operate on across a cross-board action: its `id` (slug) paired with
@@ -1384,7 +1455,8 @@ fn republish_related(
 /// Drop `other` from `card`'s stored related-to set, republishing the superseding
 /// set only when the edge was actually present. One half of the symmetric
 /// [`BoardAction::Unrelate`]: called for both endpoints so the edge is cleared
-/// wherever it was stored.
+/// wherever it was stored. Returns whether this endpoint actually changed, so
+/// the caller can report an edge that was on neither side.
 fn unrelate_endpoint(
     ndb: &Ndb,
     author: &Pubkey,
@@ -1392,7 +1464,7 @@ fn unrelate_endpoint(
     other: &NoteId,
     signer: &Signer,
     publisher: &mut dyn Publisher,
-) {
+) -> bool {
     let cur = event::current_related(ndb, author, card);
     let mut set: Vec<NoteId> = cur
         .as_ref()
@@ -1401,9 +1473,10 @@ fn unrelate_endpoint(
     let before = set.len();
     set.retain(|id| id != other);
     if set.len() == before {
-        return;
+        return false;
     }
     republish_related(ndb, card, &set, cur, signer, publisher);
+    true
 }
 
 /// Would blocking `card` on `on` create a dependency cycle? A cycle would form
@@ -1693,7 +1766,9 @@ mod tests {
             }
         }
 
-        fn apply(&self, view: &BoardView, action: BoardAction) {
+        /// Apply an action, handing back the reducer's [`Declined`] (if any) so a
+        /// test can assert *why* an edit produced no events.
+        fn apply(&self, view: &BoardView, action: BoardAction) -> Option<Declined> {
             super::apply(
                 &self.ndb,
                 BOARD_ID,
@@ -1702,7 +1777,7 @@ mod tests {
                 &Signer::new(&self.secret(), None),
                 action,
                 &mut NoPublish,
-            );
+            )
         }
     }
 
@@ -2509,6 +2584,137 @@ mod tests {
             .await;
         assert!(find_card(&view, s1).unwrap().related.is_empty());
         assert_eq!(find_card(&view, hub).unwrap().related[0].id, s2);
+    }
+
+    /// Every deliberate skip in the edge/parent family reports *why* it emitted
+    /// no events, so a caller can tell an idempotent no-op from a refusal — and
+    /// both from an action the reducer simply couldn't resolve, which reports
+    /// nothing.
+    #[tokio::test]
+    async fn declined_edge_edits_report_a_reason() {
+        let t = TestNdb::new();
+        seed_demo(&t);
+        let mut view = t.wait(|v| v.columns[1].cards.len() == 2).await;
+
+        for title in ["first", "second", "third"] {
+            t.apply(
+                &view,
+                BoardAction::AddCard {
+                    col: 0,
+                    title: title.to_string(),
+                    description: String::new(),
+                    labels: vec![],
+                    parent: None,
+                },
+            );
+            view = t.wait(|v| card_id_by_title(v, title).is_some()).await;
+        }
+        let a = card_id_by_title(&view, "first").unwrap();
+        let b = card_id_by_title(&view, "second").unwrap();
+        let c = card_id_by_title(&view, "third").unwrap();
+
+        // A live edit reports no reason: it emitted events.
+        assert_eq!(t.apply(&view, BoardAction::Block { card: a, on: b }), None);
+        let view = t
+            .wait(|v| find_card(v, a).is_some_and(|c| c.blocked_by.len() == 1))
+            .await;
+
+        // Already-done: the edge is there / isn't there. Idempotent, not refused.
+        assert_eq!(
+            t.apply(&view, BoardAction::Block { card: a, on: b }),
+            Some(Declined {
+                reason: DeclineReason::AlreadyBlocked,
+                card: a,
+                other: b,
+            })
+        );
+        assert_eq!(
+            t.apply(&view, BoardAction::Unblock { card: a, on: c }),
+            Some(Declined {
+                reason: DeclineReason::NotBlocked,
+                card: a,
+                other: c,
+            })
+        );
+        assert_eq!(
+            t.apply(&view, BoardAction::Unrelate { card: a, other: b }),
+            Some(Declined {
+                reason: DeclineReason::NotRelated,
+                card: a,
+                other: b,
+            })
+        );
+        assert!(
+            t.apply(&view, BoardAction::Unblock { card: a, on: c })
+                .is_some_and(|d| d.reason.is_noop())
+        );
+
+        // Refused: the edit is well-formed but would break an invariant.
+        assert_eq!(
+            t.apply(&view, BoardAction::Block { card: b, on: a }),
+            Some(Declined {
+                reason: DeclineReason::BlockCycle,
+                card: b,
+                other: a,
+            })
+        );
+        assert_eq!(
+            t.apply(
+                &view,
+                BoardAction::SetParent {
+                    card: a,
+                    parent: Some(a),
+                }
+            ),
+            Some(Declined {
+                reason: DeclineReason::ParentCycle,
+                card: a,
+                other: a,
+            })
+        );
+        assert_eq!(
+            t.apply(&view, BoardAction::Relate { card: a, other: a }),
+            Some(Declined {
+                reason: DeclineReason::SelfRelation,
+                card: a,
+                other: a,
+            })
+        );
+        assert!(
+            !t.apply(&view, BoardAction::Block { card: b, on: a })
+                .is_some_and(|d| d.reason.is_noop())
+        );
+
+        // Relating a pair that's already related is a no-op, not a refusal.
+        assert_eq!(
+            t.apply(&view, BoardAction::Relate { card: a, other: c }),
+            None
+        );
+        let view = t
+            .wait(|v| find_card(v, a).is_some_and(|c| c.related.len() == 1))
+            .await;
+        assert_eq!(
+            t.apply(&view, BoardAction::Relate { card: a, other: c }),
+            Some(Declined {
+                reason: DeclineReason::AlreadyRelated,
+                card: a,
+                other: c,
+            })
+        );
+
+        // An action the reducer can't resolve still reports nothing: a missing
+        // card is a resolution failure, not a decline.
+        assert_eq!(
+            t.apply(
+                &view,
+                BoardAction::AddComment {
+                    card: NoteId::new([0u8; 32]),
+                    body: "into the void".to_string(),
+                    reply_to: None,
+                }
+            ),
+            None
+        );
     }
 
     #[tokio::test]
