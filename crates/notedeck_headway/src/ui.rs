@@ -2103,8 +2103,6 @@ fn detail_body_ui(
 
     ui.add_space(SPACING_LG);
     detail_subissues_section_ui(ui, theme, ctx, state, outcome);
-
-    detail_dependencies_section_ui(ui, theme, ctx, outcome);
 }
 
 /// The card's properties — status, labels, dates and the archive/delete
@@ -2158,6 +2156,17 @@ fn detail_properties_ui(
         ui.set_width(ui.available_width());
         detail_labels_section_ui(ui, theme, ctx, state, outcome);
     });
+
+    // Dependency edges get their own bordered block under Labels, Linear-style,
+    // rather than sitting in the main column where they read as sub-issues.
+    // Skipped entirely when the card has no edges, so no empty panel shows.
+    if !ctx.blocked_by.is_empty() || !ctx.blocks.is_empty() {
+        ui.add_space(SPACING_SM);
+        sidebar_panel(theme).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            detail_dependencies_section_ui(ui, theme, ctx, outcome);
+        });
+    }
 
     // Quiet, frameless actions under the panels — Linear keeps these out of
     // the way rather than as filled buttons.
@@ -2615,12 +2624,14 @@ fn commit_subissue_drop(
     };
 }
 
-/// The card's dependency edges, mirroring the subissue section: a "Blocked by"
-/// list of the cards holding this one back (each row unblockable with a trailing
-/// ✕, the way the parent breadcrumb detaches) and a read-only "Blocks" list of
-/// the cards it holds back. Both are omitted when empty, so a card with no
-/// dependencies shows nothing. Adding a blocker lives in the board card's
-/// context menu ([`card_blocker_menu`]), like re-parenting.
+/// The card's dependency edges, a Linear-style sidebar block under Labels: a
+/// "Blocked by" list of the cards holding this one back (each row unblockable
+/// with a trailing ✕, the way the parent breadcrumb detaches) and a read-only
+/// "Blocks" list of the cards it holds back. Both are omitted when empty; the
+/// caller ([`detail_properties_ui`]) skips the wrapping panel entirely when
+/// there are no edges at all, so an empty bordered block never shows. Adding a
+/// blocker lives in the board card's context menu ([`card_blocker_menu`]), like
+/// re-parenting.
 fn detail_dependencies_section_ui(
     ui: &mut egui::Ui,
     theme: &ColorTheme,
@@ -2628,7 +2639,6 @@ fn detail_dependencies_section_ui(
     outcome: &mut DetailOutcome,
 ) {
     if !ctx.blocked_by.is_empty() {
-        ui.add_space(SPACING_LG);
         ui.horizontal(|ui| {
             detail_heading(ui, theme, "Blocked by");
             // A dim ⊘ next to the heading when at least one blocker is still
@@ -2645,7 +2655,11 @@ fn detail_dependencies_section_ui(
     }
 
     if !ctx.blocks.is_empty() {
-        ui.add_space(SPACING_LG);
+        // Separate the two lists only when both are present, so a single-list
+        // panel doesn't carry dead space above its heading.
+        if !ctx.blocked_by.is_empty() {
+            ui.add_space(SPACING_MD);
+        }
         detail_heading(ui, theme, "Blocks");
         ui.add_space(SPACING_XS);
         for edge in &ctx.blocks {
