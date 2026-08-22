@@ -1101,7 +1101,7 @@ pub fn apply(
                 .map(|r| r.related.iter().map(|id| NoteId::new(*id)).collect())
                 .unwrap_or_default();
             let reverse_has = event::current_related(ndb, author, &other)
-                .is_some_and(|r| r.related.contains(other.bytes()));
+                .is_some_and(|r| r.related.contains(card.bytes()));
             if set.contains(&other) || reverse_has {
                 return Some(Declined {
                     reason: DeclineReason::AlreadyRelated,
@@ -2557,13 +2557,21 @@ mod tests {
         );
 
         // Relating an existing pair from the reverse endpoint is a no-op — the edge
-        // is stored once, so s2 gains no second entry.
-        t.apply(
-            &view,
-            BoardAction::Relate {
+        // is stored once, so s2 gains no second entry (and the reducer says why it
+        // wrote nothing, rather than storing a redundant mirror of the edge).
+        assert_eq!(
+            t.apply(
+                &view,
+                BoardAction::Relate {
+                    card: s2,
+                    other: hub,
+                },
+            ),
+            Some(Declined {
+                reason: DeclineReason::AlreadyRelated,
                 card: s2,
                 other: hub,
-            },
+            })
         );
         let view = t
             .wait(|v| find_card(v, hub).is_some_and(|c| c.related.len() == 2))
