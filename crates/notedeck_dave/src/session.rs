@@ -31,6 +31,7 @@ pub fn permission_mode_to_str(mode: PermissionMode) -> &'static str {
         PermissionMode::Default => "default",
         PermissionMode::Plan => "plan",
         PermissionMode::AcceptEdits => "accept_edits",
+        PermissionMode::Auto => "auto",
         PermissionMode::BypassPermissions => "bypass",
     }
 }
@@ -40,6 +41,7 @@ pub fn permission_mode_from_str(s: &str) -> PermissionMode {
     match s {
         "plan" => PermissionMode::Plan,
         "accept_edits" => PermissionMode::AcceptEdits,
+        "auto" => PermissionMode::Auto,
         "bypass" => PermissionMode::BypassPermissions,
         _ => PermissionMode::Default,
     }
@@ -224,10 +226,6 @@ pub struct AgenticSessionData {
     /// For Bash: stores binary names (first word of command).
     /// For other tools: stores the tool name.
     pub runtime_allows: HashSet<String>,
-    /// Auto-accept EVERY permission request this session (dave-side "Auto
-    /// Accept All"). Unlike the CLI's bypass mode this is enforced by dave, so
-    /// it works across all backends and can be toggled at runtime.
-    pub auto_accept_all: bool,
     /// Stable Nostr event identity for this session (d-tag for kind-31988
     /// and kind-1988 events).  Generated at creation, never changes.
     /// Separate from the Claude CLI session ID used for `--resume`.
@@ -265,7 +263,6 @@ impl AgenticSessionData {
             tail_order: None,
             usage: Default::default(),
             runtime_allows: HashSet::new(),
-            auto_accept_all: false,
             event_id: uuid::Uuid::new_v4().to_string(),
         }
     }
@@ -285,20 +282,18 @@ impl AgenticSessionData {
         }
     }
 
-    /// Check if a permission request should be auto-accepted this session —
-    /// either because "Auto Accept All" is on, or the tool matches the runtime
-    /// allowlist. This is the single dave-side checkpoint every backend's
-    /// permission requests flow through, so it is backend-agnostic.
+    /// Check if a permission request should be auto-accepted this session
+    /// because the tool matches the per-session runtime allowlist (an
+    /// "allow this command for the rest of the session" grant). This is the
+    /// single dave-side checkpoint every backend's permission requests flow
+    /// through, so it is backend-agnostic.
     pub fn should_runtime_allow(&self, tool_name: &str, tool_input: &serde_json::Value) -> bool {
         // Decision-type prompts (AskUserQuestion / ExitPlanMode plan review)
         // always need a real user decision — a question set needs a selection
         // and a plan review needs approval, neither is a yes/no tool grant — so
-        // never auto-accept them, even under Auto Accept All.
+        // never auto-accept them.
         if crate::messages::PermissionView::is_decision_tool(tool_name) {
             return false;
-        }
-        if self.auto_accept_all {
-            return true;
         }
         if let Some(key) = Self::runtime_allow_key(tool_name, tool_input) {
             self.runtime_allows.contains(&key)
@@ -771,11 +766,6 @@ impl ChatSession {
             .as_ref()
             .map(|a| a.permission_mode)
             .unwrap_or(PermissionMode::Default)
-    }
-
-    /// Whether dave-side "Auto Accept All" is on for this session.
-    pub fn auto_accept_all(&self) -> bool {
-        self.agentic.as_ref().is_some_and(|a| a.auto_accept_all)
     }
 
     /// Get the working directory (agentic only)
@@ -1563,19 +1553,20 @@ mod tests {
     use std::sync::mpsc;
 
     #[test]
-    fn auto_accept_all_allows_every_tool() {
+    fn runtime_allowlist_grants_persist_per_session() {
         let mut agentic = AgenticSessionData::new(1, PathBuf::from("/tmp"));
 
-        // Off: an arbitrary tool not on the allowlist is not auto-accepted.
-        let scary = serde_json::json!({ "command": "rm -rf /" });
-        assert!(!agentic.should_runtime_allow("Bash", &scary));
+        // Off: a command not on the allowlist is not auto-accepted.
+        let ls = serde_json::json!({ "command": "ls -la" });
+        assert!(!agentic.should_runtime_allow("Bash", &ls));
 
-        // On: dave auto-accepts genuine tool grants, regardless of tool or
-        // allowlist. Decision-type prompts are the exception (see below).
-        agentic.auto_accept_all = true;
-        assert!(agentic.should_runtime_allow("Bash", &scary));
-        assert!(agentic
-            .should_runtime_allow("Write", &serde_json::json!({ "file_path": "/etc/passwd" })));
+        // Granting `ls` (by binary name) auto-accepts future `ls` invocations
+        // this session, but not other binaries.
+        agentic.add_runtime_allow("Bash", &ls);
+        assert!(agentic.should_runtime_allow("Bash", &serde_json::json!({ "command": "ls foo" })));
+        assert!(
+            !agentic.should_runtime_allow("Bash", &serde_json::json!({ "command": "rm -rf /" }))
+        );
     }
 
     #[test]
@@ -1592,11 +1583,12 @@ mod tests {
         let plan = serde_json::json!({ "plan": "# Do the thing" });
 
         // A question set / plan review needs a real user decision, so it is
-        // never auto-accepted — not by Auto Accept All, not by the allowlist.
+        // never auto-accepted — not even if it were somehow on the allowlist.
         assert!(!agentic.should_runtime_allow("AskUserQuestion", &question));
         assert!(!agentic.should_runtime_allow("ExitPlanMode", &plan));
 
-        agentic.auto_accept_all = true;
+        agentic.add_runtime_allow("AskUserQuestion", &question);
+        agentic.add_runtime_allow("ExitPlanMode", &plan);
         assert!(!agentic.should_runtime_allow("AskUserQuestion", &question));
         assert!(!agentic.should_runtime_allow("ExitPlanMode", &plan));
     }

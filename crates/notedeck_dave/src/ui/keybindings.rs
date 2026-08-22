@@ -30,11 +30,8 @@ pub enum KeyAction {
     Interrupt,
     /// Toggle between scene view and classic view
     ToggleView,
-    /// Cycle permission mode: Default → Plan → AcceptEdits (Ctrl+M)
+    /// Cycle permission mode: Manual → Plan → Accept Edits → Auto (Ctrl+M)
     CyclePermissionMode,
-    /// Toggle dave-side "Auto Accept All" on/off (Ctrl+Shift+M). Deliberately a
-    /// distinct chord from the Ctrl+M mode cycle.
-    ToggleAutoAcceptAll,
     /// Delete the active session
     DeleteActiveSession,
     /// Navigate to next item in focus queue (Ctrl+N)
@@ -150,12 +147,6 @@ pub fn check_keybindings(
     // Ctrl+M to cycle permission mode - agentic only
     if is_agentic && ctx.input(|i| i.modifiers.matches_exact(ctrl) && i.key_pressed(Key::M)) {
         return Some(KeyAction::CyclePermissionMode);
-    }
-
-    // Ctrl+Shift+M to toggle dave-side Auto Accept All - agentic only.
-    // A distinct chord so it can't be reached by accidental cycling.
-    if is_agentic && ctx.input(|i| i.modifiers.matches_exact(ctrl_shift) && i.key_pressed(Key::M)) {
-        return Some(KeyAction::ToggleAutoAcceptAll);
     }
 
     // Ctrl+D to toggle Done status for current focus queue item - agentic only
@@ -283,17 +274,10 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_m_cycles_but_ctrl_shift_m_toggles_auto_accept_all() {
-        // The safe cycle stays on Ctrl+M...
+    fn ctrl_m_cycles_permission_mode() {
         assert_eq!(
             detect(Modifiers::CTRL, Key::M),
             Some(KeyAction::CyclePermissionMode),
-        );
-        // ...and the dangerous Auto Accept All needs the distinct Ctrl+Shift+M
-        // chord, so it can't be triggered by the cycle key.
-        assert_eq!(
-            detect(Modifiers::CTRL | Modifiers::SHIFT, Key::M),
-            Some(KeyAction::ToggleAutoAcceptAll),
         );
     }
 }

@@ -2103,14 +2103,13 @@ fn detail_body_ui(
 
     ui.add_space(SPACING_LG);
     detail_subissues_section_ui(ui, theme, ctx, state, outcome);
-
-    detail_dependencies_section_ui(ui, theme, ctx, outcome);
 }
 
-/// The card's properties — status, labels, dates and the archive/delete
-/// actions — rendered as Linear-style bordered sidebar panels: fixed to the
-/// right on a wide pane, stacked between the body and activity on a narrow
-/// one.
+/// The card's properties — status, labels, dependency edges, dates and the
+/// archive/delete actions — rendered as a flat, frameless Linear-style sidebar:
+/// each group is a muted section label over its rows, separated only by
+/// whitespace (no bordered panels). Fixed to the right on a wide pane, stacked
+/// between the body and activity on a narrow one.
 fn detail_properties_ui(
     ui: &mut egui::Ui,
     theme: &ColorTheme,
@@ -2118,50 +2117,54 @@ fn detail_properties_ui(
     state: &mut BoardUiState,
     outcome: &mut DetailOutcome,
 ) {
-    sidebar_panel(theme).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        section_label(ui, theme, "Properties");
+    section_label(ui, theme, "Properties");
+    ui.add_space(SPACING_SM);
+    // Move the card between lanes without dragging (meaningless on a
+    // single-column board).
+    if ctx.columns.len() > 1 {
+        detail_status_row_ui(ui, theme, ctx, outcome);
         ui.add_space(SPACING_SM);
-        // Move the card between lanes without dragging (meaningless on a
-        // single-column board).
-        if ctx.columns.len() > 1 {
-            detail_status_row_ui(ui, theme, ctx, outcome);
-            ui.add_space(SPACING_SM);
-        }
-        detail_priority_row_ui(ui, theme, ctx, outcome);
-        ui.add_space(SPACING_SM);
+    }
+    detail_priority_row_ui(ui, theme, ctx, outcome);
+    ui.add_space(SPACING_SM);
 
-        // Same `rel_time` as the comment thread, so the two read alike. The
-        // updated time only appears once it has drifted past creation.
+    // Same `rel_time` as the comment thread, so the two read alike. The
+    // updated time only appears once it has drifted past creation.
+    ui.label(
+        egui::RichText::new(format!(
+            "Created {}",
+            headway::fmt::rel_time(ctx.created_at)
+        ))
+        .small()
+        .color(theme.text_muted),
+    );
+    if ctx.updated_at > ctx.created_at {
         ui.label(
             egui::RichText::new(format!(
-                "Created {}",
-                headway::fmt::rel_time(ctx.created_at)
+                "Updated {}",
+                headway::fmt::rel_time(ctx.updated_at)
             ))
             .small()
             .color(theme.text_muted),
         );
-        if ctx.updated_at > ctx.created_at {
-            ui.label(
-                egui::RichText::new(format!(
-                    "Updated {}",
-                    headway::fmt::rel_time(ctx.updated_at)
-                ))
-                .small()
-                .color(theme.text_muted),
-            );
-        }
-    });
+    }
 
-    ui.add_space(SPACING_SM);
-    sidebar_panel(theme).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        detail_labels_section_ui(ui, theme, ctx, state, outcome);
-    });
+    // Generous whitespace between groups is what separates them now the borders
+    // are gone — the Linear sidebar rhythm.
+    ui.add_space(SPACING_LG);
+    detail_labels_section_ui(ui, theme, ctx, state, outcome);
 
-    // Quiet, frameless actions under the panels — Linear keeps these out of
+    // Dependency edges get their own flat group under Labels, Linear-style,
+    // rather than sitting in the main column where they read as sub-issues.
+    // Skipped entirely when the card has no edges, so no empty heading shows.
+    if !ctx.blocked_by.is_empty() || !ctx.blocks.is_empty() {
+        ui.add_space(SPACING_LG);
+        detail_dependencies_section_ui(ui, theme, ctx, outcome);
+    }
+
+    // Quiet, frameless actions under the groups — Linear keeps these out of
     // the way rather than as filled buttons.
-    ui.add_space(SPACING_SM);
+    ui.add_space(SPACING_LG);
     ui.horizontal(|ui| {
         let archive = egui::Button::new(
             egui::RichText::new("Archive")
@@ -2615,12 +2618,14 @@ fn commit_subissue_drop(
     };
 }
 
-/// The card's dependency edges, mirroring the subissue section: a "Blocked by"
-/// list of the cards holding this one back (each row unblockable with a trailing
-/// ✕, the way the parent breadcrumb detaches) and a read-only "Blocks" list of
-/// the cards it holds back. Both are omitted when empty, so a card with no
-/// dependencies shows nothing. Adding a blocker lives in the board card's
-/// context menu ([`card_blocker_menu`]), like re-parenting.
+/// The card's dependency edges, a Linear-style sidebar block under Labels: a
+/// "Blocked by" list of the cards holding this one back (each row unblockable
+/// with a trailing ✕, the way the parent breadcrumb detaches) and a read-only
+/// "Blocks" list of the cards it holds back. Both are omitted when empty; the
+/// caller ([`detail_properties_ui`]) skips the wrapping panel entirely when
+/// there are no edges at all, so an empty bordered block never shows. Adding a
+/// blocker lives in the board card's context menu ([`card_blocker_menu`]), like
+/// re-parenting.
 fn detail_dependencies_section_ui(
     ui: &mut egui::Ui,
     theme: &ColorTheme,
@@ -2628,9 +2633,8 @@ fn detail_dependencies_section_ui(
     outcome: &mut DetailOutcome,
 ) {
     if !ctx.blocked_by.is_empty() {
-        ui.add_space(SPACING_LG);
         ui.horizontal(|ui| {
-            detail_heading(ui, theme, "Blocked by");
+            section_label(ui, theme, "Blocked by");
             // A dim ⊘ next to the heading when at least one blocker is still
             // open — the same signal the board listing carries.
             if ctx.blocked_by.iter().any(|e| !e.done) {
@@ -2645,8 +2649,12 @@ fn detail_dependencies_section_ui(
     }
 
     if !ctx.blocks.is_empty() {
-        ui.add_space(SPACING_LG);
-        detail_heading(ui, theme, "Blocks");
+        // Separate the two lists only when both are present, so a single-list
+        // panel doesn't carry dead space above its heading.
+        if !ctx.blocked_by.is_empty() {
+            ui.add_space(SPACING_MD);
+        }
+        section_label(ui, theme, "Blocks");
         ui.add_space(SPACING_XS);
         for edge in &ctx.blocks {
             detail_edge_row_ui(ui, theme, edge, false, outcome);
@@ -2654,12 +2662,14 @@ fn detail_dependencies_section_ui(
     }
 }
 
-/// One dependency row: a cleared/open status circle, the other card's title (a
-/// link that opens it when it's on this board, struck through once the edge is
-/// cleared), its muted word-id, and — when `unblockable` (the "Blocked by" side)
-/// — a trailing ✕ that lifts the blocker. The reverse "Blocks" side is read-only
+/// One dependency row, Linear-style: a single clean line of a cleared/open
+/// status circle and the other card's title, truncated to an ellipsis rather
+/// than wrapped. The title opens the card when it's on this board (struck
+/// through once the edge is cleared). Only while the row is hovered do the muted
+/// word-id and — when `unblockable` (the "Blocked by" side) — a trailing ✕ that
+/// lifts the blocker appear on the right. The reverse "Blocks" side is read-only
 /// (the edge is owned by the other card's blocker set), so it passes
-/// `unblockable = false`.
+/// `unblockable = false` and never shows a ✕.
 fn detail_edge_row_ui(
     ui: &mut egui::Ui,
     theme: &ColorTheme,
@@ -2667,48 +2677,75 @@ fn detail_edge_row_ui(
     unblockable: bool,
     outcome: &mut DetailOutcome,
 ) {
-    ui.horizontal_wrapped(|ui| {
+    // Reveal the word-id and unblock ✕ only while the row is hovered. Hover is
+    // read from last frame's registered response so we know it before laying the
+    // row out — the trailing controls reflow the title's truncation, which we
+    // can't decide mid-layout.
+    let row_id = ui.make_persistent_id(("headway-edge-row", edge.id, unblockable));
+    let hovered = ui
+        .ctx()
+        .read_response(row_id)
+        .is_some_and(|r| r.contains_pointer());
+
+    // A cleared edge no longer blocks: a done disc; otherwise a plain ring.
+    let icon = if edge.done {
+        StatusIcon::Done
+    } else {
+        StatusIcon::Todo
+    };
+    // A cleared blocker reads as struck-through and muted, so an open one is the
+    // eye's anchor (the CLI's `[x]`/`[ ]` distinction).
+    let title = if edge.done {
+        egui::RichText::new(&edge.title)
+            .strikethrough()
+            .color(theme.text_muted)
+    } else {
+        egui::RichText::new(&edge.title).color(theme.text_primary)
+    };
+
+    let row = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = SPACING_XS;
-        // A cleared edge no longer blocks: a done disc; otherwise a plain ring.
-        let icon = if edge.done {
-            StatusIcon::Done
-        } else {
-            StatusIcon::Todo
-        };
         status_icon_ui(ui, theme, icon, 14.0);
-        // A cleared blocker reads as struck-through and muted, so an open one is
-        // the eye's anchor (the CLI's `[x]`/`[ ]` distinction).
-        let title = if edge.done {
-            egui::RichText::new(&edge.title)
-                .strikethrough()
-                .color(theme.text_muted)
-        } else {
-            egui::RichText::new(&edge.title).color(theme.text_primary)
-        };
-        if edge.on_board {
-            if ui
-                .add(egui::Link::new(title))
-                .on_hover_text("Open card")
-                .clicked()
-            {
-                *outcome = DetailOutcome::OpenCard(edge.id);
+        // Trailing controls pin to the right on hover; the title fills whatever
+        // is left and truncates to one line with an ellipsis.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if hovered && unblockable {
+                let x = egui::Button::new(egui::RichText::new("✕").small().color(theme.text_muted))
+                    .frame(false);
+                if ui.add(x).on_hover_text("Remove blocker").clicked() {
+                    *outcome = DetailOutcome::Unblock(edge.id);
+                }
             }
-        } else {
-            ui.label(title);
-        }
-        ui.label(
-            egui::RichText::new(headway::wordid::encode(edge.id.bytes()))
-                .small()
-                .color(theme.text_muted.gamma_multiply(0.6)),
-        );
-        if unblockable {
-            let x = egui::Button::new(egui::RichText::new("✕").small().color(theme.text_muted))
-                .frame(false);
-            if ui.add(x).on_hover_text("Remove blocker").clicked() {
-                *outcome = DetailOutcome::Unblock(edge.id);
+            if hovered {
+                ui.label(
+                    egui::RichText::new(headway::wordid::encode(edge.id.bytes()))
+                        .small()
+                        .color(theme.text_muted.gamma_multiply(0.6)),
+                );
             }
-        }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let label = egui::Label::new(title).truncate();
+                if edge.on_board {
+                    let resp = ui
+                        .add(label.sense(egui::Sense::click()))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("Open card");
+                    if resp.clicked() {
+                        *outcome = DetailOutcome::OpenCard(edge.id);
+                    }
+                } else {
+                    ui.add(label);
+                }
+            });
+        });
     });
+
+    // Register this frame's row rect under the stable id so next frame's hover
+    // read resolves; repaint on change so the reveal isn't a frame late.
+    let resp = ui.interact(row.response.rect, row_id, egui::Sense::hover());
+    if resp.contains_pointer() != hovered {
+        ui.ctx().request_repaint();
+    }
 }
 
 /// Labels section: removable Linear-style chips (a colored dot in a neutral
@@ -3589,16 +3626,6 @@ fn detail_heading(ui: &mut egui::Ui, theme: &ColorTheme, text: &str) {
             .strong()
             .color(theme.text_primary),
     );
-}
-
-/// The subtle bordered, rounded panel each sidebar group (Properties, Labels)
-/// sits in — Linear's sidebar look. A builder, so no `_ui` suffix.
-fn sidebar_panel(theme: &ColorTheme) -> egui::Frame {
-    egui::Frame::new()
-        .fill(theme.surface_secondary)
-        .stroke(egui::Stroke::new(STROKE_THIN, theme.border_default))
-        .corner_radius(egui::CornerRadius::same(RADIUS_MD as u8))
-        .inner_margin(egui::Margin::same(SPACING_SM as i8))
 }
 
 /// Which Linear-style status circle to paint for a column or subissue.

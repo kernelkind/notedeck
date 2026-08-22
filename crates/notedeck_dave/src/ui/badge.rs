@@ -13,6 +13,8 @@ pub enum BadgeVariant {
     Success,
     /// Warning amber/yellow
     Warning,
+    /// Purple/violet (matches Claude Code's "accept edits" mode)
+    Purple,
     /// Error/danger red
     Destructive,
 }
@@ -71,6 +73,20 @@ impl BadgeVariant {
                     Color32::from_rgb(252, 211, 77) // amber-300
                 } else {
                     Color32::from_rgb(180, 83, 9) // amber-700
+                };
+                (bg, fg)
+            }
+            BadgeVariant::Purple => {
+                // Violet tones
+                let bg = if is_dark {
+                    Color32::from_rgba_unmultiplied(139, 92, 246, 30)
+                } else {
+                    Color32::from_rgba_unmultiplied(139, 92, 246, 25)
+                };
+                let fg = if is_dark {
+                    Color32::from_rgb(196, 181, 253) // violet-300
+                } else {
+                    Color32::from_rgb(109, 40, 217) // violet-700
                 };
                 (bg, fg)
             }
