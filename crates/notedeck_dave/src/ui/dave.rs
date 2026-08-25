@@ -1313,11 +1313,12 @@ impl<'a> DaveUi<'a> {
                 diff::file_update_ui(file_update, false, ui);
             }
         } else if let Some(output) = &result.output {
-            // Free-form tool output (bash stdout/stderr) — collapsed by default
-            // so a noisy command doesn't dominate the transcript; click to reveal
-            // the full command and its output together.
+            // Free-form tool output (bash stdout/stderr) — expanded by default so
+            // the command and its output are visible without a click, mirroring
+            // auto-accepted permission rows: the user never approved it up front,
+            // so what ran should stay on-screen. A user toggle still collapses it.
             let expand_id = ui.id().with("exec_output").with(&result.summary);
-            let expanded: bool = ui.data(|d| d.get_temp(expand_id).unwrap_or(false));
+            let expanded: bool = ui.data(|d| d.get_temp(expand_id).unwrap_or(true));
 
             let header_resp = Self::exec_tool_header_ui(
                 &result.tool_name,
@@ -3105,7 +3106,8 @@ mod tests {
     /// the chevron — toggles its body. Guards headway:dave/retire-garage-accuse:
     /// the click target spans the *full width* of the row, so a click in the
     /// empty space well past the summary text (nowhere near the chevron) still
-    /// expands it.
+    /// toggles it. Bash-output rows start *expanded*, so the click here
+    /// collapses the body.
     #[test]
     fn clicking_tool_summary_line_toggles_body() {
         let results = vec![crate::messages::ExecutedTool {
@@ -3124,10 +3126,9 @@ mod tests {
             });
         harness.run();
 
-        // Collapsed by default: the expanded body renders the *bare* command
-        // (backticks stripped), so its absence means the body is hidden — only
-        // the backtick-quoted header summary is present.
-        assert!(harness.query_by_label("ls -la crates").is_none());
+        // Expanded by default: the body renders the *bare* command (backticks
+        // stripped), so its presence proves the row starts open without a click.
+        harness.get_by_label("ls -la crates");
 
         // Click the empty space to the far right of the summary text, well past
         // both the chevron and the command, to prove the whole line is the hit
@@ -3153,13 +3154,14 @@ mod tests {
         harness.step();
         harness.run();
 
-        // Body revealed: the bare command now renders in the expanded block.
-        harness.get_by_label("ls -la crates");
+        // Body hidden: the click collapsed the row, so the bare command is gone.
+        assert!(harness.query_by_label("ls -la crates").is_none());
     }
 
-    /// Visualize the tool-result rows in their default (collapsed) state: the
-    /// Bash-with-output row shows a ▶ disclosure, the others render as plain
-    /// one-liners. Render with `scripts/snapshot-test snapshot_executed_tool_results`.
+    /// Visualize the tool-result rows in their default state: the
+    /// Bash-with-output row shows a ▼ disclosure with its body expanded, the
+    /// others render as plain one-liners. Render with
+    /// `scripts/snapshot-test snapshot_executed_tool_results`.
     #[test]
     #[ignore] // requires lavapipe — run via scripts/snapshot-test
     fn snapshot_executed_tool_results() {
@@ -3347,6 +3349,10 @@ mod tests {
             .renderer(notedeck::software_renderer())
             .build_ui(move |ui| {
                 ui.vertical(|ui| {
+                    // Bash-output rows start expanded; force the collapsed state
+                    // to exercise the header-truncation path this test guards.
+                    let expand_id = ui.id().with("exec_output").with(summary);
+                    ui.data_mut(|d| d.insert_temp(expand_id, false));
                     for result in &results {
                         DaveUi::executed_tool_ui(result, ui);
                         ui.add_space(4.0);
