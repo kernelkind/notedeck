@@ -1,6 +1,7 @@
 use crate::{
     nav::RenderNavAction,
     profile::ProfileAction,
+    scoped_sub_owner_keys::ThreadOwnerId,
     timeline::{thread::Threads, ThreadSelection, TimelineCache, TimelineKind},
     ui::{self, ProfileView},
 };
@@ -51,10 +52,12 @@ pub fn render_timeline_route(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn render_thread_route(
+/// Render a thread using a column or deep-link owner identity.
+pub(crate) fn render_thread_route(
     threads: &mut Threads,
     selection: &ThreadSelection,
-    col: usize,
+    owner: ThreadOwnerId,
+    scroll_id: egui::Id,
     mut note_options: NoteOptions,
     ui: &mut egui::Ui,
     note_context: &mut NoteContext,
@@ -66,12 +69,13 @@ pub fn render_thread_route(
     // We need the reply lines in threads
     note_options.set(NoteOptions::Wide, false);
 
-    ui::ThreadView::new(
+    ui::ThreadView::new_for_owner(
         threads,
         selection.selected_or_root(),
         note_options,
         note_context,
-        col,
+        owner,
+        scroll_id,
     )
     .ui(ui)
     .map_output(RenderNavAction::NoteAction)

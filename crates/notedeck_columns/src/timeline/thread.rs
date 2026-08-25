@@ -2,16 +2,19 @@ use egui_nav::ReturnType;
 use egui_virtual_list::VirtualList;
 use enostr::NoteId;
 use hashbrown::{hash_map::RawEntryMut, HashMap};
-use nostrdb::{Filter, Ndb, Note, NoteKey, NoteReplyBuf, Transaction};
+use nostrdb::{Ndb, Note, NoteKey, NoteReplyBuf, Transaction};
 use notedeck::{Accounts, NoteCache, NoteRef, ScopedSubApi, UnknownIds};
 
 use crate::{
     actionbar::{process_thread_notes, NewThreadNotes},
+    column::ColumnId,
+    deeplink::DeepLinkId,
+    scoped_sub_owner_keys::ThreadOwnerId,
     timeline::{
         note_units::{NoteUnits, UnitKey},
         sub::ThreadSubs,
         unit::NoteUnit,
-        InsertionResponse,
+        InsertionResponse, RemoteSubscriptionPolicy,
     },
 };
 
@@ -58,19 +61,69 @@ pub struct Threads {
 }
 
 impl Threads {
-    /// Opening a thread.
-    /// Similar to [[super::cache::TimelineCache::open]]
+    /// Open a thread with a Columns-internal remote subscription policy.
     #[allow(clippy::too_many_arguments)]
     #[profiling::function]
     pub fn open(
         &mut self,
         ndb: &mut Ndb,
         txn: &Transaction,
-        scoped_subs: &mut ScopedSubApi<'_, '_>,
+        scoped_subs: &mut ScopedSubApi<'_>,
         thread: &ThreadSelection,
         new_scope: bool,
-        col: usize,
+        col: ColumnId,
         scroll_offset: f32,
+        remote_policy: RemoteSubscriptionPolicy,
+    ) -> Option<NewThreadNotes> {
+        self.open_for_owner(
+            ndb,
+            txn,
+            scoped_subs,
+            thread,
+            new_scope,
+            ThreadOwnerId::Column(col),
+            scroll_offset,
+            remote_policy,
+        )
+    }
+
+    /// Open a thread owned by one transient deep-link entry.
+    #[allow(clippy::too_many_arguments)]
+    #[profiling::function]
+    pub(crate) fn open_deeplink(
+        &mut self,
+        ndb: &mut Ndb,
+        txn: &Transaction,
+        scoped_subs: &mut ScopedSubApi<'_>,
+        thread: &ThreadSelection,
+        new_scope: bool,
+        id: DeepLinkId,
+        scroll_offset: f32,
+        remote_policy: RemoteSubscriptionPolicy,
+    ) -> Option<NewThreadNotes> {
+        self.open_for_owner(
+            ndb,
+            txn,
+            scoped_subs,
+            thread,
+            new_scope,
+            ThreadOwnerId::DeepLink(id),
+            scroll_offset,
+            remote_policy,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn open_for_owner(
+        &mut self,
+        ndb: &mut Ndb,
+        txn: &Transaction,
+        scoped_subs: &mut ScopedSubApi<'_>,
+        thread: &ThreadSelection,
+        new_scope: bool,
+        owner: ThreadOwnerId,
+        scroll_offset: f32,
+        remote_policy: RemoteSubscriptionPolicy,
     ) -> Option<NewThreadNotes> {
         tracing::info!("Opening thread: {:?}", thread);
         let local_sub_filter = if let Some(selected) = &thread.selected_note {
@@ -116,12 +169,11 @@ impl Threads {
         self.subs.subscribe(
             ndb,
             scoped_subs,
-            col,
+            owner,
             thread,
             local_sub_filter,
             new_scope,
-            replies_filter_remote(thread),
-            replies_history_filter_remote(thread),
+            remote_policy,
         );
 
         new_notes.map(|notes| NewThreadNotes {
@@ -130,17 +182,40 @@ impl Threads {
         })
     }
 
-    pub fn close(
+    pub(crate) fn close(
         &mut self,
         ndb: &mut Ndb,
-        scoped_subs: &mut ScopedSubApi<'_, '_>,
+        scoped_subs: &mut ScopedSubApi<'_>,
         thread: &ThreadSelection,
         return_type: ReturnType,
-        id: usize,
+        id: impl Into<ThreadOwnerId>,
     ) {
         tracing::info!("Closing thread: {:?}", thread);
         self.subs
             .unsubscribe(ndb, scoped_subs, id, thread, return_type);
+    }
+
+    /// Remove the top thread scope for one removed route.
+    pub(crate) fn dispose_route_for_account(
+        &mut self,
+        ndb: &mut Ndb,
+        scoped_subs: &mut ScopedSubApi<'_>,
+        account_pk: enostr::Pubkey,
+        id: ColumnId,
+        thread: &ThreadSelection,
+    ) {
+        self.subs
+            .dispose_route_for_account(ndb, scoped_subs, account_pk, id, thread);
+    }
+
+    pub(crate) fn refresh_remote_subscriptions(
+        &mut self,
+        ndb: &Ndb,
+        scoped_subs: &mut ScopedSubApi<'_>,
+        remote_policy: RemoteSubscriptionPolicy,
+    ) {
+        self.subs
+            .refresh_remote_subscriptions(ndb, scoped_subs, remote_policy);
     }
 
     /// Responsible for making sure the chain and the direct replies are up to date
@@ -154,7 +229,30 @@ impl Threads {
         txn: &Transaction,
         unknown_ids: &mut UnknownIds,
         accounts: &Accounts,
-        col: usize,
+        col: ColumnId,
+    ) {
+        self.update_for_owner(
+            selected,
+            note_cache,
+            ndb,
+            txn,
+            unknown_ids,
+            accounts,
+            ThreadOwnerId::Column(col),
+        );
+    }
+
+    /// Update a rendered thread using its stable owner identity.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn update_for_owner(
+        &mut self,
+        selected: &Note<'_>,
+        note_cache: &mut NoteCache,
+        ndb: &Ndb,
+        txn: &Transaction,
+        unknown_ids: &mut UnknownIds,
+        accounts: &Accounts,
+        owner: ThreadOwnerId,
     ) {
         let Some(selected_key) = selected.key() else {
             tracing::error!("Selected note did not have a key");
@@ -171,7 +269,7 @@ impl Threads {
             .get_mut(&selected.id())
             .expect("should be guarenteed to exist from `Self::fill_reply_chain_recursive`");
 
-        let Some(sub) = self.subs.get_local_for_selected(accounts, col) else {
+        let Some(sub) = self.subs.get_local_for_selected(accounts, owner) else {
             tracing::error!("Was expecting to find local sub");
             return;
         };
@@ -367,26 +465,6 @@ fn direct_replies_filter_root(root_id: &[u8; 32]) -> nostrdb::Filter {
         .build()
 }
 
-fn replies_filter_remote(selection: &ThreadSelection) -> Vec<Filter> {
-    let (replies, root) = replies_remote_filter_builders(selection);
-    vec![replies.limit(500).build(), root.limit(1).build()]
-}
-
-fn replies_history_filter_remote(selection: &ThreadSelection) -> Vec<Filter> {
-    let (replies, root) = replies_remote_filter_builders(selection);
-    vec![replies.build(), root.build()]
-}
-
-fn replies_remote_filter_builders(
-    selection: &ThreadSelection,
-) -> (nostrdb::FilterBuilder, nostrdb::FilterBuilder) {
-    let replies = nostrdb::Filter::new()
-        .kinds([1])
-        .event(selection.root_id.bytes());
-    let root = nostrdb::Filter::new().ids([selection.root_id.bytes()]);
-    (replies, root)
-}
-
 /// Represents indicators that there is more content in the note to view
 #[derive(Default)]
 pub struct NoteSeenFlags {
@@ -446,6 +524,7 @@ impl SingleNoteUnits {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::column::ColumnId;
     use egui_nav::ReturnType;
     use nostrdb::Transaction;
     use notedeck::{Notedeck, RootNoteIdBuf};
@@ -453,7 +532,6 @@ mod tests {
 
     struct ThreadHostHarness {
         _tmp: TempDir,
-        ui_ctx: egui::Context,
         notedeck: Notedeck,
         threads: Threads,
     }
@@ -470,7 +548,6 @@ mod tests {
 
             Self {
                 _tmp: tmp,
-                ui_ctx,
                 notedeck,
                 threads: Threads::default(),
             }
@@ -481,13 +558,18 @@ mod tests {
         ThreadSelection::from_root_id(RootNoteIdBuf::new_unsafe([tag; 32]))
     }
 
-    #[tokio::test]
-    async fn open_thread_installs_expected_remote_sub() {
+    fn remote_policy() -> RemoteSubscriptionPolicy {
+        RemoteSubscriptionPolicy::from_outbox_relays(true)
+    }
+
+    #[test]
+    fn open_thread_installs_expected_remote_sub() {
         let mut h = ThreadHostHarness::new();
         let selection = thread_selection(0x11);
+        let col = ColumnId::for_test(7);
 
         {
-            let mut app_ctx = h.notedeck.app_context(&h.ui_ctx);
+            let mut app_ctx = h.notedeck.app_context();
             let txn = Transaction::new(app_ctx.ndb).expect("txn");
             let mut scoped_subs = app_ctx.remote.scoped_subs(app_ctx.accounts);
             let _ = h.threads.open(
@@ -496,27 +578,29 @@ mod tests {
                 &mut scoped_subs,
                 &selection,
                 true,
-                7,
+                col,
                 0.0,
+                remote_policy(),
             );
         }
 
         assert!(
             h.threads
                 .subs
-                .get_local_for_selected(h.notedeck.app_context(&h.ui_ctx).accounts, 7)
+                .get_local_for_selected(h.notedeck.app_context().accounts, col)
                 .is_some(),
             "thread open should keep the local NDB sub alive for the selected account"
         );
     }
 
-    #[tokio::test]
-    async fn nested_thread_scopes_share_one_live_remote_sub_until_last_close() {
+    #[test]
+    fn nested_thread_scopes_keep_local_subs_until_last_close() {
         let mut h = ThreadHostHarness::new();
         let selection = thread_selection(0x22);
+        let col = ColumnId::for_test(3);
 
         {
-            let mut app_ctx = h.notedeck.app_context(&h.ui_ctx);
+            let mut app_ctx = h.notedeck.app_context();
             let txn = Transaction::new(app_ctx.ndb).expect("txn");
             let mut scoped_subs = app_ctx.remote.scoped_subs(app_ctx.accounts);
             let _ = h.threads.open(
@@ -525,12 +609,13 @@ mod tests {
                 &mut scoped_subs,
                 &selection,
                 true,
-                3,
+                col,
                 0.0,
+                remote_policy(),
             );
         }
         {
-            let mut app_ctx = h.notedeck.app_context(&h.ui_ctx);
+            let mut app_ctx = h.notedeck.app_context();
             let txn = Transaction::new(app_ctx.ndb).expect("txn");
             let mut scoped_subs = app_ctx.remote.scoped_subs(app_ctx.accounts);
             let _ = h.threads.open(
@@ -539,122 +624,196 @@ mod tests {
                 &mut scoped_subs,
                 &selection,
                 true,
-                3,
+                col,
                 0.0,
+                remote_policy(),
             );
         }
         assert!(
             h.threads
                 .subs
-                .get_local_for_selected(h.notedeck.app_context(&h.ui_ctx).accounts, 3)
+                .get_local_for_selected(h.notedeck.app_context().accounts, col)
                 .is_some(),
             "nested scopes should keep one live local thread sub for the selected account"
         );
 
         {
-            let mut app_ctx = h.notedeck.app_context(&h.ui_ctx);
+            let mut app_ctx = h.notedeck.app_context();
             let mut scoped_subs = app_ctx.remote.scoped_subs(app_ctx.accounts);
             h.threads.close(
                 app_ctx.ndb,
                 &mut scoped_subs,
                 &selection,
                 ReturnType::Click,
-                3,
+                col,
             );
         }
         assert!(
             h.threads
                 .subs
-                .get_local_for_selected(h.notedeck.app_context(&h.ui_ctx).accounts, 3)
+                .get_local_for_selected(h.notedeck.app_context().accounts, col)
                 .is_some(),
             "closing one nested scope should keep the local thread sub alive"
         );
 
         {
-            let mut app_ctx = h.notedeck.app_context(&h.ui_ctx);
+            let mut app_ctx = h.notedeck.app_context();
             let mut scoped_subs = app_ctx.remote.scoped_subs(app_ctx.accounts);
             h.threads.close(
                 app_ctx.ndb,
                 &mut scoped_subs,
                 &selection,
                 ReturnType::Click,
-                3,
+                col,
             );
         }
         assert!(
             h.threads
                 .subs
-                .get_local_for_selected(h.notedeck.app_context(&h.ui_ctx).accounts, 3)
+                .get_local_for_selected(h.notedeck.app_context().accounts, col)
                 .is_none(),
             "closing the last scope should unsubscribe the local thread sub"
         );
     }
 
-    /// A deep-linked thread's subscription lifecycle runs through the same
-    /// `threads.open` / `cleanup_popped_route` pair a deck column uses — only
-    /// keyed by a deep-link's dedicated high `col`. Opening then routing the
-    /// popped `Route::Thread` through `cleanup_popped_route` (exactly what
-    /// [`Damus::cleanup_nav`](crate::Damus) does on a global-back) must leave no
-    /// dangling sub, so a deep-link entry frees its thread when it leaves the
-    /// global history.
     #[tokio::test]
-    async fn deeplink_thread_cleanup_closes_the_sub() {
-        use crate::route::cleanup_popped_route;
-        use crate::Route;
-
+    async fn column_and_deeplink_thread_owners_are_independent() {
         let mut h = ThreadHostHarness::new();
-        let selection = thread_selection(0x44);
-        // A deep-link col lives in the disjoint high range, never a real column.
-        let col = usize::MAX / 2;
+        let column_selection = thread_selection(0x43);
+        let deeplink_selection = thread_selection(0x44);
+        let deeplink_id = DeepLinkId::new(7);
+        let column_id = ColumnId::for_test_in_deck(1, 7);
 
         {
-            let mut app_ctx = h.notedeck.app_context(&h.ui_ctx);
+            let mut app_ctx = h.notedeck.app_context();
             let txn = Transaction::new(app_ctx.ndb).expect("txn");
             let mut scoped_subs = app_ctx.remote.scoped_subs(app_ctx.accounts);
             let _ = h.threads.open(
                 app_ctx.ndb,
                 &txn,
                 &mut scoped_subs,
+                &column_selection,
+                true,
+                column_id,
+                0.0,
+                remote_policy(),
+            );
+            let _ = h.threads.open_deeplink(
+                app_ctx.ndb,
+                &txn,
+                &mut scoped_subs,
+                &deeplink_selection,
+                false,
+                deeplink_id,
+                0.0,
+                remote_policy(),
+            );
+        }
+
+        {
+            let app_ctx = h.notedeck.app_context();
+            assert!(h
+                .threads
+                .subs
+                .get_local_for_selected(app_ctx.accounts, ThreadOwnerId::Column(column_id))
+                .is_some());
+            assert!(h
+                .threads
+                .subs
+                .get_local_for_selected(app_ctx.accounts, ThreadOwnerId::DeepLink(deeplink_id),)
+                .is_some());
+        }
+
+        {
+            let mut app_ctx = h.notedeck.app_context();
+            let mut scoped_subs = app_ctx.remote.scoped_subs(app_ctx.accounts);
+            h.threads.close(
+                app_ctx.ndb,
+                &mut scoped_subs,
+                &deeplink_selection,
+                ReturnType::Click,
+                ThreadOwnerId::DeepLink(deeplink_id),
+            );
+        }
+
+        let app_ctx = h.notedeck.app_context();
+        assert!(h
+            .threads
+            .subs
+            .get_local_for_selected(app_ctx.accounts, ThreadOwnerId::Column(column_id))
+            .is_some());
+        assert!(h
+            .threads
+            .subs
+            .get_local_for_selected(app_ctx.accounts, ThreadOwnerId::DeepLink(deeplink_id))
+            .is_none());
+    }
+
+    /// A deep-linked thread's subscription lifecycle uses its tagged deep-link
+    /// owner from open through cleanup. Opening then routing the popped
+    /// `Route::Thread` through `cleanup_deeplink_route` (exactly what
+    /// [`Damus::cleanup_nav`](crate::Damus) does on a global-back) must leave no
+    /// dangling sub, so a deep-link entry frees its thread when it leaves the
+    /// global history.
+    #[tokio::test]
+    async fn deeplink_thread_cleanup_closes_the_sub() {
+        use crate::route::cleanup_deeplink_route;
+        use crate::Route;
+
+        let mut h = ThreadHostHarness::new();
+        let selection = thread_selection(0x44);
+        let id = DeepLinkId::new(42);
+
+        {
+            let mut app_ctx = h.notedeck.app_context();
+            let txn = Transaction::new(app_ctx.ndb).expect("txn");
+            let mut scoped_subs = app_ctx.remote.scoped_subs(app_ctx.accounts);
+            let _ = h.threads.open_deeplink(
+                app_ctx.ndb,
+                &txn,
+                &mut scoped_subs,
                 &selection,
                 false,
-                col,
+                id,
                 0.0,
+                remote_policy(),
             );
         }
         assert!(
             h.threads
                 .subs
-                .get_local_for_selected(h.notedeck.app_context(&h.ui_ctx).accounts, col)
+                .get_local_for_selected(
+                    h.notedeck.app_context().accounts,
+                    ThreadOwnerId::DeepLink(id),
+                )
                 .is_some(),
-            "opening the deep-link thread installs its local sub under the deep-link col"
+            "opening the deep-link thread installs its local sub under the deep-link identity"
         );
 
         // Free it via the deep-link cleanup path (not a direct threads.close).
         let route = Route::Thread(selection.clone());
         let mut timeline_cache = crate::timeline::TimelineCache::default();
-        let mut onboarding = crate::onboarding::Onboarding::default();
-        let mut view_state = crate::view_state::ViewState::default();
         {
-            let mut app_ctx = h.notedeck.app_context(&h.ui_ctx);
+            let mut app_ctx = h.notedeck.app_context();
             let mut scoped_subs = app_ctx.remote.scoped_subs(app_ctx.accounts);
-            cleanup_popped_route(
+            cleanup_deeplink_route(
                 &route,
+                id,
                 &mut timeline_cache,
                 &mut h.threads,
-                &mut onboarding,
-                &mut view_state,
                 app_ctx.ndb,
                 &mut scoped_subs,
-                ReturnType::Click,
-                col,
             );
         }
         assert!(
             h.threads
                 .subs
-                .get_local_for_selected(h.notedeck.app_context(&h.ui_ctx).accounts, col)
+                .get_local_for_selected(
+                    h.notedeck.app_context().accounts,
+                    ThreadOwnerId::DeepLink(id),
+                )
                 .is_none(),
-            "cleanup_popped_route must unsubscribe the deep-link thread's local sub"
+            "cleanup_deeplink_route must unsubscribe the deep-link thread's local sub"
         );
     }
 }

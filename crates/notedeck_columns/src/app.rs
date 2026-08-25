@@ -2,6 +2,7 @@ use crate::{
     args::{ColumnsArgs, ColumnsFlag},
     column::Columns,
     decks::{Decks, DecksCache},
+    deeplink::DeepLinkId,
     draft::Drafts,
     nav::{self, ProcessNavResult},
     onboarding::Onboarding,
@@ -9,7 +10,10 @@ use crate::{
     route::Route,
     storage,
     support::Support,
-    timeline::{self, kind::ListKind, thread::Threads, TimelineCache, TimelineKind},
+    timeline::{
+        self, kind::ListKind, thread::Threads, RemoteSubscriptionPolicy, TimelineCache,
+        TimelineKind,
+    },
     timeline_loader::{TimelineLoader, TimelineLoaderMsg},
     ui::{self, DesktopSidePanel, SidePanelAction},
     view_state::ViewState,
@@ -29,10 +33,11 @@ use notedeck_ui::{
 };
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
+use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
-/// Max timeline loader messages to process per frame to avoid UI stalls.
-const MAX_TIMELINE_LOADER_MSGS_PER_FRAME: usize = 8;
+/// Max wall time spent applying timeline loader messages in one frame.
+const TIMELINE_LOADER_APPLY_BUDGET: Duration = Duration::from_millis(2);
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum DamusState {
@@ -68,18 +73,15 @@ pub struct Damus {
     /// Track which column is hovered for mouse back/forward navigation
     hovered_column: Option<usize>,
 
-    /// Next subscription-scope key to hand a deep-link pane (see
-    /// [`Damus::alloc_deeplink_col`]). Deep-links rendered as global-nav entries
-    /// must not share a `col` with a deck column (small, 0-based) or with each
-    /// other, so they draw from a disjoint high range instead.
-    next_deeplink_col: usize,
+    /// Next identity value allocated to a global deep-link entry.
+    ///
+    /// Each entry receives one monotonic [`DeepLinkId`] before its route opens
+    /// and retains it through rendering and cleanup. Values are never reused
+    /// during this `Damus` session, keeping deep links distinct from each other;
+    /// [`ThreadOwnerId`](crate::scoped_sub_owner_keys::ThreadOwnerId) and
+    /// deep-link-specific egui IDs keep them distinct from deck columns.
+    next_deeplink_id: u64,
 }
-
-/// Base subscription-scope key for deep-link panes. Deck columns index from 0
-/// upward and never reach here, so allocating deep-link `col`s from this base
-/// keeps their thread/timeline subscription bookkeeping from ever colliding with
-/// a real column's. See [`Damus::alloc_deeplink_col`].
-const DEEPLINK_COL_BASE: usize = usize::MAX / 2;
 
 #[profiling::function]
 fn handle_egui_events(
@@ -226,7 +228,15 @@ fn try_process_event(
 
         let is_ready = {
             let mut scoped_subs = app_ctx.remote.scoped_subs(app_ctx.accounts);
-            timeline::is_timeline_ready(app_ctx.ndb, &mut scoped_subs, timeline, app_ctx.accounts)
+            timeline::is_timeline_ready(
+                app_ctx.ndb,
+                &mut scoped_subs,
+                timeline,
+                app_ctx.accounts,
+                RemoteSubscriptionPolicy::from_outbox_relays(
+                    app_ctx.settings.columns_use_outbox_relays(),
+                ),
+            )
         };
 
         if is_ready {
@@ -250,6 +260,9 @@ fn try_process_event(
                 reversed,
             ) {
                 Ok(new_note_keys) => {
+                    if !new_note_keys.is_empty() {
+                        ctx.request_repaint();
+                    }
                     if !new_note_keys.is_empty() && matches!(kind, TimelineKind::Notifications(_)) {
                         let muted = app_ctx.accounts.mute();
                         let has_unmuted = new_note_keys.iter().any(|key| {
@@ -290,10 +303,6 @@ fn try_process_event(
                 _ => {}
             }
         }
-
-        if let Some(follow_packs) = damus.onboarding.get_follow_packs_mut() {
-            follow_packs.poll_for_notes(app_ctx.ndb, app_ctx.unknown_ids);
-        }
     }
 
     Ok(())
@@ -327,9 +336,19 @@ fn schedule_timeline_load(
 
 /// Drain timeline loader messages and apply them to the timeline cache.
 #[profiling::function]
-fn handle_timeline_loader_messages(damus: &mut Damus, app_ctx: &mut AppContext<'_>) {
+fn handle_timeline_loader_messages(
+    damus: &mut Damus,
+    app_ctx: &mut AppContext<'_>,
+    ctx: &egui::Context,
+) {
+    let start = Instant::now();
     let mut handled = 0;
-    while handled < MAX_TIMELINE_LOADER_MSGS_PER_FRAME {
+    loop {
+        if handled > 0 && start.elapsed() >= TIMELINE_LOADER_APPLY_BUDGET {
+            ctx.request_repaint();
+            break;
+        }
+
         let Some(msg) = damus.timeline_loader.try_recv() else {
             break;
         };
@@ -342,11 +361,9 @@ fn handle_timeline_loader_messages(damus: &mut Damus, app_ctx: &mut AppContext<'
                     continue;
                 };
                 let txn = Transaction::new(app_ctx.ndb).expect("txn");
-                if let Some(pks) =
-                    timeline.insert_new(&txn, app_ctx.ndb, app_ctx.note_cache, &notes)
-                {
-                    pks.process(app_ctx.ndb, &txn, app_ctx.unknown_ids);
-                }
+                let insert_result =
+                    timeline.insert_new(&txn, app_ctx.ndb, app_ctx.note_cache, &notes);
+                insert_result.process(app_ctx.ndb, &txn, app_ctx.unknown_ids, app_ctx.note_cache);
             }
             TimelineLoaderMsg::TimelineFinished { kind } => {
                 if let Some(timeline) = damus.timeline_cache.get_mut(&kind) {
@@ -400,7 +417,11 @@ fn update_damus(damus: &mut Damus, app_ctx: &mut AppContext<'_>, ctx: &egui::Con
         DamusState::Initialized => (),
     };
 
-    handle_timeline_loader_messages(damus, app_ctx);
+    handle_timeline_loader_messages(damus, app_ctx, ctx);
+
+    if let Some(follow_packs) = damus.onboarding.get_follow_packs_mut() {
+        follow_packs.poll_for_notes(app_ctx.ndb, app_ctx.unknown_ids);
+    }
 
     if let Err(err) = try_process_event(damus, app_ctx, ctx) {
         error!("error processing event: {}", err);
@@ -538,6 +559,9 @@ impl Damus {
                     &mut scoped_subs,
                     &timeline_kind,
                     *app_context.accounts.selected_account_pubkey(),
+                    RemoteSubscriptionPolicy::from_outbox_relays(
+                        app_context.settings.columns_use_outbox_relays(),
+                    ),
                 ) {
                     add_result.process(
                         app_context.ndb,
@@ -587,7 +611,7 @@ impl Damus {
             threads,
             onboarding: Onboarding::default(),
             hovered_column: None,
-            next_deeplink_col: DEEPLINK_COL_BASE,
+            next_deeplink_id: 0,
             timeline_loader: TimelineLoader::default(),
         }
     }
@@ -631,7 +655,7 @@ impl Damus {
             threads: Threads::default(),
             onboarding: Onboarding::default(),
             hovered_column: None,
-            next_deeplink_col: DEEPLINK_COL_BASE,
+            next_deeplink_id: 0,
             timeline_loader: TimelineLoader::default(),
         }
     }
@@ -640,42 +664,45 @@ impl Damus {
         &self.unrecognized_args
     }
 
-    /// Allocate a fresh subscription-scope key for a deep-link pane.
+    /// Allocate a fresh identity for one global deep-link entry.
     ///
-    /// Each deep-link (see [`crate::deeplink::DeepLink`]) gets its own `col`,
-    /// disjoint from every deck column and from every other deep-link, so the
-    /// thread/timeline subscription it opens is torn down independently when its
-    /// global-history entry is popped. Keys are drawn from
-    /// [`DEEPLINK_COL_BASE`] upward and never reused within a session.
-    pub fn alloc_deeplink_col(&mut self) -> usize {
-        let col = self.next_deeplink_col;
-        self.next_deeplink_col = self.next_deeplink_col.wrapping_add(1);
-        col
+    /// The identity is allocated before its route opens and carried through
+    /// rendering and cleanup. It isolates thread subscription ownership and
+    /// thread/timeline UI state from deck columns and other deep links. Values
+    /// increase monotonically and are never reused during this `Damus` session.
+    pub(crate) fn alloc_deeplink_id(&mut self) -> DeepLinkId {
+        let id = DeepLinkId::new(self.next_deeplink_id);
+        self.next_deeplink_id = self
+            .next_deeplink_id
+            .checked_add(1)
+            .expect("deep-link identity space exhausted");
+        id
     }
 
     /// Open a deep-link for a cross-app navigation and return the token to push
     /// onto the chrome's global history, or `None` if `action` names no navigable
     /// route (only a note-open or a profile-open deep-links).
     ///
-    /// This opens the route's subscription up front (keyed by a freshly
-    /// [allocated](Self::alloc_deeplink_col) `col`), so the entry renders
-    /// immediately and [`cleanup_nav`](notedeck::App::cleanup_nav) can close
-    /// exactly that subscription when the entry is later popped. `app` is the
-    /// Columns chrome slot, carried in the token so a drill-in from inside the
-    /// pane can push further deep-links onto the same app's history.
+    /// This opens the route's subscription before pushing the entry. The
+    /// freshly allocated identity is stored in the token to isolate its UI
+    /// state and, for a thread route, its subscription
+    /// owner. When the entry is popped, [`cleanup_nav`](notedeck::App::cleanup_nav)
+    /// releases that entry's route demand. `app` is the Columns chrome slot,
+    /// carried so a drill-in can push further deep-links onto the same app's
+    /// history.
     pub fn open_deeplink(
         &mut self,
         ctx: &mut AppContext<'_>,
         app: notedeck::AppId,
         action: &notedeck::NoteAction,
     ) -> Option<std::rc::Rc<dyn std::any::Any>> {
-        let col = self.alloc_deeplink_col();
-        let route = nav::open_deeplink_route(self, ctx, col, action)?;
+        let id = self.alloc_deeplink_id();
+        let route = nav::open_deeplink_route(self, ctx, id, action)?;
         Some(std::rc::Rc::new(
             crate::deeplink::ColumnsNavToken::DeepLink(crate::deeplink::DeepLink {
                 app,
                 route,
-                col,
+                id,
             }),
         ))
     }
@@ -789,15 +816,6 @@ fn render_damus_mobile(
 
                 ProcessNavResult::PfpClicked => {
                     app_action = Some(AppAction::ToggleChrome);
-                }
-
-                ProcessNavResult::SwitchAccount(pubkey) => {
-                    // Add as pubkey-only account if not already present
-                    let kp = enostr::Keypair::only_pubkey(pubkey);
-                    let _ = app_ctx.accounts.add_account(kp);
-
-                    app_ctx.select_account(&pubkey);
-                    setup_selected_account_timeline_subs(&mut app.timeline_cache, app_ctx);
                 }
 
                 ProcessNavResult::ExternalNoteAction(note_action) => {
@@ -1030,7 +1048,7 @@ fn timelines_view(
     // StripBuilder rendering
     let mut save_cols = false;
     if let Some(action) = side_panel_action {
-        save_cols = save_cols || action.process(&mut app.timeline_cache, &mut app.decks_cache, ctx);
+        save_cols = save_cols || action.process(app, ctx);
     }
 
     let mut app_action: Option<AppAction> = None;
@@ -1044,15 +1062,6 @@ fn timelines_view(
 
                 ProcessNavResult::PfpClicked => {
                     app_action = Some(AppAction::ToggleChrome);
-                }
-
-                ProcessNavResult::SwitchAccount(pubkey) => {
-                    // Add as pubkey-only account if not already present
-                    let kp = enostr::Keypair::only_pubkey(pubkey);
-                    let _ = ctx.accounts.add_account(kp);
-
-                    ctx.select_account(&pubkey);
-                    setup_selected_account_timeline_subs(&mut app.timeline_cache, ctx);
                 }
 
                 ProcessNavResult::ExternalNoteAction(note_action) => {
@@ -1088,7 +1097,8 @@ impl notedeck::App for Damus {
     /// token renders that single thread/profile as its own transient pane; the
     /// `Deck` token — and any token this app doesn't recognize, such as the `()`
     /// a plain app-switch entry carries — renders the normal multi-column deck,
-    /// exactly like [`render`](Self::render). The deck's own per-column in-pane
+    /// exactly like [`App::render`](notedeck::App::render). The deck's own
+    /// per-column in-pane
     /// nav is untouched and stays private to the deck path.
     #[profiling::function]
     fn render_nav(
@@ -1106,12 +1116,14 @@ impl notedeck::App for Damus {
         }
     }
 
-    /// Free a popped deep-link's subscription. The chrome calls this off a
-    /// completed global-back with the same token [`render_nav`](Self::render_nav)
-    /// drew; a deck-token (or unrecognized token) owns no per-entry resources, so
-    /// it's a no-op. Runs the deck's own [`cleanup_popped_route`](crate::route::cleanup_popped_route)
-    /// under the deep-link's `col`, tearing down exactly what
-    /// [`open_deeplink`](Self::open_deeplink) opened.
+    /// Free a popped deep-link's route state. The chrome calls this off a
+    /// completed global-back with the same token
+    /// [`App::render_nav`](notedeck::App::render_nav) drew; a deck-token (or
+    /// unrecognized token) owns no per-entry resources, so it's a no-op. Timeline
+    /// cleanup drops one account/kind depender; thread cleanup closes the exact
+    /// tagged owner carried by the deep-link identity. These are the counterparts
+    /// of the work performed by
+    /// [`open_deeplink`](Self::open_deeplink).
     fn cleanup_nav(&mut self, ctx: &mut AppContext<'_>, token: &std::rc::Rc<dyn std::any::Any>) {
         let Some(deeplink) = token
             .downcast_ref::<crate::deeplink::ColumnsNavToken>()
@@ -1121,16 +1133,13 @@ impl notedeck::App for Damus {
         };
 
         let mut scoped_subs = ctx.remote.scoped_subs(ctx.accounts);
-        crate::route::cleanup_popped_route(
+        crate::route::cleanup_deeplink_route(
             &deeplink.route,
+            deeplink.id,
             &mut self.timeline_cache,
             &mut self.threads,
-            &mut self.onboarding,
-            &mut self.view_state,
             ctx.ndb,
             &mut scoped_subs,
-            egui_nav::ReturnType::Click,
-            deeplink.col,
         );
     }
 

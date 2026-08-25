@@ -297,6 +297,37 @@ impl notedeck::App for NotedeckApp {
         }
     }
 
+    fn tools(&self) -> Vec<notedeck::RegisteredTool> {
+        match self {
+            #[cfg(feature = "dave")]
+            NotedeckApp::Dave(dave) => dave.tools(),
+            NotedeckApp::Columns(columns) => columns.tools(),
+
+            #[cfg(feature = "notebook")]
+            NotedeckApp::Notebook(notebook) => notebook.tools(),
+
+            #[cfg(feature = "headway")]
+            NotedeckApp::Headway(headway) => headway.tools(),
+
+            #[cfg(feature = "clndash")]
+            NotedeckApp::ClnDash(clndash) => clndash.tools(),
+
+            #[cfg(feature = "messages")]
+            NotedeckApp::Messages(dms) => dms.tools(),
+
+            #[cfg(feature = "dashboard")]
+            NotedeckApp::Dashboard(db) => db.tools(),
+
+            #[cfg(feature = "horizon")]
+            NotedeckApp::Horizon(horizon) => horizon.tools(),
+
+            #[cfg(feature = "nostrverse")]
+            NotedeckApp::Nostrverse(nostrverse) => nostrverse.tools(),
+
+            NotedeckApp::Other(_name, other) => other.tools(),
+        }
+    }
+
     fn tab_notifications(&self, ctx: &AppContext<'_>) -> notedeck::TabNotifications {
         match self {
             #[cfg(feature = "dave")]

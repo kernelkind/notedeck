@@ -37,6 +37,7 @@ base64 = { workspace = true }
 negentropy = { workspace = true }
 uuid = { workspace = true }
 profiling = { workspace = true }
+libc = "0.2"
 
 # Interface watching (crate::relay::netwatch). Android is excluded: if-watch has
 # no netlink backend there, so it falls back to polling getifaddrs(), which is

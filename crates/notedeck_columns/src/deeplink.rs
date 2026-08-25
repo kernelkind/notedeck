@@ -7,13 +7,27 @@
 //! thread/profile deep-linked in from another app.
 //!
 //! A deep-link is deliberately *not* a deck column: it renders as its own
-//! transient global-nav pane via [`crate::app::Damus::render_nav`], and drilling
+//! transient global-nav pane via [`App::render_nav`](notedeck::App::render_nav), and drilling
 //! deeper inside it pushes another global deep-link rather than growing a private
 //! stack. This keeps the deck's per-column in-pane navigation entirely private —
 //! only entering Columns and cross-app opens are global-history events.
 
 use crate::Route;
 use notedeck::AppId;
+
+/// Stable identity of one transient global deep-link entry.
+///
+/// The id is allocated before the entry opens its route, then carried through
+/// rendering and cleanup. It is not a deck column index.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct DeepLinkId(u64);
+
+impl DeepLinkId {
+    /// Build a deep-link identity from the app's monotonic allocator.
+    pub(crate) fn new(value: u64) -> Self {
+        Self(value)
+    }
+}
 
 /// A Columns entry in the chrome-owned global navigation history.
 ///
@@ -45,7 +59,8 @@ impl ColumnsNavToken {
 ///
 /// Created by [`Damus::open_deeplink`](crate::app::Damus::open_deeplink), which
 /// opens the route's subscription before the entry is pushed, and torn down by
-/// [`Damus::cleanup_nav`](crate::app::Damus) when a global-back pops the entry.
+/// [`App::cleanup_nav`](notedeck::App::cleanup_nav) when a global-back pops the
+/// entry.
 pub struct DeepLink {
     /// The Columns app slot, carried so a drill-in from inside the pane can push
     /// a further deep-link onto the *same* app's global history without the app
@@ -56,12 +71,12 @@ pub struct DeepLink {
     /// [`Route::Timeline`]).
     pub route: Route,
 
-    /// A dedicated subscription-scope key, distinct from every deck column index
-    /// and from every other deep-link, so this pane's thread/timeline sub
-    /// bookkeeping never collides with a real column's. Allocated at open time
-    /// (see [`Damus::alloc_deeplink_col`](crate::app::Damus::alloc_deeplink_col))
-    /// and stable for the entry's life so open and cleanup use the same key.
-    pub col: usize,
+    /// Stable identity for this global-nav entry.
+    ///
+    /// Allocated once when the entry opens and never reused during the `Damus`
+    /// session. It keeps entry-owned thread state and UI state distinct from deck
+    /// columns and other deep links through rendering and cleanup.
+    pub id: DeepLinkId,
 }
 
 #[cfg(test)]
@@ -80,12 +95,12 @@ mod tests {
         let token = ColumnsNavToken::DeepLink(DeepLink {
             app: AppId(3),
             route: Route::Relays,
-            col: 42,
+            id: DeepLinkId::new(42),
         });
         let dl = token
             .deeplink()
             .expect("deeplink variant yields its payload");
         assert_eq!(dl.app, AppId(3));
-        assert_eq!(dl.col, 42);
+        assert_eq!(dl.id, DeepLinkId::new(42));
     }
 }

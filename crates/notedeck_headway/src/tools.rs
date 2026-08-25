@@ -294,12 +294,12 @@ fn resolve_container(view: &BoardView, sel: &str) -> Result<Container, String> {
 /// A [`store::Publisher`] that fans locally-ingested board events out to the
 /// selected account's private relays through a [`ToolContext`]'s publisher —
 /// the tool-side analogue of the Headway app's own `PrivateRelayPublisher`.
-struct RelayFanout<'x, 'a, 'p> {
-    api: &'x mut ExplicitPublishApi<'a, 'p>,
+struct RelayFanout<'x, 'a> {
+    api: &'x mut ExplicitPublishApi<'a>,
     relays: Vec<RelayId>,
 }
 
-impl store::Publisher for RelayFanout<'_, '_, '_> {
+impl store::Publisher for RelayFanout<'_, '_> {
     fn publish(&mut self, event_frame: &str) {
         fan_out_event_frame(self.api, event_frame, &self.relays);
     }
@@ -1037,7 +1037,7 @@ mod tests {
         ndb: &'a Ndb,
         note_cache: &'a mut NoteCache,
         accounts: &'a Accounts,
-    ) -> ToolContext<'a, 'a> {
+    ) -> ToolContext<'a> {
         ToolContext {
             ndb,
             note_cache,

@@ -12,9 +12,10 @@ use notedeck_ui::{ProfilePic, ProfilePreview};
 use std::f32::consts::PI;
 use tracing::{error, warn};
 
+use crate::deeplink::DeepLinkId;
 use crate::timeline::{
-    CompositeType, CompositeUnit, NoteUnit, ReactionUnit, RepostUnit, TimelineCache, TimelineKind,
-    TimelineTab, ZapUnit,
+    CompositeType, CompositeUnit, NoteUnit, ReactionUnit, RepostUnit, Timeline, TimelineCache,
+    TimelineKind, TimelineTab, ZapUnit,
 };
 use notedeck::DragResponse;
 use notedeck::{
@@ -30,8 +31,32 @@ pub struct TimelineView<'a, 'd> {
     timeline_cache: &'a mut TimelineCache,
     note_options: NoteOptions,
     note_context: &'a mut NoteContext<'d>,
-    col: usize,
+    scroll_owner: TimelineScrollOwner,
     scroll_to_top: bool,
+}
+
+#[derive(Clone, Copy)]
+/// Identifies the UI entry whose timeline scroll state is being rendered.
+enum TimelineScrollOwner {
+    /// A timeline rendered at one deck-column display position.
+    Column(usize),
+    /// A timeline rendered by one transient global deep-link entry.
+    DeepLink(DeepLinkId),
+}
+
+impl TimelineScrollOwner {
+    fn scroll_id(self, timeline_id: &TimelineKind, timeline: &Timeline) -> egui::Id {
+        match self {
+            Self::Column(col) => egui::Id::new(("tlscroll", timeline.view_id(col))),
+            Self::DeepLink(id) => egui::Id::new((
+                "tlscroll",
+                "deeplink",
+                id,
+                timeline_id,
+                timeline.selected_view,
+            )),
+        }
+    }
 }
 
 impl<'a, 'd> TimelineView<'a, 'd> {
@@ -43,13 +68,46 @@ impl<'a, 'd> TimelineView<'a, 'd> {
         note_options: NoteOptions,
         col: usize,
     ) -> Self {
+        Self::new_with_scroll_owner(
+            timeline_id,
+            timeline_cache,
+            note_context,
+            note_options,
+            TimelineScrollOwner::Column(col),
+        )
+    }
+
+    /// Build a timeline view with UI state owned by one global deep-link.
+    pub(crate) fn new_for_deep_link(
+        timeline_id: &'a TimelineKind,
+        timeline_cache: &'a mut TimelineCache,
+        note_context: &'a mut NoteContext<'d>,
+        note_options: NoteOptions,
+        id: DeepLinkId,
+    ) -> Self {
+        Self::new_with_scroll_owner(
+            timeline_id,
+            timeline_cache,
+            note_context,
+            note_options,
+            TimelineScrollOwner::DeepLink(id),
+        )
+    }
+
+    fn new_with_scroll_owner(
+        timeline_id: &'a TimelineKind,
+        timeline_cache: &'a mut TimelineCache,
+        note_context: &'a mut NoteContext<'d>,
+        note_options: NoteOptions,
+        scroll_owner: TimelineScrollOwner,
+    ) -> Self {
         let scroll_to_top = false;
         TimelineView {
             timeline_id,
             timeline_cache,
             note_options,
             note_context,
-            col,
+            scroll_owner,
             scroll_to_top,
         }
     }
@@ -61,7 +119,7 @@ impl<'a, 'd> TimelineView<'a, 'd> {
             self.timeline_cache,
             self.note_options,
             self.note_context,
-            self.col,
+            self.scroll_owner,
             self.scroll_to_top,
         )
     }
@@ -69,15 +127,6 @@ impl<'a, 'd> TimelineView<'a, 'd> {
     pub fn scroll_to_top(mut self, enable: bool) -> Self {
         self.scroll_to_top = enable;
         self
-    }
-
-    pub fn scroll_id(
-        timeline_cache: &TimelineCache,
-        timeline_id: &TimelineKind,
-        col: usize,
-    ) -> Option<egui::Id> {
-        let timeline = timeline_cache.get(timeline_id)?;
-        Some(egui::Id::new(("tlscroll", timeline.view_id(col))))
     }
 }
 
@@ -89,7 +138,7 @@ fn timeline_ui(
     timeline_cache: &mut TimelineCache,
     mut note_options: NoteOptions,
     note_context: &mut NoteContext,
-    col: usize,
+    scroll_owner: TimelineScrollOwner,
     scroll_to_top: bool,
 ) -> DragResponse<NoteAction> {
     //padding(4.0, ui, |ui| ui.heading("Notifications"));
@@ -99,31 +148,24 @@ fn timeline_ui(
 
     */
 
-    let Some(scroll_id) = TimelineView::scroll_id(timeline_cache, timeline_id, col) else {
+    let Some(timeline) = timeline_cache.get_mut(timeline_id) else {
+        error!("tried to render timeline in column, but timeline was missing");
+        // TODO (jb55): render an error when the timeline is missing. This can
+        // happen if a timeline column is added without add_new_timeline_column.
         return DragResponse::none();
     };
+    let scroll_id = scroll_owner.scroll_id(timeline_id, timeline);
 
-    {
-        let timeline = if let Some(timeline) = timeline_cache.get_mut(timeline_id) {
-            timeline
-        } else {
-            error!("tried to render timeline in column, but timeline was missing");
-            // TODO (jb55): render error when timeline is missing?
-            // this shouldn't happen...
-            return DragResponse::none();
-        };
+    timeline.selected_view = tabs_ui(
+        ui,
+        note_context.i18n,
+        timeline.selected_view,
+        &timeline.views,
+    )
+    .inner;
 
-        timeline.selected_view = tabs_ui(
-            ui,
-            note_context.i18n,
-            timeline.selected_view,
-            &timeline.views,
-        )
-        .inner;
-
-        // need this for some reason??
-        ui.add_space(3.0);
-    };
+    // need this for some reason??
+    ui.add_space(3.0);
 
     let show_top_button_id = ui.id().with((scroll_id, "at_top"));
 
@@ -162,18 +204,6 @@ fn timeline_ui(
     }
 
     let scroll_output = scroll_area.show(ui, |ui| {
-        let timeline = if let Some(timeline) = timeline_cache.get(timeline_id) {
-            timeline
-        } else {
-            error!("tried to render timeline in column, but timeline was missing");
-            // TODO (jb55): render error when timeline is missing?
-            // this shouldn't happen...
-            //
-            // NOTE (jb55): it can easily happen if you add a timeline column without calling
-            // add_new_timeline_column, since that sets up the initial subs, etc
-            return None;
-        };
-
         let txn = Transaction::new(note_context.ndb).expect("failed to create txn");
 
         if matches!(timeline_id, TimelineKind::Notifications(_)) {

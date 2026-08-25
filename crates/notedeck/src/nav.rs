@@ -161,6 +161,24 @@ impl<R: Clone> NavStack<R> {
     /// Pop the top route. Should only be called on a `NavResponse::Returned`.
     /// A non-overlay pop is pushed onto the forward stack so it can be replayed.
     pub fn pop(&mut self) -> Option<R> {
+        self.remove_top_route(true)
+    }
+
+    /// Remove the top route outside a rendered nav return.
+    ///
+    /// Owner-driven cleanup uses this when the route must disappear before a
+    /// different owner becomes active. Unlike [`Self::pop`], the removed route
+    /// is not retained as forward history.
+    pub fn remove_top_route_for_disposal(&mut self) -> Option<R> {
+        let removed = self.remove_top_route(false);
+        if removed.is_some() {
+            self.returning = false;
+            self.navigating = false;
+        }
+        removed
+    }
+
+    fn remove_top_route(&mut self, keep_forward_route: bool) -> Option<R> {
         if self.routes.len() == 1 {
             return None;
         }
@@ -186,13 +204,28 @@ impl<R: Clone> NavStack<R> {
         };
 
         let popped = self.routes.pop()?;
-        if !is_overlay {
+        if keep_forward_route && !is_overlay {
             self.forward_stack.push(popped.clone());
         }
         Some(popped)
     }
 
     /// Removes all routes in the overlay besides the last.
+    ///
+    /// Do not treat the drained routes as missing cleanup work. In Columns, a
+    /// multi-route overlay is one thread stack, not a list of independent route
+    /// owners: `route_to_overlaid` appends a route to the current `ThreadSubs`
+    /// scope, while `route_to_overlaid_new` starts a separate overlay and
+    /// scope. On click/back, the retained top route is returned through normal
+    /// nav handling with `ReturnType::Click`; `ThreadSubs::unsubscribe_click`
+    /// then drops the whole current scope, including the stack entries
+    /// represented by routes drained here.
+    ///
+    /// Returning the drained routes would make callers dispose them as separate
+    /// owners and double-release one thread scope. If another overlay type needs
+    /// per-route ownership, model that explicitly at the route-owner layer.
+    /// Drag returns are different: they do not call `go_back`, but pop one route
+    /// and use `ReturnType::Drag`.
     fn remove_overlay(&mut self, overlay_range: Range<usize>) {
         let num_routes = self.routes.len();
         if num_routes <= 1 {
@@ -299,6 +332,15 @@ impl<R: Clone> NavStack<R> {
     /// The full back stack, oldest first.
     pub fn routes(&self) -> &Vec<R> {
         &self.routes
+    }
+
+    /// Snapshot the visible route stack for owner-driven disposal.
+    ///
+    /// Forced disposal owns only these visible routes. Routes already drained
+    /// while collapsing an overlay are represented by the retained overlay
+    /// route's `ThreadSubs` scope and must not be synthesized here.
+    pub fn routes_for_disposal(&self) -> Vec<R> {
+        self.routes.clone()
     }
 
     /// True while a forward transition is animating.
@@ -556,6 +598,19 @@ mod nav_stack_tests {
     }
 
     #[test]
+    fn disposal_removal_does_not_create_forward_history() {
+        let mut stack = NavStack::new(vec![1]);
+        stack.route_to(2);
+        stack.returning_mut(true);
+
+        assert_eq!(stack.remove_top_route_for_disposal(), Some(2));
+        assert_eq!(stack.routes(), &vec![1]);
+        assert!(!stack.returning());
+        assert!(!stack.navigating());
+        assert!(!stack.go_forward());
+    }
+
+    #[test]
     fn can_go_back_tracks_depth_and_returning() {
         let mut stack = NavStack::new(vec![1]);
         // at the root there is nowhere to go back to
@@ -669,6 +724,16 @@ mod nav_stack_tests {
         // the render loop then pops the surviving overlay route on Returned
         assert_eq!(stack.pop(), Some(3));
         assert_eq!(stack.routes(), &vec![1]);
+    }
+
+    #[test]
+    fn disposal_snapshot_contains_only_visible_overlay_routes() {
+        let mut stack = NavStack::new(vec![1]);
+        stack.route_to_overlaid(2);
+        stack.route_to_overlaid(3);
+
+        assert_eq!(stack.go_back(), Some(1));
+        assert_eq!(stack.routes_for_disposal(), vec![1, 3]);
     }
 
     #[test]

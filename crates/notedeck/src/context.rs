@@ -128,7 +128,7 @@ impl<'a> AppContext<'a> {
     /// [`ToolCall`](crate::ToolCall). Like [`note_context`](Self::note_context),
     /// this reborrows the relevant fields, so the returned context holds a
     /// mutable borrow of `self` for its lifetime.
-    pub fn tool_context(&mut self) -> crate::ToolContext<'_, 'a> {
+    pub fn tool_context(&mut self) -> crate::ToolContext<'_> {
         crate::ToolContext {
             ndb: self.ndb,
             note_cache: self.note_cache,
@@ -181,7 +181,8 @@ impl<'a> AppContext<'a> {
     }
 
     pub fn process_relay_action(&mut self, action: crate::RelayAction) {
-        self.accounts.process_relay_action(&mut self.remote, action);
+        self.accounts
+            .process_relay_action(self.ndb, &mut self.remote, action);
     }
 
     pub fn soft_keyboard_rect(&self, screen_rect: Rect, ctx: SoftKeyboardContext) -> Option<Rect> {
@@ -212,6 +213,12 @@ impl<'a> AppContext<'a> {
                 }
             }
         }
+    }
+}
+
+impl Drop for AppContext<'_> {
+    fn drop(&mut self) {
+        self.remote.flush();
     }
 }
 
