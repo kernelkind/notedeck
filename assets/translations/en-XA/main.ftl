@@ -7,6 +7,12 @@
 # Profile about/bio field label
 About_00c0 = {"["}Àbóút{"]"}
 
+# Button to accept TOS and continue using the app
+Accept_and_Continue_2e5c = {"["}Àççépt àñd Çóñtíñúé{"]"}
+
+# Button to go to the accounts view
+Accounts_03a0 = {"["}Àççóúñts{"]"}
+
 # Column title for account management
 Accounts_f018 = {"["}Àççóúñts{"]"}
 
@@ -31,6 +37,9 @@ Add_Account_d06c = {"["}Àdd Àççóúñt{"]"}
 # Column title for adding algorithm column
 Add_Algo_Column_0d75 = {"["}Àdd Àlgó Çólúmñ{"]"}
 
+# Add new column to current deck from profile context menu
+Add_as_column_baa1 = {"["}Àdd às çólúmñ{"]"}
+
 # Column title for adding new column
 Add_Column_c764 = {"["}Àdd Çólúmñ{"]"}
 
@@ -52,17 +61,29 @@ Add_new_deck_f2fc = {"["}Àdd ñéw déçk{"]"}
 # Column title for adding notifications column
 Add_Notifications_Column_79f8 = {"["}Àdd Ñótífíçàtíóñs Çólúmñ{"]"}
 
+# Button label to add a private sync relay
+Add_private_relay_de9d = {"["}Àdd prívàté rélày{"]"}
+
 # Button label to add a relay
 Add_relay_269d = {"["}Àdd rélày{"]"}
 
 # Button label to add a wallet
 Add_Wallet_d1be = {"["}Àdd Wàllét{"]"}
 
+# Heading shown when prompting the user to add a private key to use messages
+Add_your_private_key_a52e = {"["}Àdd yóúr prívàté kéy{"]"}
+
+# Section header for advertised relays
+Advertised_8b3b = {"["}Àdvértíséd{"]"}
+
 # Title for algorithmic feeds column
 Algo_2452 = {"["}Àlgó{"]"}
 
 # Description for algorithmic feeds column
 Algorithmic_feeds_to_aid_in_note_discovery_d344 = {"["}Àlgóríthmíç fééds tó àíd íñ ñóté dísçóvéry{"]"}
+
+# Filter label for all notes view
+All_8729 = {"["}Àll{"]"}
 
 # Label for zap amount input field
 Amount_70f0 = {"["}Àmóúñt{"]"}
@@ -79,14 +100,14 @@ Ask_dave_anything_33d1 = {"["}Àsk dàvé àñythíñg...{"]"}
 # Profile banner URL field label
 Banner_52ef = {"["}Bàññér{"]"}
 
-# Beta version label
-BETA_8e5d = {"["}BÉTÀ{"]"}
-
 # Broadcast the note to all connected relays
 Broadcast_fe43 = {"["}Bróàdçàst{"]"}
 
 # Broadcast the note only to local network relays
 Broadcast_Local_7e50 = {"["}Bróàdçàst Lóçàl{"]"}
+
+# Label for cancel compact database
+Cancel_0fef = {"["}Çàñçél{"]"}
 
 # Button label to cancel an action
 Cancel_ed3b = {"["}Çàñçél{"]"}
@@ -94,17 +115,41 @@ Cancel_ed3b = {"["}Çàñçél{"]"}
 # Label for cancel clear cache, Storage settings section
 Cancel_fd8b = {"["}Çàñçél{"]"}
 
+# Title for the list of chat conversations
+Chats_dc22 = {"["}Çhàts{"]"}
+
 # Label for clear cache button, Storage settings section
 Clear_cache_dccb = {"["}Çléàr çàçhé{"]"}
 
 # Hover text for editable zap amount
 Click_to_edit_0414 = {"["}Çlíçk tó édít{"]"}
 
+# Button to go to the ClnDash app
+ClnDash_2988 = {"["}ÇlñDàsh{"]"}
+
+# Button to go to the Columns app
+Columns_7215 = {"["}Çólúmñs{"]"}
+
+# Button to compact the database
+Compact_database_be7b = {"["}Çómpàçt dàtàbàsé{"]"}
+
+# Status label after database compaction completes
+Compacted_cbb8 = {"["}Çómpàçtéd!{"]"}
+
+# Status label while database compaction is running
+Compacting_3332 = {"["}Çómpàçtíñg...{"]"}
+
+# Status label when database compaction fails
+Compaction_error_7f8f = {"["}Çómpàçtíóñ érrór:{"]"}
+
 # Column title for note composition
 Compose_Note_c094 = {"["}Çómpósé Ñóté{"]"}
 
 # Label for configure relays, settings section
 Configure_relays_d156 = {"["}Çóñfígúré rélàys{"]"}
+
+# Label for confirm compact database
+Confirm_7a50 = {"["}Çóñfírm{"]"}
 
 # Label for confirm clear cache, Storage settings section
 Confirm_9d9d = {"["}Çóñfírm{"]"}
@@ -118,8 +163,14 @@ Connected_f8cc = {"["}Çóññéçtéd{"]"}
 # Status label for connecting relay
 Connecting_6b7e = {"["}Çóññéçtíñg...{"]"}
 
+# Badge indicating this profile is in contacts
+Contact_7fbf = {"["}Çóñtàçt{"]"}
+
 # Title for contact list column
 Contact_List_f85a = {"["}Çóñtàçt Líst{"]"}
+
+# Heading shown when choosing a contact to start a new chat
+Contacts_2f5e = {"["}Çóñtàçts{"]"}
 
 # Column title for contact lists
 Contacts_7533 = {"["}Çóñtàçts{"]"}
@@ -127,17 +178,29 @@ Contacts_7533 = {"["}Çóñtàçts{"]"}
 # Column title for last notes per contact
 Contacts__last_notes_3f84 = {"["}Çóñtàçts (làst ñótés){"]"}
 
+# Title used when viewing an unknown conversation
+Conversation_2b63 = {"["}Çóñvérsàtíóñ{"]"}
+
+# Fallback title when no direct chat partner is available
+Conversation_babb = {"["}Çóñvérsàtíóñ{"]"}
+
 # Button label to copy logs
 Copy_a688 = {"["}Çópy{"]"}
+
+# Copy a damus.io link to the author's profile to keyboard
+Copy_Link_490f = {"["}Çópy Líñk{"]"}
 
 # Button to copy media link to clipboard
 Copy_Link_dc7c = {"["}Çópy Líñk{"]"}
 
-# Copy the unique note identifier to clipboard
-Copy_Note_ID_6b45 = {"["}Çópy Ñóté ÍD{"]"}
+# Copy the note identifier to clipboard
+Copy_Note_ID_5a37 = {"["}Çópy Ñóté ÍD{"]"}
 
 # Copy the raw note data in JSON format to clipboard
 Copy_Note_JSON_9e4e = {"["}Çópy Ñóté JSÓÑ{"]"}
+
+# Copy the damus.io note link for this note to clipboard
+Copy_Note_Link_be49 = {"["}Çópy Ñóté Líñk{"]"}
 
 # Context menu item to copy an account's public key
 Copy_npub_7b3c = {"["}Çópy ñpúb{"]"}
@@ -154,32 +217,17 @@ Copy_Pubkey_9cc4 = {"["}Çópy Púbkéy{"]"}
 # Copy the text content of the note to clipboard
 Copy_Text_f81c = {"["}Çópy Téxt{"]"}
 
-# Relative time in days
-count_d_b9be = {"["}{$count}d{"]"}
-
-# Relative time in hours
-count_h_3ecb = {"["}{$count}h{"]"}
-
-# Relative time in minutes
-count_m_b41e = {"["}{$count}m{"]"}
-
-# Relative time in months
-count_mo_7aba = {"["}{$count}mó{"]"}
-
-# Relative time in seconds
-count_s_aa26 = {"["}{$count}s{"]"}
-
-# Relative time in weeks
-count_w_7468 = {"["}{$count}w{"]"}
-
-# Relative time in years
-count_y_9408 = {"["}{$count}y{"]"}
-
 # Button to create a new account
 Create_Account_6994 = {"["}Çréàté Àççóúñt{"]"}
 
+# Button to create a new Nostr account
+Create_Account_9a79 = {"["}Çréàté Àççóúñt{"]"}
+
 # Button label to create a new deck
 Create_Deck_16b7 = {"["}Çréàté Déçk{"]"}
+
+# Column title for creating a people list
+Create_People_List_3067 = {"["}Çréàté Péóplé Líst{"]"}
 
 # Column title for custom timelines
 Custom_a69e = {"["}Çústóm{"]"}
@@ -187,11 +235,29 @@ Custom_a69e = {"["}Çústóm{"]"}
 # Column title for zap amount customization
 Customize_Zap_Amount_cfc4 = {"["}Çústómízé Zàp Àmóúñt{"]"}
 
+# Damus android beta version label
+Damus_Android_BETA_e76b = {"["}Dàmús Àñdróíd BÉTÀ{"]"}
+
+# Damus notedeck beta version label
+Damus_Notedeck_BETA_99ac = {"["}Dàmús Ñótédéçk BÉTÀ{"]"}
+
 # Column title for support page
 Damus_Support_27c0 = {"["}Dàmús Súppórt{"]"}
 
 # Label for Theme Dark, Appearance settings section
 Dark_85fe = {"["}Dàrk{"]"}
+
+# Button to go to the dashboard app
+Dashboard_3a45 = {"["}Dàshbóàrd{"]"}
+
+# Label for database settings section
+Database_0a2b = {"["}Dàtàbàsé{"]"}
+
+# Label for database size in settings
+Database_size_6772 = {"["}Dàtàbàsé sízé:{"]"}
+
+# Button to go to the Dave app
+Dave_7a46 = {"["}Dàvé{"]"}
 
 # Label for deck name input field
 Deck_name_cd32 = {"["}Déçk ñàmé{"]"}
@@ -241,26 +307,47 @@ Enter_the_desired_hashtags_here__for_multiple_space-separated_7a69 = {"["}Éñt�
 # Placeholder for relay input field
 Enter_the_relay_here_1c8b = {"["}Éñtér thé rélày héré{"]"}
 
-# Hint text to prompt entering the user's public key.
-Enter_the_user_s_key__npub__hex__nip05__here_650c = {"["}Éñtér thé úsér's kéy (ñpúb, héx, ñíp05) héré...{"]"}
-
 # Label for key input field. Key can be public key (npub), private key (nsec), or Nostr address (NIP-05).
 Enter_your_key_0fca = {"["}Éñtér yóúr kéy{"]"}
 
 # Instructions for entering Nostr credentials
 Enter_your_public_key__npub___nostr_address__e_g___address____or_private_key__nsec___You_must_enter_your_private_key_to_be_able_to_post__reply__etc_48e9 = {"["}Éñtér yóúr públíç kéy (ñpúb), ñóstr àddréss (é.g. {$address}), ór prívàté kéy (ñséç). Yóú múst éñtér yóúr prívàté kéy tó bé àblé tó póst, réply, étç.{"]"}
 
-# Label for find user button
-Find_User_bd12 = {"["}Fíñd Úsér{"]"}
+# Column title for followers
+Followed_by_e8c2 = {"["}Fóllówéd by{"]"}
 
-# Label for font size, Appearance settings section
-Font_size_dd73 = {"["}Fóñt sízé:{"]"}
+# Column title for users being followed
+Following_633f = {"["}Fóllówíñg{"]"}
+
+# Label for number of accounts being followed
+following_7b54 = {"["}fóllówíñg{"]"}
+
+# Badge indicating user follows you
+Follows_you_1835 = {"["}Fóllóws yóú{"]"}
+
+# Info text when hashtag filter is disabled (set to 0)
+Hashtag_filter_disabled_a136 = {"["}Hàshtàg fíltér dísàbléd{"]"}
 
 # Title for hashtags column
 Hashtags_f8e0 = {"["}Hàshtàgs{"]"}
 
+# Button to go to the Headway app
+Headway_b5c8 = {"["}Héàdwày{"]"}
+
 # Title for Home column
 Home_8c19 = {"["}Hómé{"]"}
+
+# Button to go to the Horizon app
+Horizon_41be = {"["}Hórízóñ{"]"}
+
+# Age verification checkbox label
+I_confirm_that_I_am_at_least_17_years_old_b09f = {"["}Í çóñfírm thàt Í àm àt léàst 17 yéàrs óld{"]"}
+
+# Button for existing Nostr users to log in with their key
+I_have_a_Nostr_key_c306 = {"["}Í hàvé à Ñóstr kéy{"]"}
+
+# TOS agreement checkbox label
+I_have_read_and_agree_to_the_Terms_of_Service_5903 = {"["}Í hàvé réàd àñd àgréé tó thé Térms óf Sérvíçé{"]"}
 
 # Label for deck icon selection
 Icon_b0ab = {"["}Íçóñ{"]"}
@@ -280,6 +367,9 @@ Invalid_key_4726 = {"["}Íñvàlíd kéy.{"]"}
 # Error message for invalid Nostr Wallet Connect URI
 Invalid_NWC_URI_031b = {"["}Íñvàlíd ÑWÇ ÚRÍ{"]"}
 
+# Button to dismiss welcome and browse the app without an account
+Just_browsing_17ed = {"["}Júst brówsíñg{"]"}
+
 # Zap amount button for 100000 sats. Abbreviated because the button is too small to display the full amount.
 k_100K_686c = {"["}100K{"]"}
 
@@ -298,6 +388,12 @@ k_5K_f7e6 = {"["}5K{"]"}
 # Description for your notes column
 Keep_track_of_your_notes___replies_a334 = {"["}Kéép tràçk óf yóúr ñótés & réplíés{"]"}
 
+# Confirmation prompt for database compaction
+Keeps_all_profiles_and_your_notes__The_smaller_database_will_be_used_on_next_restart_c4a6 = {"["}Kééps àll prófílés àñd yóúr ñótés. Thé smàllér dàtàbàsé wíll bé úséd óñ ñéxt réstàrt.{"]"}
+
+# desc
+key_1dee = {"["}kéy{"]"}
+
 # label for keys setting section
 Keys_435f = {"["}Kéys{"]"}
 
@@ -313,26 +409,50 @@ Light_7475 = {"["}Líght{"]"}
 # Bitcoin Lightning network address field label
 Lightning_network_address__lud16_ea51 = {"["}Líghtñíñg ñétwórk àddréss (lúd16){"]"}
 
+# Hover text for like button
+Like_this_note_dfb5 = {"["}Líké thís ñóté{"]"}
+
 # Login page title
 Login_9eef = {"["}Lógíñ{"]"}
 
 # Login button text
 Login_now___let_s_do_this_5630 = {"["}Lógíñ ñów — lét's dó thís!{"]"}
 
+# Label for max hashtags per note, others settings section
+Max_hashtags_per_note_90e5 = {"["}Màx hàshtàgs pér ñóté:{"]"}
+
 # Text shown on blurred media from unfollowed users
 Media_from_someone_you_don_t_follow_5611 = {"["}Médíà fróm sóméóñé yóú dóñ't fóllów{"]"}
 
+# Filter label for mentions only view
+Mentions_28d3 = {"["}Méñtíóñs{"]"}
+
+# Description shown under the private key prompt in the Messages view
+Messages_are_end-to-end_encrypted__Add_your_nsec_in_Accounts_to_read_and_send_chats_67db = {"["}Méssàgés àré éñd-tó-éñd éñçryptéd. Àdd yóúr ñséç íñ Àççóúñts tó réàd àñd séñd çhàts.{"]"}
+
+# Button to go to the messaging app
+Messaging_700d = {"["}Méssàgíñg{"]"}
+
 # Tooltip for moving a column
 Moves_this_column_to_another_position_0d4b = {"["}Móvés thís çólúmñ tó àñóthér pósítíóñ{"]"}
+
+# Mute this user's content
+Mute_User_7a73 = {"["}Múté Úsér{"]"}
+
+# Mute the author of this note
+Mute_User_d94a = {"["}Múté Úsér{"]"}
 
 # Title for the user's deck
 My_Deck_4ac5 = {"["}My Déçk{"]"}
 
 # reaction from user to a note you were tagged in
-name__reacted_to_a_note_you_were_tagged_in_4b62 = {"["}{$name} réàçtéd tó à ñóté yóú wéré tàggéd íñ{"]"}
+name___privately_reacted_to_a_note_you_were_tagged_in_4b62 = {"["}{$name} {$privately}réàçtéd tó à ñóté yóú wéré tàggéd íñ{"]"}
 
 # reaction from user to your note
-name__reacted_to_your_note_ead9 = {"["}{$name} réàçtéd tó yóúr ñóté{"]"}
+name___privately_reacted_to_your_note_ead9 = {"["}{$name} {$privately}réàçtéd tó yóúr ñóté{"]"}
+
+# repost from user
+name__reposted_1379 = {"["}{$name} répóstéd{"]"}
 
 # repost from user
 name__reposted_a_note_you_were_tagged_in_1379 = {"["}{$name} répóstéd à ñóté yóú wéré tàggéd íñ{"]"}
@@ -340,8 +460,38 @@ name__reposted_a_note_you_were_tagged_in_1379 = {"["}{$name} répóstéd à ñó
 # repost from user
 name__reposted_your_note_1379 = {"["}{$name} répóstéd yóúr ñóté{"]"}
 
+# zap from user to a note you were tagged in
+name__zapped_a_note_you_were_tagged_in_a6e2 = {"["}{$name} zàppéd à ñóté yóú wéré tàggéd íñ{"]"}
+
+# zap from user to your note
+name__zapped_your_note_45d1 = {"["}{$name} zàppéd yóúr ñóté{"]"}
+
+# Button to go to a WASM app
+name_as_str_c366 = {"["}ñàmé.às_str(){"]"}
+
+# Title shown when composing a new conversation
+New_Chat_afb4 = {"["}Ñéw Çhàt{"]"}
+
 # Label asking if the user is new to Nostr. Underneath this label is a button to create an account.
 New_to_Nostr_a2fd = {"["}Ñéw tó Ñóstr?{"]"}
+
+# Shown when user has no contacts to display
+No_contacts_yet_cd10 = {"["}Ñó çóñtàçts yét{"]"}
+
+# Empty state text when the user has no conversations
+No_conversations_yet_52c0 = {"["}Ñó çóñvérsàtíóñs yét{"]"}
+
+# label describing that there are no conversations yet
+No_conversations_yet_df0d = {"["}Ñó çóñvérsàtíóñs yét{"]"}
+
+# Chat summary text when the conversation has no messages
+No_messages_yet_3205 = {"["}Ñó méssàgés yét{"]"}
+
+# Shown when profile search returns no results
+No_profiles_found_3130 = {"["}Ñó prófílés fóúñd{"]"}
+
+# Empty relay section placeholder
+None_8249 = {"["}Ñóñé{"]"}
 
 # NIP-05 identity field label
 Nostr_address__NIP-05_identity_74a2 = {"["}Ñóstr àddréss (ÑÍP-05 ídéñtíty){"]"}
@@ -349,11 +499,20 @@ Nostr_address__NIP-05_identity_74a2 = {"["}Ñóstr àddréss (ÑÍP-05 ídéñt�
 # Default username when profile is not available
 nostrich_df29 = {"["}ñóstríçh{"]"}
 
+# Button to go to the Nostrverse app
+Nostrverse_b12a = {"["}Ñóstrvérsé{"]"}
+
 # Status label for disconnected relay
 Not_Connected_6292 = {"["}Ñót Çóññéçtéd{"]"}
 
 # Link text for note references
 note_cad6 = {"["}ñóté{"]"}
+
+# Conversation title used when a chat only has the current user
+Note_to_Self_99be = {"["}Ñóté tó Sélf{"]"}
+
+# Button to go to the Notebook app
+Notebook_6f45 = {"["}Ñótébóók{"]"}
 
 # Beta product warning message
 Notedeck_is_a_beta_product__Expect_bugs_and_contact_us_when_you_run_into_issues_a671 = {"["}Ñótédéçk ís à bétà pródúçt. Éxpéçt búgs àñd çóñtàçt ús whéñ yóú rúñ íñtó íssúés.{"]"}
@@ -361,14 +520,8 @@ Notedeck_is_a_beta_product__Expect_bugs_and_contact_us_when_you_run_into_issues_
 # Filter label for notes only view
 Notes_03fb = {"["}Ñótés{"]"}
 
-# Label for notes-only filter
-Notes_60d2 = {"["}Ñótés{"]"}
-
 # Filter label for notes and replies view
 Notes___Replies_1ec2 = {"["}Ñótés & Réplíés{"]"}
-
-# Label for notes and replies filter
-Notes___Replies_6e3b = {"["}Ñótés & Réplíés{"]"}
 
 # Column title for notifications
 Notifications_d673 = {"["}Ñótífíçàtíóñs{"]"}
@@ -391,17 +544,26 @@ Open_Email_25e9 = {"["}Ópéñ Émàíl{"]"}
 # Instruction to open email client
 Open_your_default_email_client_to_get_help_from_the_Damus_team_68dc = {"["}Ópéñ yóúr défàúlt émàíl çlíéñt tó gét hélp fróm thé Dàmús téàm{"]"}
 
+# Section header for non-advertised connected relays
+Other_65fa = {"["}Óthér{"]"}
+
 # Label for others settings section
 Others_7267 = {"["}Óthérs{"]"}
 
 # Placeholder text for NWC URI input
 Paste_your_NWC_URI_here_b471 = {"["}Pàsté yóúr ÑWÇ ÚRÍ héré...{"]"}
 
+# Title for people list column
+People_List_42bf = {"["}Péóplé Líst{"]"}
+
 # Error message for missing deck name
 Please_create_a_name_for_the_deck_38e7 = {"["}Pléàsé çréàté à ñàmé fór thé déçk.{"]"}
 
 # Error message for missing deck name and icon
 Please_create_a_name_for_the_deck_and_select_an_icon_0add = {"["}Pléàsé çréàté à ñàmé fór thé déçk àñd séléçt àñ íçóñ.{"]"}
+
+# TOS acceptance instruction text
+Please_read_and_accept_the_following_terms_to_continue_37de = {"["}Pléàsé réàd àñd àççépt thé fóllówíñg térms tó çóñtíñúé.{"]"}
 
 # Error message for missing deck icon
 Please_select_an_icon_655b = {"["}Pléàsé séléçt àñ íçóñ.{"]"}
@@ -411,6 +573,12 @@ Post_now_8a49 = {"["}Póst ñów{"]"}
 
 # Instruction for copying logs
 Press_the_button_below_to_copy_your_most_recent_logs_to_your_system_s_clipboard__Then_paste_it_into_your_email_322e = {"["}Préss thé búttóñ bélów tó çópy yóúr móst réçéñt lógs tó yóúr systém's çlípbóàrd. Théñ pàsté ít íñtó yóúr émàíl.{"]"}
+
+# Section header for private sync relays
+Private_sync_560b = {"["}Prívàté syñç{"]"}
+
+# Button to go to the user's profile
+Profile_c0ba = {"["}Prófílé{"]"}
 
 # Profile picture URL field label
 Profile_picture_81ff = {"["}Prófílé píçtúré{"]"}
@@ -424,8 +592,14 @@ Quote_475c = {"["}Qúóté{"]"}
 # Error message when quote note cannot be found
 Quote_of_unknown_note_e4f0 = {"["}Qúóté óf úñkñówñ ñóté{"]"}
 
+# Column title for note reactions list
+Reactions_68e3 = {"["}Réàçtíóñs{"]"}
+
 # Label for read-only profile mode
 Read_only_82ff = {"["}Réàd óñly{"]"}
+
+# Tooltip for refreshing a one-shot feed
+Refresh_feed_e03d = {"["}Réfrésh fééd{"]"}
 
 # Column title for relay management
 Relays_9d89 = {"["}Rélàys{"]"}
@@ -460,17 +634,35 @@ replying_to__user__s__thread_444d = {"["}réplyíñg tó {$user}'s {$thread}{"]"
 # Fallback text when reply note is not found
 replying_to_a_note_e0bc = {"["}réplyíñg tó à ñóté{"]"}
 
+# Column title for report screen
+Report_e56f = {"["}Répórt{"]"}
+
+# Report this note for objectionable content
+Report_Note_8f42 = {"["}Répórt Ñóté{"]"}
+
+# Report this user for objectionable content
+Report_User_ed48 = {"["}Répórt Úsér{"]"}
+
+# Column title for deciding the type of repost
+Repost_06b2 = {"["}Répóst{"]"}
+
 # Hover text for repost button
 Repost_this_note_8e56 = {"["}Répóst thís ñóté{"]"}
 
-# Label for reposted notes
-Reposted_61c8 = {"["}Répóstéd{"]"}
+# Column title for note reposts list
+Reposts_1f43 = {"["}Répósts{"]"}
 
-# Label for reset note body font size, Appearance settings section
-Reset_4e60 = {"["}Rését{"]"}
+# Label for reset max hashtags per note, others settings section
+Reset_4998 = {"["}Rését{"]"}
 
 # Label for reset zoom level, Appearance settings section
 Reset_62d4 = {"["}Rését{"]"}
+
+# Instruction to restart after compaction
+Restart_to_apply_811d = {"["}Réstàrt tó àpply.{"]"}
+
+# Heading shown above search results
+Results_41bf = {"["}Résúlts{"]"}
 
 # Heading for support section
 Running_into_a_bug_1796 = {"["}Rúññíñg íñtó à búg?{"]"}
@@ -490,14 +682,20 @@ Save_changes_00db = {"["}Sàvé çhàñgés{"]"}
 # Column title for search page
 Search_c573 = {"["}Séàrçh{"]"}
 
-# Placeholder for search notes input field
-Search_notes_42a6 = {"["}Séàrçh ñótés...{"]"}
+# Placeholder for search input field
+Search_e7f2 = {"["}Séàrçh{"]"}
 
-# Search in progress message
-Searching_for___query_5d18 = {"["}Séàrçhíñg fór '{$query}'{"]"}
+# Placeholder for profile search input
+Search_profiles_7e59 = {"["}Séàrçh prófílés...{"]"}
+
+# Placeholder for profile search input
+Search_profiles_or_enter_nip05_address_7e59 = {"["}Séàrçh prófílés ór éñtér ñíp05 àddréss...{"]"}
 
 # label describing secret key
 SECRET_ACCOUNT_LOGIN_KEY_8440 = {"["}SÉÇRÉT ÀÇÇÓÚÑT LÓGÍÑ KÉY{"]"}
+
+# Description for people list column
+See_notes_from_a_NIP-51_people_list_e6d9 = {"["}Séé ñótés fróm à ÑÍP-51 péóplé líst{"]"}
 
 # Description for Home column
 See_notes_from_your_contacts_ac16 = {"["}Séé ñótés fróm yóúr çóñtàçts{"]"}
@@ -505,11 +703,17 @@ See_notes_from_your_contacts_ac16 = {"["}Séé ñótés fróm yóúr çóñtàç
 # Description for universe column
 See_the_whole_nostr_universe_7694 = {"["}Séé thé whólé ñóstr úñívérsé{"]"}
 
+# Column title for selecting a people list
+Select_a_People_List_a920 = {"["}Séléçt à Péóplé Líst{"]"}
+
 # Button to select all profiles in follow pack
 Select_All_a319 = {"["}Séléçt Àll{"]"}
 
 # Button label to send a zap
 Send_1ea4 = {"["}Séñd{"]"}
+
+# Button to go to the settings view
+Settings_4d83 = {"["}Séttíñgs{"]"}
 
 # Column title for app settings
 Settings_7a4f = {"["}Séttíñgs{"]"}
@@ -556,6 +760,9 @@ Step_1_8656 = {"["}Stép 1{"]"}
 # Step 2 label in support instructions
 Step_2_d08d = {"["}Stép 2{"]"}
 
+# Button to interrupt/stop the AI operation
+Stop_5b38 = {"["}Stóp{"]"}
+
 # Label for storage settings section
 Storage_ed65 = {"["}Stóràgé{"]"}
 
@@ -565,17 +772,23 @@ Subscribe_to_someone_else_s_notes_d1e9 = {"["}Súbsçríbé tó sóméóñé él
 # Column title for subscribing to individual user
 Subscribe_to_someone_s_notes_b3c8 = {"["}Súbsçríbé tó sóméóñé's ñótés{"]"}
 
+# Ask Dave to summarize this note's thread
+Summarize_Thread_5d52 = {"["}Súmmàrízé Thréàd{"]"}
+
+# Button to go to the support view
+Support_75e2 = {"["}Súppórt{"]"}
+
 # Support email address
 Support_email_44d9 = {"["}Súppórt émàíl:{"]"}
 
-# Hover text for dark mode toggle button
-Switch_to_dark_mode_4dec = {"["}Swítçh tó dàrk módé{"]"}
-
-# Hover text for light mode toggle button
-Switch_to_light_mode_72ce = {"["}Swítçh tó líght módé{"]"}
-
 # Button text to load blurred media
 Tap_to_Load_4b05 = {"["}Tàp tó Lóàd{"]"}
+
+# Column title for TOS acceptance screen
+Terms_of_Service_8a6e = {"["}Térms óf Sérvíçé{"]"}
+
+# TOS acceptance screen title
+Terms_of_Service_e074 = {"["}Térms óf Sérvíçé{"]"}
 
 # Message shown when Dave trial period has ended
 The_Dave_Nostr_AI_assistant_trial_has_ended_____Thanks_for_testing__Zap-enabled_Dave_coming_soon_c6c7 = {"["}Thé Dàvé Ñóstr ÀÍ àssístàñt tríàl hàs éñdéd :(. Thàñks fór téstíñg! Zàp-éñàbléd Dàvé çómíñg sóóñ!{"]"}
@@ -583,17 +796,32 @@ The_Dave_Nostr_AI_assistant_trial_has_ended_____Thanks_for_testing__Zap-enabled_
 # Label for theme, Appearance settings section
 Theme_4aac = {"["}Thémé:{"]"}
 
+# Button to change the theme (light or dark)
+Theme_7e6b = {"["}Thémé{"]"}
+
 # Column title for note thread view
 Thread_0f20 = {"["}Thréàd{"]"}
 
 # Link text for thread references
 thread_ad1f = {"["}thréàd{"]"}
 
+# Label shown between chat messages for the current day
+Today_bd04 = {"["}Tódày{"]"}
+
+# Placeholder text for the message composer in chats
+Type_a_message_2a19 = {"["}Typé à méssàgé{"]"}
+
 # Title for universe column
 Universe_e01e = {"["}Úñívérsé{"]"}
 
 # Column title for universe feed
 Universe_ffaa = {"["}Úñívérsé{"]"}
+
+# Unmute the author of this note
+Unmute_User_5d5a = {"["}Úñmúté Úsér{"]"}
+
+# Unmute this user's content
+Unmute_User_bf35 = {"["}Úñmúté Úsér{"]"}
 
 # Checkbox label for using wallet only for current account
 Use_this_wallet_for_the_current_account_only_61dc = {"["}Úsé thís wàllét fór thé çúrréñt àççóúñt óñly{"]"}
@@ -604,11 +832,17 @@ username___at___domain___will_be_used_for_identification_a4fd = {"["}"{$username
 # Profile username field label
 Username_daa7 = {"["}Úsérñàmé{"]"}
 
+# Switch active user to this profile
+View_as_092c = {"["}Víéw às{"]"}
+
 # Label for view folder button, Storage settings section
 View_folder_9742 = {"["}Víéw fóldér{"]"}
 
 # Column title for wallet management
 Wallet_5e50 = {"["}Wàllét{"]"}
+
+# Button to go to the wallet view
+Wallet_899d = {"["}Wàllét{"]"}
 
 # Hint for deck name input field
 We_recommend_short_names_083e = {"["}Wé réçómméñd shórt ñàmés{"]"}
@@ -616,8 +850,20 @@ We_recommend_short_names_083e = {"["}Wé réçómméñd shórt ñàmés{"]"}
 # Profile website field label
 Website_7980 = {"["}Wébsíté{"]"}
 
+# Column title for welcome screen
+Welcome_5cce = {"["}Wélçómé{"]"}
+
+# Welcome screen title
+Welcome_to_Notedeck_e2e7 = {"["}Wélçómé tó Ñótédéçk{"]"}
+
 # Placeholder for note input field
 Write_a_banger_note_here_bad2 = {"["}Wríté à bàñgér ñóté héré...{"]"}
+
+# Abbreviated version of yesterday used in conversation summaries
+Yest_0505 = {"["}Yést{"]"}
+
+# Label shown between chat messages for the previous day
+Yesterday_82b1 = {"["}Yéstérdày{"]"}
 
 # Placeholder text for key input field
 Your_key_here_81bd = {"["}Yóúr kéy héré...{"]"}
@@ -634,6 +880,9 @@ Zap_16b4 = {"["}Zàp{"]"}
 # Hover text for zap button
 Zap_this_note_42b2 = {"["}Zàp thís ñóté{"]"}
 
+# Column title for note zaps list
+Zaps_612c = {"["}Zàps{"]"}
+
 # Label for zoom level, Appearance settings section
 Zoom_Level_29a8 = {"["}Zóóm Lévél:{"]"}
 
@@ -644,6 +893,14 @@ Got__count__results_for___query_85fb =
     { $count ->
         [one] {"["}Gót {$count} résúlt fór '{$query}'{"]"}
        *[other] {"["}Gót {$count} résúlts fór '{$query}'{"]"}
+    }
+
+
+# Count of messages shown in a chat summary line
+count__messages_28b1 =
+    { $count ->
+        [one] {"["}{$count} méssàgé{"]"}
+       *[other] {"["}{$count} méssàgés{"]"}
     }
 
 
@@ -663,6 +920,14 @@ name__and__count__others_reacted_to_your_note_0f6a =
     }
 
 
+# describing the amount of reposts a note has
+name__and__count__others_reposted_708c =
+    { $count ->
+        [one] {"["}{$name} àñd {$count} óthér répóstéd{"]"}
+       *[other] {"["}{$name} àñd {$count} óthérs répóstéd{"]"}
+    }
+
+
 # describing the amount of reposts a note you were tagged in received
 name__and__count__others_reposted_a_note_you_were_tagged_in_08e1 =
     { $count ->
@@ -676,4 +941,20 @@ name__and__count__others_reposted_your_note_70a0 =
     { $count ->
         [one] {"["}{$name} àñd {$count} óthér répóstéd yóúr ñóté{"]"}
        *[other] {"["}{$name} àñd {$count} óthérs répóstéd yóúr ñóté{"]"}
+    }
+
+
+# amount of zaps a note you were tagged in received
+name__and__count__others_zapped_a_note_you_were_tagged_in_985d =
+    { $count ->
+        [one] {"["}{$name} àñd {$count} óthér zàppéd à ñóté yóú wéré tàggéd íñ{"]"}
+       *[other] {"["}{$name} àñd {$count} óthérs zàppéd à ñóté yóú wéré tàggéd íñ{"]"}
+    }
+
+
+# describing the amount of zaps your note received
+name__and__count__others_zapped_your_note_256d =
+    { $count ->
+        [one] {"["}{$name} àñd {$count} óthér zàppéd yóúr ñóté{"]"}
+       *[other] {"["}{$name} àñd {$count} óthérs zàppéd yóúr ñóté{"]"}
     }
