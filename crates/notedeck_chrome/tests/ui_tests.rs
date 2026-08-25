@@ -402,3 +402,50 @@ fn render_notedeck_tick_no_anim(ctx: &egui::Context, state: &mut TickTestState) 
     }
     state.notedeck.tick(ctx);
 }
+
+#[cfg(all(feature = "auto-update", feature = "snapshot-testing"))]
+#[tokio::test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "egui_nav renders transition routes on separate layers with shared widget ids"
+)]
+/// A pointer click on Add account must not also activate the column's Back button.
+async fn mobile_chrome_add_account_stays_open() {
+    use notedeck_chrome::Chrome;
+
+    let ctx = egui::Context::default();
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let args: Vec<String> = vec!["notedeck-test".into(), "--testrunner".into()];
+    let mut notedeck = Notedeck::init(&ctx, tmpdir.path(), &args);
+    let mut chrome = {
+        let mut app_ctx = notedeck.app_context();
+        app_ctx.settings.complete_welcome();
+        app_ctx.settings.get_settings_mut().animate_nav_transitions = false;
+        Chrome::new_test(&mut app_ctx, &ctx, &args)
+    };
+    chrome.toggle();
+    notedeck.set_app(chrome);
+
+    let state = TickTestState {
+        notedeck,
+        _tmpdir: tmpdir,
+        fonts_installed: false,
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::Vec2::new(375.0, 667.0))
+        .with_max_steps(100)
+        .build_state(render_notedeck_tick_no_anim, state);
+
+    let _ = harness.run_ok();
+    harness.get_by_label("Accounts").simulate_click();
+    let _ = harness.run_ok();
+    harness.get_by_label("Add account").simulate_click();
+    let _ = harness.run_ok();
+
+    assert!(harness.query_by_label("Login").is_some());
+    let _ = harness.run_ok();
+    assert!(
+        harness.query_by_label("Login").is_some(),
+        "the Add account route must not be popped on the following frame"
+    );
+}
