@@ -1011,7 +1011,6 @@ fn sync_status(ctx: &AppContext) -> ui::SyncStatus {
         };
         inspect
             .relay_infos()
-            .iter()
             .any(|info| info.relay_url == url && info.status == RelayStatus::Connected)
     });
     if connected {
