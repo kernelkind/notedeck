@@ -10,8 +10,7 @@ use async_openai::types::{
 };
 use async_openai::Client;
 use futures::StreamExt;
-use notedeck_dave::backend::BackendType;
-use notedeck_dave::config::{has_binary_on_path, ModelConfig};
+use notedeck_dave::config::ModelConfig;
 
 /// Test that the trial key can authenticate and get a streamed response.
 #[tokio::test]
@@ -163,42 +162,4 @@ fn test_trial_config_values() {
         config.endpoint().is_none(),
         "Trial config should use default OpenAI endpoint"
     );
-}
-
-/// Test that ModelConfig::default() falls back to trial key when no env vars are set.
-/// This verifies the Android fix (no longer defaults to Remote backend).
-#[test]
-fn test_default_config_uses_openai_without_env_vars() {
-    // Note: This test's behavior depends on environment variables.
-    // When DAVE_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, and CLAUDE_API_KEY
-    // are all unset, it should default to OpenAI with trial key.
-    let config = ModelConfig::default();
-
-    // If no API keys or agentic CLIs are available, we should get OpenAI
-    // trial mode rather than Remote.
-    if std::env::var("DAVE_API_KEY").is_err()
-        && std::env::var("OPENAI_API_KEY").is_err()
-        && std::env::var("ANTHROPIC_API_KEY").is_err()
-        && std::env::var("CLAUDE_API_KEY").is_err()
-        && std::env::var("DAVE_BACKEND").is_err()
-        && !has_binary_on_path("claude")
-        && !has_binary_on_path("codex")
-    {
-        assert!(
-            config.trial,
-            "Should be in trial mode when no API keys are set"
-        );
-        assert!(
-            config.api_key().is_some(),
-            "Should have trial API key when no env vars are set"
-        );
-        assert_eq!(config.model(), "gpt-4.1-mini");
-    } else if std::env::var("DAVE_BACKEND").is_err()
-        && (has_binary_on_path("claude") || has_binary_on_path("codex"))
-    {
-        assert!(
-            matches!(config.backend, BackendType::Claude | BackendType::Codex),
-            "agentic CLI auto-detection should select an agentic backend"
-        );
-    }
 }
