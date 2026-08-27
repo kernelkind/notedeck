@@ -2076,7 +2076,7 @@ impl AiBackend for CodexBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{AssistantMessage, DaveApiResponse};
+    use crate::messages::DaveApiResponse;
     use serde_json::json;
     use std::time::Duration;
 
@@ -2191,10 +2191,10 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
 
         assert_eq!(value["id"], serde_json::json!(321));
-        assert_eq!(
-            value["error"]["code"],
-            serde_json::json!(JSON_RPC_INVALID_PARAMS_CODE)
-        );
+        // The literal, not the constant: re-deriving the expectation from what
+        // the writer uses lets the wire code drift off the JSON-RPC spec
+        // unnoticed. -32602 is "Invalid params".
+        assert_eq!(value["error"]["code"], serde_json::json!(-32602));
         assert_eq!(value["error"]["message"], serde_json::json!("bad params"));
     }
 
@@ -2293,7 +2293,7 @@ mod tests {
 
     #[test]
     fn test_handle_turn_completed_success() {
-        let (tx, _rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
         let waker = Waker::noop();
         let mut subagents = Vec::new();
 
@@ -2307,6 +2307,12 @@ mod tests {
             &mut TokenState::Initial,
         );
         assert!(matches!(result, HandleResult::TurnDone));
+        // The arm returns TurnDone for every params value, so the status logic
+        // only shows up in what does (or doesn't) reach the channel.
+        assert!(
+            rx.try_recv().is_err(),
+            "a successful turn must not emit an error to the UI"
+        );
     }
 
     #[test]
@@ -2706,7 +2712,7 @@ mod tests {
 
     #[test]
     fn test_request_user_input_mcp_approval_extracts_tool_name() {
-        let (tx, _rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
         let waker = Waker::noop();
         let mut subagents = Vec::new();
 
@@ -2745,6 +2751,19 @@ mod tests {
             }
             other => panic!(
                 "Expected NeedsApproval+UserInput, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        }
+
+        // The fallback name only reaches the UI through this channel — the
+        // HandleResult above carries no tool name, so leaving it undrained is
+        // what made this test blind to the behaviour it is named for.
+        match rx.try_recv().expect("permission request sent to the UI") {
+            DaveApiResponse::PermissionRequest(pending) => {
+                assert_eq!(pending.request.tool_name, "mcp_tool");
+            }
+            other => panic!(
+                "Expected PermissionRequest, got {:?}",
                 std::mem::discriminant(&other)
             ),
         }
@@ -3615,91 +3634,6 @@ mod tests {
         let result =
             check_approval_or_forward(43, "Bash", json!({"command": "sudo rm -rf /"}), &tx, &waker);
         assert!(matches!(result, HandleResult::Rejected { rpc_id: 43, .. }));
-    }
-
-    // -----------------------------------------------------------------------
-    // get_pending_user_messages tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn pending_messages_single_user() {
-        let messages = vec![Message::User("hello".into())];
-        assert_eq!(shared::get_pending_user_messages(&messages), "hello");
-    }
-
-    #[test]
-    fn pending_messages_multiple_trailing_users() {
-        let messages = vec![
-            Message::User("first".into()),
-            Message::Assistant(AssistantMessage::from_text("reply".into())),
-            Message::User("second".into()),
-            Message::User("third".into()),
-            Message::User("fourth".into()),
-        ];
-        assert_eq!(
-            shared::get_pending_user_messages(&messages),
-            "second\nthird\nfourth"
-        );
-    }
-
-    #[test]
-    fn pending_messages_stops_at_non_user() {
-        let messages = vec![
-            Message::User("old".into()),
-            Message::User("also old".into()),
-            Message::Assistant(AssistantMessage::from_text("reply".into())),
-            Message::User("pending".into()),
-        ];
-        assert_eq!(shared::get_pending_user_messages(&messages), "pending");
-    }
-
-    #[test]
-    fn pending_messages_empty_when_last_is_assistant() {
-        let messages = vec![
-            Message::User("hello".into()),
-            Message::Assistant(AssistantMessage::from_text("reply".into())),
-        ];
-        assert_eq!(shared::get_pending_user_messages(&messages), "");
-    }
-
-    #[test]
-    fn pending_messages_empty_chat() {
-        let messages: Vec<Message> = vec![];
-        assert_eq!(shared::get_pending_user_messages(&messages), "");
-    }
-
-    #[test]
-    fn pending_messages_stops_at_tool_response() {
-        let messages = vec![
-            Message::User("do something".into()),
-            Message::Assistant(AssistantMessage::from_text("ok".into())),
-            Message::ToolCalls(vec![crate::tools::ToolCall::invalid(
-                "c1".into(),
-                Some("Read".into()),
-                None,
-                "test".into(),
-            )]),
-            Message::ToolResponse(crate::tools::ToolResponse::error(
-                "c1".into(),
-                "result".into(),
-            )),
-            Message::User("queued 1".into()),
-            Message::User("queued 2".into()),
-        ];
-        assert_eq!(
-            shared::get_pending_user_messages(&messages),
-            "queued 1\nqueued 2"
-        );
-    }
-
-    #[test]
-    fn pending_messages_preserves_order() {
-        let messages = vec![
-            Message::User("a".into()),
-            Message::User("b".into()),
-            Message::User("c".into()),
-        ];
-        assert_eq!(shared::get_pending_user_messages(&messages), "a\nb\nc");
     }
 
     // -----------------------------------------------------------------------
@@ -4821,16 +4755,16 @@ mod tests {
     /// and join handle, or `None` when the `codex` binary isn't installed so
     /// the caller can skip rather than fail.
     ///
-    /// These tests are `#[ignore]`d, but the snapshot CI job runs every ignored
-    /// test in this binary via `--ignored` (see `scripts/snapshot-test`), which
-    /// sweeps these real-binary tests up too.
+    /// These tests are `#[ignore]`d. The snapshot CI job runs the ignored tests
+    /// in this binary via `--ignored`, so it would sweep these real-binary tests
+    /// up too; `scripts/snapshot-test` excludes them by name (`--skip
+    /// test_real_codex`) — rename them and that exclusion has to move with them.
     ///
     /// They hit the live codex backend, so on a machine where codex is installed
     /// but its auth has lapsed the turn fails (expired refresh token) and the
-    /// sweep goes red — a login-dependent flake. To keep CI deterministic they
-    /// are opt-in: set `CODEX_LIVE_TEST=1` to actually exercise the real path
-    /// (locally, with valid auth). Unset — as in CI — they skip. A missing
-    /// `codex` binary skips too.
+    /// run goes red — a login-dependent flake. So they are opt-in: set
+    /// `CODEX_LIVE_TEST=1` to actually exercise the real path (locally, with
+    /// valid auth). Unset, they skip. A missing `codex` binary skips too.
     fn setup_real_codex_test() -> Option<(
         tokio_mpsc::Sender<SessionCommand>,
         mpsc::Receiver<DaveApiResponse>,

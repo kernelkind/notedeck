@@ -204,6 +204,21 @@ pub fn send_tool_result(
 /// Returns `true` (and logs) when the tool should be silently
 /// accepted without asking the user.
 pub fn should_auto_accept(tool_name: &str, tool_input: &serde_json::Value) -> bool {
+    should_auto_accept_with(&AutoAcceptRules::default(), tool_name, tool_input)
+}
+
+/// [`should_auto_accept`] against an explicit rules set.
+///
+/// `rules` is a parameter so the decision-tool gate below can be tested at all:
+/// with the shipping [`AutoAcceptRules::default`] the gate is unobservable —
+/// none of those rules match `AskUserQuestion` or `ExitPlanMode` anyway, so
+/// removing it changes nothing. Pass a rules set that *would* accept them and
+/// the gate becomes the only thing standing in the way.
+fn should_auto_accept_with(
+    rules: &AutoAcceptRules,
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+) -> bool {
     // Decision-type prompts (AskUserQuestion / ExitPlanMode plan review) always
     // need a real user decision and must never be silently accepted. This gate
     // runs at the backend, before the request reaches dave's session-level
@@ -213,7 +228,6 @@ pub fn should_auto_accept(tool_name: &str, tool_input: &serde_json::Value) -> bo
     if PermissionView::is_decision_tool(tool_name) {
         return false;
     }
-    let rules = AutoAcceptRules::default();
     let accepted = rules.should_auto_accept(tool_name, tool_input);
     if accepted {
         tracing::debug!("Auto-accepting {}: matched auto-accept rule", tool_name);
@@ -312,6 +326,7 @@ pub fn prepare_prompt_and_images(
 mod tests {
     use super::prepare_prompt_and_images;
     use super::*;
+    use crate::backend::CountingWaker;
     use crate::messages::{
         AssistantMessage, CompactionInfo, ImageAttachment, PermissionView, UserMessage,
     };
@@ -324,7 +339,38 @@ mod tests {
     #[test]
     fn decision_tools_never_backend_auto_accepted() {
         // A question set / plan review must reach the user for a real decision,
-        // so the backend-level default-rules gate must never silently accept it.
+        // so the backend gate must never silently accept it — even if the rules
+        // set says otherwise. Asserting this against the *default* rules proves
+        // nothing: none of them match a decision tool, so the gate is
+        // unobservable there. Use a rules set that would accept them.
+        let permissive =
+            AutoAcceptRules::from_rules(vec![crate::auto_accept::AutoAcceptRule::ReadOnlyTool {
+                tools: vec![
+                    "AskUserQuestion".to_string(),
+                    "ExitPlanMode".to_string(),
+                    "Read".to_string(),
+                ],
+            }]);
+
+        // Control: these rules do accept, so a `false` below is the gate and not
+        // a rules set that never matched anything.
+        assert!(
+            should_auto_accept_with(&permissive, "Read", &serde_json::json!({})),
+            "the fixture rules must actually accept something"
+        );
+
+        assert!(!should_auto_accept_with(
+            &permissive,
+            "AskUserQuestion",
+            &serde_json::json!({ "questions": [] }),
+        ));
+        assert!(!should_auto_accept_with(
+            &permissive,
+            "ExitPlanMode",
+            &serde_json::json!({ "plan": "# Do the thing" }),
+        ));
+
+        // And the shipping path, which is what the backends actually call.
         assert!(!should_auto_accept(
             "AskUserQuestion",
             &serde_json::json!({ "questions": [] }),
@@ -472,15 +518,49 @@ mod tests {
         assert_eq!(get_pending_user_messages(&msgs), "");
     }
 
+    #[test]
+    fn get_pending_single_user() {
+        let msgs = vec![Message::User("hello".into())];
+        assert_eq!(get_pending_user_messages(&msgs), "hello");
+    }
+
+    #[test]
+    fn get_pending_stops_at_tool_response() {
+        // A tool call/response pair breaks the trailing run just like an
+        // assistant message does.
+        let msgs = vec![
+            Message::User("do something".into()),
+            Message::Assistant(AssistantMessage::from_text("ok".into())),
+            Message::ToolCalls(vec![crate::tools::ToolCall::invalid(
+                "c1".into(),
+                Some("Read".into()),
+                None,
+                "test".into(),
+            )]),
+            Message::ToolResponse(crate::tools::ToolResponse::error(
+                "c1".into(),
+                "result".into(),
+            )),
+            Message::User("queued 1".into()),
+            Message::User("queued 2".into()),
+        ];
+        assert_eq!(get_pending_user_messages(&msgs), "queued 1\nqueued 2");
+    }
+
     // ---- forward_permission_to_ui ----
 
     #[test]
     fn forward_permission_delivers() {
         let (tx, rx) = mpsc::channel();
-        let waker = Waker::noop();
+        let waker = CountingWaker::new();
         let input = serde_json::json!({"command": "ls"});
-        let result = forward_permission_to_ui("Bash", input.clone(), &tx, &waker);
+        let result = forward_permission_to_ui("Bash", input.clone(), &tx, waker.waker());
         assert!(result.is_some());
+        assert_eq!(
+            waker.wakes(),
+            1,
+            "a permission prompt must repaint, or the user is never asked"
+        );
 
         let resp = rx.try_recv().unwrap();
         match resp {
@@ -536,7 +616,7 @@ mod tests {
     #[test]
     fn send_tool_result_with_parent() {
         let (tx, rx) = mpsc::channel();
-        let waker = Waker::noop();
+        let waker = CountingWaker::new();
         let stack = vec!["task-1".to_string()];
         send_tool_result(
             "Read",
@@ -546,7 +626,7 @@ mod tests {
             None,
             &stack,
             &tx,
-            &waker,
+            waker.waker(),
         );
 
         let resp = rx.try_recv().unwrap();
@@ -559,6 +639,11 @@ mod tests {
             }
             _ => panic!("expected ToolResult"),
         }
+        assert_eq!(
+            waker.wakes(),
+            1,
+            "a tool result must repaint, or it sits unseen until the next frame"
+        );
     }
 
     #[test]
@@ -666,11 +751,16 @@ mod tests {
     #[test]
     fn complete_subagent_removes_from_stack() {
         let (tx, rx) = mpsc::channel();
-        let waker = Waker::noop();
+        let waker = CountingWaker::new();
         let mut stack = vec!["task-a".to_string(), "task-b".to_string()];
-        complete_subagent("task-a", "done", &mut stack, &tx, &waker);
+        complete_subagent("task-a", "done", &mut stack, &tx, waker.waker());
 
         assert_eq!(stack, vec!["task-b".to_string()]);
+        assert_eq!(
+            waker.wakes(),
+            1,
+            "a finished subagent must repaint, or the sidebar entry stays running"
+        );
         let resp = rx.try_recv().unwrap();
         match resp {
             DaveApiResponse::SubagentCompleted { task_id, result } => {

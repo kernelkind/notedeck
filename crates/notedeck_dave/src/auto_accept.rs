@@ -134,6 +134,16 @@ impl AutoAcceptRules {
             .iter()
             .any(|rule| rule.matches(tool_name, tool_input))
     }
+
+    /// Build a rules set from an explicit list.
+    ///
+    /// Test-only: the shipping set is [`Default`]. Used to check guards that sit
+    /// *in front of* the rules, which the default set cannot exercise because it
+    /// never matches the tools those guards protect.
+    #[cfg(test)]
+    pub(crate) fn from_rules(rules: Vec<AutoAcceptRule>) -> Self {
+        Self { rules }
+    }
 }
 
 #[cfg(test)]
@@ -168,38 +178,55 @@ mod tests {
     }
 
     #[test]
-    fn test_cargo_build_auto_accept() {
+    fn test_cargo_commands_auto_accept() {
         let rules = default_rules();
-        let input = json!({ "command": "cargo build" });
-        assert!(rules.should_auto_accept("Bash", &input));
+        for command in [
+            "cargo build",
+            "cargo check",
+            "cargo test --release",
+            "cargo fmt",
+            "cargo clippy",
+        ] {
+            assert!(
+                rules.should_auto_accept("Bash", &json!({ "command": command })),
+                "{command:?} is on the allow list"
+            );
+        }
     }
 
+    /// Sharing a prefix is not enough: the prefix has to end on a word
+    /// boundary, or `ls` would auto-accept `lsof` and `cargo build` would
+    /// auto-accept anything starting with those characters.
     #[test]
-    fn test_cargo_check_auto_accept() {
+    fn test_prefix_without_word_boundary_not_auto_accept() {
         let rules = default_rules();
-        let input = json!({ "command": "cargo check" });
-        assert!(rules.should_auto_accept("Bash", &input));
+        for command in [
+            "lsof -i",          // "ls"
+            "cargo build-evil", // "cargo build"
+            "rgrep foo",        // "rg"
+            "findutils",        // "find"
+            "catalog.sh",       // "cat"
+            "types",            // "type"
+            "dfu-util",         // "df"
+        ] {
+            assert!(
+                !rules.should_auto_accept("Bash", &json!({ "command": command })),
+                "{command:?} only shares a prefix with an allowed command"
+            );
+        }
     }
 
+    /// The boundary check must not reject the allowed commands themselves,
+    /// either bare (the whole command is the prefix) or with arguments.
     #[test]
-    fn test_cargo_test_with_args_auto_accept() {
+    fn test_prefix_at_word_boundary_auto_accepts() {
         let rules = default_rules();
-        let input = json!({ "command": "cargo test --release" });
-        assert!(rules.should_auto_accept("Bash", &input));
-    }
-
-    #[test]
-    fn test_cargo_fmt_auto_accept() {
-        let rules = default_rules();
-        let input = json!({ "command": "cargo fmt" });
-        assert!(rules.should_auto_accept("Bash", &input));
-    }
-
-    #[test]
-    fn test_cargo_clippy_auto_accept() {
-        let rules = default_rules();
-        let input = json!({ "command": "cargo clippy" });
-        assert!(rules.should_auto_accept("Bash", &input));
+        for command in ["ls", "ls -la", "cat", "cat Cargo.toml", "df -h"] {
+            assert!(
+                rules.should_auto_accept("Bash", &json!({ "command": command })),
+                "{command:?} matches an allowed prefix at a word boundary"
+            );
+        }
     }
 
     #[test]

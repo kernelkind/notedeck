@@ -1059,7 +1059,7 @@ impl AiBackend for ClaudeBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::AssistantMessage;
+    use crate::backend::CountingWaker;
 
     #[test]
     fn cancelled_turn_suppresses_follow_up_messages_until_result() {
@@ -1108,7 +1108,7 @@ mod tests {
     #[test]
     fn task_started_local_agent_spawns_background_subagent() {
         let (tx, rx) = mpsc::channel();
-        let waker = Waker::noop();
+        let waker = CountingWaker::new();
 
         // The originating Task tool_use is still pending (its launch result
         // hasn't landed), so the subagent type is recoverable from its input.
@@ -1127,8 +1127,13 @@ mod tests {
             "description": "do background work",
             "task_type": "local_agent",
         });
-        handle_task_started(&data, &pending, &tx, &waker);
+        handle_task_started(&data, &pending, &tx, waker.waker());
 
+        assert_eq!(
+            waker.wakes(),
+            1,
+            "a spawned subagent must repaint, or it never appears in the sidebar"
+        );
         match rx.try_recv().expect("expected a spawn response") {
             DaveApiResponse::SubagentSpawned(info) => {
                 // Keyed by tool_use_id so parent_tool_use_id + task_notification align.
@@ -1168,7 +1173,7 @@ mod tests {
     #[test]
     fn task_notification_completes_and_fails_by_tool_use_id() {
         let (tx, rx) = mpsc::channel();
-        let waker = Waker::noop();
+        let waker = CountingWaker::new();
 
         handle_task_notification(
             &serde_json::json!({
@@ -1177,7 +1182,7 @@ mod tests {
                 "summary": "all done",
             }),
             &tx,
-            &waker,
+            waker.waker(),
         );
         match rx.try_recv().expect("expected a completion") {
             DaveApiResponse::SubagentCompleted { task_id, result } => {
@@ -1197,7 +1202,7 @@ mod tests {
                 "summary": "it broke",
             }),
             &tx,
-            &waker,
+            waker.waker(),
         );
         match rx.try_recv().expect("expected a failure") {
             DaveApiResponse::SubagentFailed { task_id, error } => {
@@ -1209,6 +1214,12 @@ mod tests {
                 std::mem::discriminant(&other)
             ),
         }
+
+        assert_eq!(
+            waker.wakes(),
+            2,
+            "both notifications must repaint, or the entry stays running"
+        );
     }
 
     #[test]
@@ -1277,84 +1288,164 @@ mod tests {
         );
     }
 
-    #[test]
-    fn pending_messages_single_user() {
-        let messages = vec![Message::User("hello".into())];
-        assert_eq!(shared::get_pending_user_messages(&messages), "hello");
+    /// The per-session state `run_stream` threads through
+    /// `handle_stream_message`, so a test can feed it real CLI messages and
+    /// read back exactly what the UI would receive.
+    struct StreamHarness {
+        tx: mpsc::Sender<DaveApiResponse>,
+        rx: mpsc::Receiver<DaveApiResponse>,
+        waker: Waker,
+        pending_tools: HashMap<String, (String, serde_json::Value)>,
+        subagent_stack: Vec<String>,
+        task_tracker: TaskTracker,
+    }
+
+    impl StreamHarness {
+        fn new() -> Self {
+            let (tx, rx) = mpsc::channel();
+            Self {
+                tx,
+                rx,
+                waker: Waker::noop(),
+                pending_tools: HashMap::new(),
+                subagent_stack: Vec::new(),
+                task_tracker: TaskTracker::new(),
+            }
+        }
+
+        /// Feed one message, in the wire shape the CLI emits it.
+        fn feed(&mut self, message: serde_json::Value) {
+            let message = serde_json::from_value::<ClaudeMessage>(message)
+                .expect("message should deserialize");
+            handle_stream_message(
+                message,
+                &self.tx,
+                &self.waker,
+                &mut self.pending_tools,
+                &mut self.subagent_stack,
+                &mut self.task_tracker,
+            );
+        }
+
+        /// Drain the channel, keeping the tool results.
+        fn tool_results(&self) -> Vec<crate::messages::ExecutedTool> {
+            self.rx
+                .try_iter()
+                .filter_map(|r| match r {
+                    DaveApiResponse::ToolResult(tool) => Some(tool),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    fn tool_use(id: &str, name: &str, input: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "type": "tool_use", "id": id, "name": name, "input": input })
+    }
+
+    /// Tool results arrive on a `user` message, nested one level deeper than the
+    /// SDK's own `content` field — see `parse_user_content_blocks`.
+    fn user_with(blocks: Vec<serde_json::Value>) -> serde_json::Value {
+        serde_json::json!({ "type": "user", "message": { "content": blocks } })
+    }
+
+    fn tool_result(tool_use_id: &str, content: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": content,
+            "is_error": false,
+        })
     }
 
     #[test]
-    fn pending_messages_multiple_trailing_users() {
-        let messages = vec![
-            Message::User("first".into()),
-            Message::Assistant(AssistantMessage::from_text("reply".into())),
-            Message::User("second".into()),
-            Message::User("third".into()),
-            Message::User("fourth".into()),
-        ];
-        assert_eq!(
-            shared::get_pending_user_messages(&messages),
-            "second\nthird\nfourth"
+    fn tool_use_then_result_emits_an_executed_tool() {
+        let mut harness = StreamHarness::new();
+
+        harness.feed(serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [
+                tool_use("toolu_123", "Read", serde_json::json!({ "file_path": "/etc/hostname" })),
+            ]},
+        }));
+        assert!(
+            harness.pending_tools.contains_key("toolu_123"),
+            "the tool_use is held until its result lands"
+        );
+        assert!(
+            harness.tool_results().is_empty(),
+            "nothing is shown to the user until the tool has actually run"
+        );
+
+        harness.feed(user_with(vec![tool_result(
+            "toolu_123",
+            "hostname content",
+        )]));
+
+        assert!(
+            harness.pending_tools.is_empty(),
+            "a correlated tool_use is dropped from the pending map"
+        );
+        let results = harness.tool_results();
+        assert_eq!(results.len(), 1, "one result for one correlated tool_use");
+        assert_eq!(results[0].tool_name, "Read");
+        assert!(
+            !results[0].summary.is_empty(),
+            "the summary is what the chat row renders"
         );
     }
 
     #[test]
-    fn pending_messages_stops_at_non_user() {
-        let messages = vec![
-            Message::User("old".into()),
-            Message::User("also old".into()),
-            Message::Assistant(AssistantMessage::from_text("reply".into())),
-            Message::User("pending".into()),
-        ];
-        assert_eq!(shared::get_pending_user_messages(&messages), "pending");
-    }
+    fn tool_result_without_a_matching_tool_use_emits_nothing() {
+        let mut harness = StreamHarness::new();
 
-    #[test]
-    fn pending_messages_empty_when_last_is_assistant() {
-        let messages = vec![
-            Message::User("hello".into()),
-            Message::Assistant(AssistantMessage::from_text("reply".into())),
-        ];
-        assert_eq!(shared::get_pending_user_messages(&messages), "");
-    }
+        harness.feed(user_with(vec![tool_result(
+            "toolu_unknown",
+            "some content",
+        )]));
 
-    #[test]
-    fn pending_messages_empty_chat() {
-        let messages: Vec<Message> = vec![];
-        assert_eq!(shared::get_pending_user_messages(&messages), "");
-    }
-
-    #[test]
-    fn pending_messages_stops_at_tool_response() {
-        let messages = vec![
-            Message::User("do something".into()),
-            Message::Assistant(AssistantMessage::from_text("ok".into())),
-            Message::ToolCalls(vec![crate::tools::ToolCall::invalid(
-                "c1".into(),
-                Some("Read".into()),
-                None,
-                "test".into(),
-            )]),
-            Message::ToolResponse(crate::tools::ToolResponse::error(
-                "c1".into(),
-                "result".into(),
-            )),
-            Message::User("queued 1".into()),
-            Message::User("queued 2".into()),
-        ];
-        assert_eq!(
-            shared::get_pending_user_messages(&messages),
-            "queued 1\nqueued 2"
+        assert!(
+            harness.tool_results().is_empty(),
+            "an uncorrelated result has no tool name or input to render"
         );
     }
 
     #[test]
-    fn pending_messages_preserves_order() {
-        let messages = vec![
-            Message::User("a".into()),
-            Message::User("b".into()),
-            Message::User("c".into()),
-        ];
-        assert_eq!(shared::get_pending_user_messages(&messages), "a\nb\nc");
+    fn tool_results_correlate_out_of_order() {
+        let mut harness = StreamHarness::new();
+
+        harness.feed(serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [
+                tool_use("toolu_1", "Read", serde_json::json!({ "file_path": "/a" })),
+                tool_use("toolu_2", "Bash", serde_json::json!({ "command": "true" })),
+                tool_use("toolu_3", "Grep", serde_json::json!({ "pattern": "x" })),
+            ]},
+        }));
+        assert_eq!(harness.pending_tools.len(), 3);
+
+        // The CLI is free to return results in any order.
+        harness.feed(user_with(vec![tool_result("toolu_2", "bash output")]));
+        harness.feed(user_with(vec![tool_result("toolu_1", "file body")]));
+        harness.feed(user_with(vec![tool_result("toolu_3", "3 matches")]));
+
+        assert!(harness.pending_tools.is_empty());
+        let results = harness.tool_results();
+        let names: Vec<&str> = results.iter().map(|r| r.tool_name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Bash", "Read", "Grep"],
+            "each result is attributed to the tool_use it correlates with, \
+             not to arrival order"
+        );
+        assert_eq!(
+            results[0].output.as_deref(),
+            Some("bash output"),
+            "Bash output is kept verbatim for inline rendering"
+        );
+        assert_eq!(
+            results[1].output, None,
+            "a non-Bash tool is covered by its summary alone"
+        );
     }
 }

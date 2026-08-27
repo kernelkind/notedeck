@@ -37,26 +37,15 @@ fn test_options() -> ClaudeAgentOptions {
         .build()
 }
 
-/// Non-ignored test that checks CLI availability without failing.
-/// This test always passes - it just reports whether the CLI is present.
-#[test]
-fn test_cli_version_available() {
-    let version = get_claude_code_version();
-    match version {
-        Some(v) => println!("Claude Code CLI version: {}", v),
-        None => println!("Claude Code CLI not installed - integration tests will be skipped"),
-    }
-}
-
 /// Test that the Claude Code SDK returns a text response.
 /// Validates that we receive actual text content from Claude.
 #[tokio::test]
 #[ignore = "Requires Claude Code CLI to be installed and authenticated"]
 async fn test_simple_query_returns_text() {
-    if !cli_available() {
-        println!("Skipping: Claude CLI not available");
-        return;
-    }
+    assert!(
+        cli_available(),
+        "claude CLI required; this test is #[ignore]d for that reason"
+    );
 
     let prompt = "Respond with exactly: Hello";
     let options = test_options();
@@ -97,10 +86,10 @@ async fn test_simple_query_returns_text() {
 #[tokio::test]
 #[ignore = "Requires Claude Code CLI to be installed and authenticated"]
 async fn test_result_message_received() {
-    if !cli_available() {
-        println!("Skipping: Claude CLI not available");
-        return;
-    }
+    assert!(
+        cli_available(),
+        "claude CLI required; this test is #[ignore]d for that reason"
+    );
 
     let prompt = "Say hi";
     let options = test_options();
@@ -138,10 +127,10 @@ async fn test_result_message_received() {
 #[tokio::test]
 #[ignore = "Requires Claude Code CLI to be installed and authenticated"]
 async fn test_empty_prompt_handled() {
-    if !cli_available() {
-        println!("Skipping: Claude CLI not available");
-        return;
-    }
+    assert!(
+        cli_available(),
+        "claude CLI required; this test is #[ignore]d for that reason"
+    );
 
     let prompt = "";
     let options = test_options();
@@ -156,46 +145,14 @@ async fn test_empty_prompt_handled() {
     // If result is Err, that's also fine - as long as we didn't panic
 }
 
-/// Verify that our prompt formatting produces substantial output.
-/// This is a pure unit test that doesn't require Claude CLI.
-#[test]
-fn test_prompt_formatting_is_substantial() {
-    // Simulate what messages_to_prompt should produce
-    let system = "You are Dave, a helpful Nostr assistant.";
-    let user_msg = "Hi";
-
-    // Build a proper prompt like messages_to_prompt should
-    let prompt = format!("{}\n\nHuman: {}\n\n", system, user_msg);
-
-    // The prompt should be much longer than just "Hi" (2 chars)
-    // If only the user message was sent (the bug), length would be ~2
-    // With system message, it should be ~60+
-    assert!(
-        prompt.len() > 50,
-        "Prompt with system message should be substantial. Got {} chars: {:?}",
-        prompt.len(),
-        prompt
-    );
-
-    // Verify the prompt contains what we expect
-    assert!(
-        prompt.contains(system),
-        "Prompt should contain system message"
-    );
-    assert!(
-        prompt.contains("Human: Hi"),
-        "Prompt should contain formatted user message"
-    );
-}
-
 /// Test that the can_use_tool callback is invoked when Claude tries to use a tool.
 #[tokio::test]
 #[ignore = "Requires Claude Code CLI to be installed and authenticated"]
 async fn test_can_use_tool_callback_invoked() {
-    if !cli_available() {
-        println!("Skipping: Claude CLI not available");
-        return;
-    }
+    assert!(
+        cli_available(),
+        "claude CLI required; this test is #[ignore]d for that reason"
+    );
 
     let callback_count = Arc::new(AtomicUsize::new(0));
     let callback_count_clone = callback_count.clone();
@@ -260,10 +217,10 @@ async fn test_can_use_tool_callback_invoked() {
 #[tokio::test]
 #[ignore = "Requires Claude Code CLI to be installed and authenticated"]
 async fn test_session_context_maintained() {
-    if !cli_available() {
-        println!("Skipping: Claude CLI not available");
-        return;
-    }
+    assert!(
+        cli_available(),
+        "claude CLI required; this test is #[ignore]d for that reason"
+    );
 
     let stderr_callback = |_msg: String| {};
 
@@ -341,10 +298,10 @@ async fn test_session_context_maintained() {
 #[tokio::test]
 #[ignore = "Requires Claude Code CLI to be installed and authenticated"]
 async fn test_separate_sessions_have_separate_context() {
-    if !cli_available() {
-        println!("Skipping: Claude CLI not available");
-        return;
-    }
+    assert!(
+        cli_available(),
+        "claude CLI required; this test is #[ignore]d for that reason"
+    );
 
     let stderr_callback = |_msg: String| {};
 
@@ -413,10 +370,10 @@ async fn test_separate_sessions_have_separate_context() {
 #[tokio::test]
 #[ignore = "Requires Claude Code CLI to be installed and authenticated"]
 async fn test_continue_conversation_flag() {
-    if !cli_available() {
-        println!("Skipping: Claude CLI not available");
-        return;
-    }
+    assert!(
+        cli_available(),
+        "claude CLI required; this test is #[ignore]d for that reason"
+    );
 
     let stderr_callback = |_msg: String| {};
 
@@ -485,10 +442,10 @@ async fn test_continue_conversation_flag() {
 #[tokio::test]
 #[ignore = "Requires Claude Code CLI to be installed and authenticated"]
 async fn test_can_use_tool_deny_prevents_execution() {
-    if !cli_available() {
-        println!("Skipping: Claude CLI not available");
-        return;
-    }
+    assert!(
+        cli_available(),
+        "claude CLI required; this test is #[ignore]d for that reason"
+    );
 
     let was_denied = Arc::new(AtomicBool::new(false));
     let was_denied_clone = was_denied.clone();

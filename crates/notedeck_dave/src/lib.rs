@@ -6509,7 +6509,12 @@ mod tests {
             .kinds([session_events::AI_SESSION_STATE_KIND as u64])
             .build();
 
-        // The owner published a state with NO custom_title.
+        // The owner published a state with NO custom_title. Seed it in the
+        // FUTURE: against a 1970 timestamp any wall-clock implementation wins,
+        // so the `now.max(persisted + 1)` monotonicity rule — what makes a
+        // replaceable event beat a revision whose clock ran ahead — is never
+        // exercised.
+        let persisted_created_at = session_events::now_secs() + 100;
         let seed = session_events::build_session_state_event(
             sid,
             "Auto Title",
@@ -6523,7 +6528,7 @@ mod tests {
             "default",
             Some(sid),
             None,
-            1_000,
+            persisted_created_at,
             &sk,
         )
         .unwrap();
@@ -6563,8 +6568,9 @@ mod tests {
             "keeps the owner's hostname, not the phone's"
         );
         assert!(
-            publish.created_at > 1_000,
-            "created_at must strictly beat the persisted revision"
+            publish.created_at > persisted_created_at,
+            "created_at must strictly beat the persisted revision, even one \
+             stamped ahead of this machine's clock"
         );
 
         // Now the in-memory title matches what's persisted -> a status-only
@@ -6706,6 +6712,10 @@ mod tests {
         // clicking the deleted chip would revive it here instead of resuming it
         // on its owner (see `process_pending_open`).
         session.details.hostname = "other-host".to_string();
+        // Set an indicator so clearing it is observable: the fixture never had
+        // one, so the snapshot already yielded `None` and the delete path's
+        // `state.indicator = None` could be removed unnoticed.
+        session.indicator = Some(focus_queue::FocusPriority::NeedsInput);
 
         dave.delete_session(sid);
 
@@ -7408,17 +7418,30 @@ mod tests {
         std::fs::write(settings_dir.join("collapse_state.json"), "{not valid json")
             .expect("invalid collapse state should be written");
 
-        let restored = test_dave(&data_path);
+        let mut restored = test_dave(&data_path);
 
         assert!(
             !restored.collapse_state.is_host_collapsed("remote-a"),
             "invalid saved state should fall back to a clean default"
         );
+
+        // A clean default is also what you get if persistence is never read at
+        // all, so that assertion alone can't tell the two apart. What makes the
+        // fallback meaningful is that the corrupt file doesn't wedge later
+        // saves: toggle, restart, and the toggle must come back.
+        restored.collapse_serializer = TimedSerializer::new(
+            &data_path,
+            DataPathType::Setting,
+            "collapse_state.json".to_owned(),
+        )
+        .with_delay(Duration::ZERO);
+        restored.toggle_host_collapse("remote-a");
+        drop(restored);
+
+        let reloaded = test_dave(&data_path);
         assert!(
-            !restored
-                .collapse_state
-                .is_cwd_collapsed("remote-a", std::path::Path::new("/srv/api")),
-            "invalid saved state should not restore any collapsed cwd entries"
+            reloaded.collapse_state.is_host_collapsed("remote-a"),
+            "a corrupt file must not wedge saves made after it"
         );
     }
 

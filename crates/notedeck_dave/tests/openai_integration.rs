@@ -10,8 +10,7 @@ use async_openai::types::{
 };
 use async_openai::Client;
 use futures::StreamExt;
-use notedeck_dave::backend::BackendType;
-use notedeck_dave::config::{has_binary_on_path, ModelConfig};
+use notedeck_dave::config::ModelConfig;
 
 /// Test that the trial key can authenticate and get a streamed response.
 #[tokio::test]
@@ -95,15 +94,26 @@ async fn test_trial_key_non_streaming() {
     println!("Non-streaming response: {:?}", text);
 }
 
-/// Diagnostic: check which models the trial key project has access to.
+/// Check which models the trial key project has access to.
+///
+/// The one model that has to work is the one `ModelConfig::trial()` actually
+/// selects — without it the trial experience is dead. The others are probed for
+/// diagnostics only and merely logged, so this test fails on the case that
+/// matters and not on an unrelated model being out of reach.
 #[tokio::test]
 #[ignore = "Requires network access to OpenAI API"]
 async fn test_trial_key_model_access() {
     let config = ModelConfig::trial();
+    let trial_model = config.model().to_string();
     let client = Client::with_config(config.to_api());
 
     let models_to_try = ["gpt-5.2", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.1"];
+    assert!(
+        models_to_try.contains(&trial_model.as_str()),
+        "the probe list must cover the trial model {trial_model}"
+    );
 
+    let mut trial_model_ok = false;
     for model in models_to_try {
         let message = ChatCompletionRequestUserMessageArgs::default()
             .content("Say hi")
@@ -119,10 +129,18 @@ async fn test_trial_key_model_access() {
         };
 
         match client.chat().create(request).await {
-            Ok(_) => println!("  OK: {}", model),
+            Ok(_) => {
+                println!("  OK: {}", model);
+                trial_model_ok |= model == trial_model;
+            }
             Err(e) => println!("FAIL: {} - {}", model, e),
         }
     }
+
+    assert!(
+        trial_model_ok,
+        "the trial key has no access to {trial_model}, the model ModelConfig::trial() selects"
+    );
 }
 
 /// Test that ModelConfig::trial() produces the expected configuration.
@@ -144,42 +162,4 @@ fn test_trial_config_values() {
         config.endpoint().is_none(),
         "Trial config should use default OpenAI endpoint"
     );
-}
-
-/// Test that ModelConfig::default() falls back to trial key when no env vars are set.
-/// This verifies the Android fix (no longer defaults to Remote backend).
-#[test]
-fn test_default_config_uses_openai_without_env_vars() {
-    // Note: This test's behavior depends on environment variables.
-    // When DAVE_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, and CLAUDE_API_KEY
-    // are all unset, it should default to OpenAI with trial key.
-    let config = ModelConfig::default();
-
-    // If no API keys or agentic CLIs are available, we should get OpenAI
-    // trial mode rather than Remote.
-    if std::env::var("DAVE_API_KEY").is_err()
-        && std::env::var("OPENAI_API_KEY").is_err()
-        && std::env::var("ANTHROPIC_API_KEY").is_err()
-        && std::env::var("CLAUDE_API_KEY").is_err()
-        && std::env::var("DAVE_BACKEND").is_err()
-        && !has_binary_on_path("claude")
-        && !has_binary_on_path("codex")
-    {
-        assert!(
-            config.trial,
-            "Should be in trial mode when no API keys are set"
-        );
-        assert!(
-            config.api_key().is_some(),
-            "Should have trial API key when no env vars are set"
-        );
-        assert_eq!(config.model(), "gpt-4.1-mini");
-    } else if std::env::var("DAVE_BACKEND").is_err()
-        && (has_binary_on_path("claude") || has_binary_on_path("codex"))
-    {
-        assert!(
-            matches!(config.backend, BackendType::Claude | BackendType::Codex),
-            "agentic CLI auto-detection should select an agentic backend"
-        );
-    }
 }

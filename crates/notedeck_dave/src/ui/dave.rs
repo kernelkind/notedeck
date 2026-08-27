@@ -537,44 +537,13 @@ impl<'a> DaveUi<'a> {
         let mut response = DaveResponse::default();
         let is_agentic = self.ai_mode == AiMode::Agentic;
 
-        // Find where queued (not-yet-dispatched) user messages start.
-        // When streaming, append_token inserts an Assistant between the
-        // dispatched User and any queued Users, so all trailing Users
-        // after that Assistant are queued. Before the first token arrives
-        // there's no Assistant yet, so we skip the dispatched count
-        // trailing Users (they were all sent in the prompt).
-        let queued_from = if self.flags.contains(DaveUiFlags::IsWorking) {
-            let last_non_user = self
-                .chat
-                .iter()
-                .rposition(|m| !matches!(m, Message::User(_)));
-            match last_non_user {
-                Some(i) if matches!(self.chat[i], Message::Assistant(ref m) if m.is_streaming()) => {
-                    // Streaming assistant separates dispatched from queued
-                    let first_trailing = i + 1;
-                    if first_trailing < self.chat.len() {
-                        Some(first_trailing)
-                    } else {
-                        None
-                    }
-                }
-                Some(i) => {
-                    // No streaming assistant yet — skip past the dispatched
-                    // user messages (1 for single dispatch, N for batch)
-                    let first_trailing = i + 1;
-                    let skip = self.dispatch_state.dispatched_count().max(1);
-                    let queued_start = first_trailing + skip;
-                    if queued_start < self.chat.len() {
-                        Some(queued_start)
-                    } else {
-                        None
-                    }
-                }
-                None => None,
-            }
-        } else {
-            None
-        };
+        // Where queued (not-yet-dispatched) user messages start. Lives in
+        // session.rs so it is testable without a render pass.
+        let queued_from = crate::session::queued_from(
+            self.chat,
+            self.flags.contains(DaveUiFlags::IsWorking),
+            self.dispatch_state,
+        );
 
         for (i, message) in self.chat.iter().enumerate() {
             match message {

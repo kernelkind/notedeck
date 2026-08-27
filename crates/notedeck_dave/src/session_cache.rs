@@ -471,7 +471,13 @@ mod tests {
         /// Write a kind-31988 session-state event for `session_id` and ingest it
         /// locally (mirroring the store's client-ingest path). `created_at` orders
         /// revisions; `status` drives the deleted-tombstone case.
-        fn write_state(&self, session_id: &str, title: &str, status: &str, created_at: u64) {
+        fn write_state(
+            &self,
+            session_id: &str,
+            title: &str,
+            status: &str,
+            created_at: u64,
+        ) -> NoteId {
             let note = NoteBuilder::new()
                 .kind(AI_SESSION_STATE_KIND)
                 .content("")
@@ -495,6 +501,7 @@ mod tests {
             self.ndb
                 .process_event_with(&frame, nostrdb::IngestMetadata::new().client(true))
                 .unwrap();
+            NoteId::new(*note.id())
         }
 
         /// Write a kind-1988 conversation message for `session_id` and ingest it
@@ -551,7 +558,26 @@ mod tests {
                 .borrow_mut()
                 .session(&self.ndb, &txn, &self.kp.pubkey, session_id)
         }
+
+        /// Pump the cache until `f` yields, then return what it yielded.
+        ///
+        /// Bounded on purpose: an unbounded `loop { poll(); .. }` turns any
+        /// regression in the fold into a hung test — and a hung CI job — instead
+        /// of a failure naming what never converged.
+        fn poll_until<T>(&mut self, what: &str, mut f: impl FnMut(&mut Self) -> Option<T>) -> T {
+            for _ in 0..MAX_POLLS {
+                self.poll();
+                if let Some(value) = f(self) {
+                    return value;
+                }
+            }
+            panic!("gave up after {MAX_POLLS} polls waiting for {what}");
+        }
     }
+
+    /// Polls a convergence wait will make before declaring the fold stuck. The
+    /// folds here settle in one or two; this is a hang guard, not a timing knob.
+    const MAX_POLLS: usize = 200;
 
     /// A word-id for a real session resolves to its *current* kind-31988 note id,
     /// and that note id drifts to the newer revision when the session updates —
@@ -564,25 +590,18 @@ mod tests {
 
         t.write_state(sid, "First title", "working", 1_000);
         t.await_notes(1).await;
-        let first = loop {
-            t.poll();
-            if let Some(id) = t.resolve(&words) {
-                break id;
-            }
-        };
+        t.poll_until("the first revision to resolve", |t| t.resolve(&words));
 
         // A newer revision (a title/status update) replaces the resolved note id.
-        t.write_state(sid, "Renamed", "idle", 2_000);
+        // Assert against the id that write produced: the old
+        // `assert_ne!(first, second)` was guaranteed by the loop that produced
+        // `second` (it only broke when the id differed), so a fold that stopped
+        // tracking newer revisions spun forever instead of failing.
+        let second = t.write_state(sid, "Renamed", "idle", 2_000);
         t.await_notes(1).await;
-        let second = loop {
-            t.poll();
-            if let Some(id) = t.resolve(&words) {
-                if id != first {
-                    break id;
-                }
-            }
-        };
-        assert_ne!(first, second, "resolve should track the newer revision");
+        t.poll_until("resolve to move to the newer revision", |t| {
+            t.resolve(&words).filter(|id| *id == second)
+        });
 
         // The live state reflects the newer title.
         assert_eq!(t.session(sid).unwrap().state.display_title(), "Renamed");
@@ -605,12 +624,12 @@ mod tests {
         t.write_state(sid_a, "Alpha", "working", 1_000);
         t.write_state(sid_b, "Bravo", "working", 1_000);
         t.await_notes(2).await;
-        let (id_a, id_b) = loop {
-            t.poll();
-            if let (Some(a), Some(b)) = (t.resolve(&words_a), t.resolve(&words_b)) {
-                break (a, b);
+        let (id_a, id_b) = t.poll_until("both sessions to resolve", |t| {
+            match (t.resolve(&words_a), t.resolve(&words_b)) {
+                (Some(a), Some(b)) => Some((a, b)),
+                _ => None,
             }
-        };
+        });
         assert_ne!(id_a, id_b, "each session resolves to its own note id");
         assert_eq!(t.session(sid_a).unwrap().state.display_title(), "Alpha");
         assert_eq!(t.session(sid_b).unwrap().state.display_title(), "Bravo");
@@ -629,24 +648,18 @@ mod tests {
         // A session state published at t=1000, then folded.
         t.write_state(sid, "Live", "working", 1_000);
         t.await_notes(1).await;
-        let base = loop {
-            t.poll();
-            if let Some(v) = t.session(sid) {
-                break v.last_activity;
-            }
-        };
+        let base = t.poll_until("the session to project", |t| {
+            t.session(sid).map(|v| v.last_activity)
+        });
         assert_eq!(base, 1_000, "last_activity seeds from the state event");
 
         // A conversation message streams in later, without a status republish.
         t.write_message(sid, 2_500);
         t.await_notes(1).await;
-        let advanced = loop {
-            t.poll();
+        let advanced = t.poll_until("last_activity to advance past the state event", |t| {
             let v = t.session(sid).expect("session still projected");
-            if v.last_activity > 1_000 {
-                break v.last_activity;
-            }
-        };
+            (v.last_activity > 1_000).then_some(v.last_activity)
+        });
         assert_eq!(
             advanced, 2_500,
             "a newer conversation message advances last_activity"
@@ -682,24 +695,18 @@ mod tests {
 
         t.write_state(sid, "Beta", "working", 1_000);
         t.await_notes(1).await;
-        loop {
-            t.poll();
-            if t.resolve(&words).is_some() {
-                break;
-            }
-        }
+        t.poll_until("the session to resolve", |t| t.resolve(&words));
 
         // A newer `deleted` revision tombstones the session: it leaves the
         // projection (`session` is None) but stays resolvable, now pointing at the
         // tombstone revision's note id.
         t.write_state(sid, "Beta", DELETED_STATUS, 2_000);
         t.await_notes(1).await;
-        let tombstone_id = loop {
-            t.poll();
-            if t.session(sid).is_none() {
-                break t.resolve(&words).expect("a deleted session still resolves");
-            }
-        };
+        let tombstone_id = t.poll_until("the tombstone to leave the projection", |t| {
+            t.session(sid)
+                .is_none()
+                .then(|| t.resolve(&words).expect("a deleted session still resolves"))
+        });
 
         // Re-delivering the original (older) creation revision must not resurrect
         // it: the fold holds the newer tombstone, so the older revision is ignored —

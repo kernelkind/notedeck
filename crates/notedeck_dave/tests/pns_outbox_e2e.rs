@@ -303,6 +303,17 @@ fn author_session_state_query(author: &FullKeypair) -> LocalQuery {
         "query account session state events",
     )
 }
+/// Local kind-1080 envelopes — what the device has authored (or imported) into
+/// its own nostrdb, whether or not any relay has seen them.
+fn pns_envelope_query() -> LocalQuery {
+    LocalQuery::new(
+        vec![FilterBuilder::new()
+            .kinds([enostr::pns::PNS_KIND as u64])
+            .build()],
+        4096,
+        "query local PNS envelopes",
+    )
+}
 fn session_state_filter() -> Filter {
     FilterBuilder::new()
         .kinds([session_events::AI_SESSION_STATE_KIND as u64])
@@ -848,7 +859,10 @@ async fn dave_pns_no_private_relay_does_not_use_account_relays_e2e() {
     init_tracing();
 
     let account = FullKeypair::generate();
-    let account_relay = setup_seeded_relay(&account, 1).await;
+    let (account_relay_db, account_relay) = setup_relay().await;
+    seed_pns_session_states_with_prefix(&account_relay_db, &account, "account-session", 1).await;
+    let (private_db, private_relay) = setup_relay().await;
+    seed_pns_session_states_with_prefix(&private_db, &account, "private-session", 1).await;
 
     // No relay is marked "private", so Dave stays local-only and must not
     // subscribe to the account's regular relays for PNS state.
@@ -858,6 +872,33 @@ async fn dave_pns_no_private_relay_does_not_use_account_relays_e2e() {
 
     assert_eq!(session_state_query().count(&mut device), 0);
     assert!(pns_neg_open_session_ids(&account_relay, &account).is_empty());
+
+    // 300ms is ~2 orders of magnitude tighter than this file's own estimate for
+    // the same path (`wait_for_pns_import_and_open` allows 20 SECONDS for
+    // connect, NEG-OPEN, reconcile and ndb commit), so the window above cannot
+    // by itself distinguish "never subscribed" from "hasn't got there yet".
+    // Bracket it: mark a *second* relay private and wait for a real import from
+    // it. Once PNS has demonstrably connected, negotiated and committed, an
+    // account-relay subscription would have shown up too.
+    set_private_relay(&mut device, private_relay.url());
+    wait_for_pns_import_and_open(
+        &mut device,
+        &private_relay,
+        &account,
+        1,
+        "private relay marked after a local-only window",
+    );
+
+    assert!(
+        pns_neg_open_session_ids(&account_relay, &account).is_empty(),
+        "PNS must negotiate with the private relay only, never account relays"
+    );
+    session_state_query().assert_count_stable(
+        &mut device,
+        1,
+        8,
+        "Dave PNS must not import the account relay's session on top of the private relay's",
+    );
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial]
@@ -1076,6 +1117,7 @@ async fn dave_pns_no_private_relay_does_not_publish_to_account_relays_e2e() {
 
     let account = FullKeypair::generate();
     let (_, account_relay) = setup_relay().await;
+    let (_, private_relay) = setup_relay().await;
 
     let cwd = std::env::current_dir().expect("current dir");
     // No private relay marked: Dave is local-only and must not publish PNS
@@ -1090,9 +1132,51 @@ async fn dave_pns_no_private_relay_does_not_publish_to_account_relays_e2e() {
             text: "queued while no private relay is set".to_owned(),
         })
         .expect("queue outbound PNS event");
+    // Sync point, in the same conditions as the negative: wait until the
+    // envelope actually exists in local nostrdb. A bare `step_device_for(200ms)`
+    // cannot tell "the fan-out declined to send it" from "there was nothing to
+    // send yet" — the positive counterpart for this publish path
+    // (`dave_pns_outbound_publish_uses_configured_relay_only_e2e`) is allowed 10
+    // SECONDS for connect, handshake and round-trip. Once the envelope is
+    // committed locally the per-frame fan-out has it in hand, so the frames
+    // below are the ones that would publish it.
+    pns_envelope_query().wait_for_count(
+        &mut device,
+        1,
+        Duration::from_secs(10),
+        "Dave authoring the outbound PNS envelope locally",
+    );
     step_device_for(&mut device, Duration::from_millis(200));
 
-    assert_eq!(captured_event_count(&account_relay), 0);
+    assert_eq!(
+        captured_event_count(&account_relay),
+        0,
+        "an envelope that exists locally must not reach account relays with no private relay set"
+    );
+
+    // And once a relay *is* marked private, envelopes go there and still not to
+    // the account relay. Waiting on the private relay's capture (10s) means the
+    // account relay has had at least that long to receive a stray copy.
+    set_private_relay(&mut device, private_relay.url());
+    command_tx
+        .send(ControllableDaveCommand::AddUserMessage {
+            session_id,
+            text: "authored after the private relay is live".to_owned(),
+        })
+        .expect("queue post-mark outbound PNS event");
+    wait_for_event_publish(
+        &mut device,
+        &private_relay,
+        "Dave outbound PNS event publish to the private relay",
+    );
+
+    // Marking a relay private publishes a kind-10002 relay list to the
+    // account's write relay, so count PNS envelopes specifically.
+    assert_eq!(
+        captured_pns_event_count(&account_relay),
+        0,
+        "PNS envelopes must reach the private relay only, never account relays"
+    );
 }
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
