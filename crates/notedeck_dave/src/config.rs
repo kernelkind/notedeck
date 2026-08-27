@@ -406,6 +406,7 @@ impl ModelConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     fn env_with_backend(backend: &str) -> EnvSnapshot {
         EnvSnapshot {
@@ -516,6 +517,95 @@ mod tests {
         );
         assert_eq!(config.api_key(), Some("sk-dave"));
         assert_eq!(config.anthropic_api_key.as_deref(), Some("sk-ant"));
+    }
+
+    /// The variables [`EnvSnapshot::from_process_env`] reads.
+    const READ_VARS: [&str; 7] = [
+        "DAVE_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_API_KEY",
+        "DAVE_BACKEND",
+        "DAVE_MODEL",
+        "DAVE_ENDPOINT",
+    ];
+
+    /// Saves every variable in [`READ_VARS`] on construction and puts it back on
+    /// drop, so a failing assertion can't leak a fixture value into the rest of
+    /// the run.
+    struct EnvGuard(Vec<(&'static str, Option<String>)>);
+
+    impl EnvGuard {
+        fn take() -> Self {
+            EnvGuard(READ_VARS.iter().map(|k| (*k, env::var(k).ok())).collect())
+        }
+
+        /// Set `key`, or remove it when `value` is `None`.
+        fn put(key: &str, value: Option<&str>) {
+            match value {
+                Some(v) => env::set_var(key, v),
+                None => env::remove_var(key),
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in &self.0 {
+                EnvGuard::put(key, value.as_deref());
+            }
+        }
+    }
+
+    /// Each documented variable lands in its own [`EnvSnapshot`] field.
+    ///
+    /// The tests above pin [`ModelConfig::from_env`], which is a pure function of
+    /// the snapshot — but the mapping from variable *name* to field lives only in
+    /// [`EnvSnapshot::from_process_env`], whose sole caller is [`Default`], whose
+    /// sole caller is production. So a transposed or misspelled name is invisible
+    /// to every other test in the crate; only going through the process
+    /// environment can see it. Each value names its own variable, so a
+    /// transposition fails rather than reading through.
+    #[test]
+    #[serial]
+    fn from_process_env_maps_each_documented_variable() {
+        let _guard = EnvGuard::take();
+        for key in READ_VARS {
+            EnvGuard::put(key, Some(&format!("v-{key}")));
+        }
+
+        let snap = EnvSnapshot::from_process_env();
+        assert_eq!(snap.dave_api_key.as_deref(), Some("v-DAVE_API_KEY"));
+        assert_eq!(snap.openai_api_key.as_deref(), Some("v-OPENAI_API_KEY"));
+        assert_eq!(
+            snap.anthropic_api_key.as_deref(),
+            Some("v-ANTHROPIC_API_KEY")
+        );
+        assert_eq!(snap.claude_api_key.as_deref(), Some("v-CLAUDE_API_KEY"));
+        assert_eq!(snap.backend.as_deref(), Some("v-DAVE_BACKEND"));
+        assert_eq!(snap.model.as_deref(), Some("v-DAVE_MODEL"));
+        assert_eq!(snap.endpoint.as_deref(), Some("v-DAVE_ENDPOINT"));
+    }
+
+    /// An unset variable reads as `None` rather than an empty string, which is
+    /// what makes the `or_else` key fallbacks and the `DAVE_BACKEND` auto-detect
+    /// branch fire.
+    #[test]
+    #[serial]
+    fn from_process_env_reports_unset_variables_as_none() {
+        let _guard = EnvGuard::take();
+        for key in READ_VARS {
+            EnvGuard::put(key, None);
+        }
+
+        let snap = EnvSnapshot::from_process_env();
+        assert_eq!(snap.dave_api_key, None);
+        assert_eq!(snap.openai_api_key, None);
+        assert_eq!(snap.anthropic_api_key, None);
+        assert_eq!(snap.claude_api_key, None);
+        assert_eq!(snap.backend, None);
+        assert_eq!(snap.model, None);
+        assert_eq!(snap.endpoint, None);
     }
 
     /// `DAVE_MODEL` and `DAVE_ENDPOINT` are passed through as given.
