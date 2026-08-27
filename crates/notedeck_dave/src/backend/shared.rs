@@ -204,6 +204,21 @@ pub fn send_tool_result(
 /// Returns `true` (and logs) when the tool should be silently
 /// accepted without asking the user.
 pub fn should_auto_accept(tool_name: &str, tool_input: &serde_json::Value) -> bool {
+    should_auto_accept_with(&AutoAcceptRules::default(), tool_name, tool_input)
+}
+
+/// [`should_auto_accept`] against an explicit rules set.
+///
+/// `rules` is a parameter so the decision-tool gate below can be tested at all:
+/// with the shipping [`AutoAcceptRules::default`] the gate is unobservable —
+/// none of those rules match `AskUserQuestion` or `ExitPlanMode` anyway, so
+/// removing it changes nothing. Pass a rules set that *would* accept them and
+/// the gate becomes the only thing standing in the way.
+fn should_auto_accept_with(
+    rules: &AutoAcceptRules,
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+) -> bool {
     // Decision-type prompts (AskUserQuestion / ExitPlanMode plan review) always
     // need a real user decision and must never be silently accepted. This gate
     // runs at the backend, before the request reaches dave's session-level
@@ -213,7 +228,6 @@ pub fn should_auto_accept(tool_name: &str, tool_input: &serde_json::Value) -> bo
     if PermissionView::is_decision_tool(tool_name) {
         return false;
     }
-    let rules = AutoAcceptRules::default();
     let accepted = rules.should_auto_accept(tool_name, tool_input);
     if accepted {
         tracing::debug!("Auto-accepting {}: matched auto-accept rule", tool_name);
@@ -325,7 +339,38 @@ mod tests {
     #[test]
     fn decision_tools_never_backend_auto_accepted() {
         // A question set / plan review must reach the user for a real decision,
-        // so the backend-level default-rules gate must never silently accept it.
+        // so the backend gate must never silently accept it — even if the rules
+        // set says otherwise. Asserting this against the *default* rules proves
+        // nothing: none of them match a decision tool, so the gate is
+        // unobservable there. Use a rules set that would accept them.
+        let permissive =
+            AutoAcceptRules::from_rules(vec![crate::auto_accept::AutoAcceptRule::ReadOnlyTool {
+                tools: vec![
+                    "AskUserQuestion".to_string(),
+                    "ExitPlanMode".to_string(),
+                    "Read".to_string(),
+                ],
+            }]);
+
+        // Control: these rules do accept, so a `false` below is the gate and not
+        // a rules set that never matched anything.
+        assert!(
+            should_auto_accept_with(&permissive, "Read", &serde_json::json!({})),
+            "the fixture rules must actually accept something"
+        );
+
+        assert!(!should_auto_accept_with(
+            &permissive,
+            "AskUserQuestion",
+            &serde_json::json!({ "questions": [] }),
+        ));
+        assert!(!should_auto_accept_with(
+            &permissive,
+            "ExitPlanMode",
+            &serde_json::json!({ "plan": "# Do the thing" }),
+        ));
+
+        // And the shipping path, which is what the backends actually call.
         assert!(!should_auto_accept(
             "AskUserQuestion",
             &serde_json::json!({ "questions": [] }),

@@ -134,6 +134,16 @@ impl AutoAcceptRules {
             .iter()
             .any(|rule| rule.matches(tool_name, tool_input))
     }
+
+    /// Build a rules set from an explicit list.
+    ///
+    /// Test-only: the shipping set is [`Default`]. Used to check guards that sit
+    /// *in front of* the rules, which the default set cannot exercise because it
+    /// never matches the tools those guards protect.
+    #[cfg(test)]
+    pub(crate) fn from_rules(rules: Vec<AutoAcceptRule>) -> Self {
+        Self { rules }
+    }
 }
 
 #[cfg(test)]
