@@ -2191,10 +2191,10 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
 
         assert_eq!(value["id"], serde_json::json!(321));
-        assert_eq!(
-            value["error"]["code"],
-            serde_json::json!(JSON_RPC_INVALID_PARAMS_CODE)
-        );
+        // The literal, not the constant: re-deriving the expectation from what
+        // the writer uses lets the wire code drift off the JSON-RPC spec
+        // unnoticed. -32602 is "Invalid params".
+        assert_eq!(value["error"]["code"], serde_json::json!(-32602));
         assert_eq!(value["error"]["message"], serde_json::json!("bad params"));
     }
 
@@ -2293,7 +2293,7 @@ mod tests {
 
     #[test]
     fn test_handle_turn_completed_success() {
-        let (tx, _rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
         let waker = Waker::noop();
         let mut subagents = Vec::new();
 
@@ -2307,6 +2307,12 @@ mod tests {
             &mut TokenState::Initial,
         );
         assert!(matches!(result, HandleResult::TurnDone));
+        // The arm returns TurnDone for every params value, so the status logic
+        // only shows up in what does (or doesn't) reach the channel.
+        assert!(
+            rx.try_recv().is_err(),
+            "a successful turn must not emit an error to the UI"
+        );
     }
 
     #[test]
@@ -2706,7 +2712,7 @@ mod tests {
 
     #[test]
     fn test_request_user_input_mcp_approval_extracts_tool_name() {
-        let (tx, _rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
         let waker = Waker::noop();
         let mut subagents = Vec::new();
 
@@ -2745,6 +2751,19 @@ mod tests {
             }
             other => panic!(
                 "Expected NeedsApproval+UserInput, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        }
+
+        // The fallback name only reaches the UI through this channel — the
+        // HandleResult above carries no tool name, so leaving it undrained is
+        // what made this test blind to the behaviour it is named for.
+        match rx.try_recv().expect("permission request sent to the UI") {
+            DaveApiResponse::PermissionRequest(pending) => {
+                assert_eq!(pending.request.tool_name, "mcp_tool");
+            }
+            other => panic!(
+                "Expected PermissionRequest, got {:?}",
                 std::mem::discriminant(&other)
             ),
         }
