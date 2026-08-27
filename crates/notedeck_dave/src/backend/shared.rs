@@ -312,6 +312,7 @@ pub fn prepare_prompt_and_images(
 mod tests {
     use super::prepare_prompt_and_images;
     use super::*;
+    use crate::backend::CountingWaker;
     use crate::messages::{
         AssistantMessage, CompactionInfo, ImageAttachment, PermissionView, UserMessage,
     };
@@ -477,10 +478,15 @@ mod tests {
     #[test]
     fn forward_permission_delivers() {
         let (tx, rx) = mpsc::channel();
-        let waker = Waker::noop();
+        let waker = CountingWaker::new();
         let input = serde_json::json!({"command": "ls"});
-        let result = forward_permission_to_ui("Bash", input.clone(), &tx, &waker);
+        let result = forward_permission_to_ui("Bash", input.clone(), &tx, waker.waker());
         assert!(result.is_some());
+        assert_eq!(
+            waker.wakes(),
+            1,
+            "a permission prompt must repaint, or the user is never asked"
+        );
 
         let resp = rx.try_recv().unwrap();
         match resp {
@@ -536,7 +542,7 @@ mod tests {
     #[test]
     fn send_tool_result_with_parent() {
         let (tx, rx) = mpsc::channel();
-        let waker = Waker::noop();
+        let waker = CountingWaker::new();
         let stack = vec!["task-1".to_string()];
         send_tool_result(
             "Read",
@@ -546,7 +552,7 @@ mod tests {
             None,
             &stack,
             &tx,
-            &waker,
+            waker.waker(),
         );
 
         let resp = rx.try_recv().unwrap();
@@ -559,6 +565,11 @@ mod tests {
             }
             _ => panic!("expected ToolResult"),
         }
+        assert_eq!(
+            waker.wakes(),
+            1,
+            "a tool result must repaint, or it sits unseen until the next frame"
+        );
     }
 
     #[test]
@@ -666,11 +677,16 @@ mod tests {
     #[test]
     fn complete_subagent_removes_from_stack() {
         let (tx, rx) = mpsc::channel();
-        let waker = Waker::noop();
+        let waker = CountingWaker::new();
         let mut stack = vec!["task-a".to_string(), "task-b".to_string()];
-        complete_subagent("task-a", "done", &mut stack, &tx, &waker);
+        complete_subagent("task-a", "done", &mut stack, &tx, waker.waker());
 
         assert_eq!(stack, vec!["task-b".to_string()]);
+        assert_eq!(
+            waker.wakes(),
+            1,
+            "a finished subagent must repaint, or the sidebar entry stays running"
+        );
         let resp = rx.try_recv().unwrap();
         match resp {
             DaveApiResponse::SubagentCompleted { task_id, result } => {

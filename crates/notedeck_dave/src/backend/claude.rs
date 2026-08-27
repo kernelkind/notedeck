@@ -1059,6 +1059,7 @@ impl AiBackend for ClaudeBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::CountingWaker;
     use crate::messages::AssistantMessage;
 
     #[test]
@@ -1108,7 +1109,7 @@ mod tests {
     #[test]
     fn task_started_local_agent_spawns_background_subagent() {
         let (tx, rx) = mpsc::channel();
-        let waker = Waker::noop();
+        let waker = CountingWaker::new();
 
         // The originating Task tool_use is still pending (its launch result
         // hasn't landed), so the subagent type is recoverable from its input.
@@ -1127,8 +1128,13 @@ mod tests {
             "description": "do background work",
             "task_type": "local_agent",
         });
-        handle_task_started(&data, &pending, &tx, &waker);
+        handle_task_started(&data, &pending, &tx, waker.waker());
 
+        assert_eq!(
+            waker.wakes(),
+            1,
+            "a spawned subagent must repaint, or it never appears in the sidebar"
+        );
         match rx.try_recv().expect("expected a spawn response") {
             DaveApiResponse::SubagentSpawned(info) => {
                 // Keyed by tool_use_id so parent_tool_use_id + task_notification align.
@@ -1168,7 +1174,7 @@ mod tests {
     #[test]
     fn task_notification_completes_and_fails_by_tool_use_id() {
         let (tx, rx) = mpsc::channel();
-        let waker = Waker::noop();
+        let waker = CountingWaker::new();
 
         handle_task_notification(
             &serde_json::json!({
@@ -1177,7 +1183,7 @@ mod tests {
                 "summary": "all done",
             }),
             &tx,
-            &waker,
+            waker.waker(),
         );
         match rx.try_recv().expect("expected a completion") {
             DaveApiResponse::SubagentCompleted { task_id, result } => {
@@ -1197,7 +1203,7 @@ mod tests {
                 "summary": "it broke",
             }),
             &tx,
-            &waker,
+            waker.waker(),
         );
         match rx.try_recv().expect("expected a failure") {
             DaveApiResponse::SubagentFailed { task_id, error } => {
@@ -1209,6 +1215,12 @@ mod tests {
                 std::mem::discriminant(&other)
             ),
         }
+
+        assert_eq!(
+            waker.wakes(),
+            2,
+            "both notifications must repaint, or the entry stays running"
+        );
     }
 
     #[test]
