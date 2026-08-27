@@ -200,18 +200,72 @@ const DAVE_TRIAL: &str = unsafe {
     ])
 };
 
+/// The environment [`ModelConfig::default`] reads, captured as data.
+///
+/// Lifting these out of the `Default` impl makes backend auto-detection a pure
+/// function of its inputs — see [`ModelConfig::from_env`]. Testing it against
+/// the real process environment isn't possible: a dev box that has selected a
+/// backend (the documented way to choose one) or has `claude` on PATH takes a
+/// different path than a bare CI runner, so a test written against
+/// `Default::default()` silently asserts nothing on most machines.
+#[derive(Debug, Default, Clone)]
+pub struct EnvSnapshot {
+    pub dave_api_key: Option<String>,
+    pub openai_api_key: Option<String>,
+    pub anthropic_api_key: Option<String>,
+    pub claude_api_key: Option<String>,
+    pub backend: Option<String>,
+    pub model: Option<String>,
+    pub endpoint: Option<String>,
+}
+
+impl EnvSnapshot {
+    /// Read the variables from the process environment.
+    pub fn from_process_env() -> Self {
+        EnvSnapshot {
+            dave_api_key: env::var("DAVE_API_KEY").ok(),
+            openai_api_key: env::var("OPENAI_API_KEY").ok(),
+            anthropic_api_key: env::var("ANTHROPIC_API_KEY").ok(),
+            claude_api_key: env::var("CLAUDE_API_KEY").ok(),
+            backend: env::var("DAVE_BACKEND").ok(),
+            model: env::var("DAVE_MODEL").ok(),
+            endpoint: env::var("DAVE_ENDPOINT").ok(),
+        }
+    }
+}
+
 impl Default for ModelConfig {
     fn default() -> Self {
-        let api_key = std::env::var("DAVE_API_KEY")
-            .ok()
-            .or(std::env::var("OPENAI_API_KEY").ok());
+        ModelConfig::from_env(
+            &EnvSnapshot::from_process_env(),
+            has_binary_on_path("claude"),
+            has_binary_on_path("codex"),
+        )
+    }
+}
 
-        let anthropic_api_key = std::env::var("ANTHROPIC_API_KEY")
-            .ok()
-            .or(std::env::var("CLAUDE_API_KEY").ok());
+impl ModelConfig {
+    /// Resolve a config from an environment snapshot and which agentic CLIs are
+    /// installed.
+    ///
+    /// Backend precedence: an explicit `DAVE_BACKEND` wins; otherwise prefer an
+    /// agentic backend whose CLI is on PATH (claude, then codex), then an
+    /// Anthropic API key, then OpenAI with the built-in trial key. The PATH
+    /// preference is what keeps Android — where neither CLI exists — off the
+    /// agentic backends.
+    pub fn from_env(env: &EnvSnapshot, has_claude: bool, has_codex: bool) -> Self {
+        let api_key = env
+            .dave_api_key
+            .clone()
+            .or_else(|| env.openai_api_key.clone());
+
+        let anthropic_api_key = env
+            .anthropic_api_key
+            .clone()
+            .or_else(|| env.claude_api_key.clone());
 
         // Determine backend: explicit env var takes precedence, otherwise auto-detect
-        let backend = if let Ok(backend_str) = std::env::var("DAVE_BACKEND") {
+        let backend = if let Some(backend_str) = env.backend.as_deref() {
             match backend_str.to_lowercase().as_str() {
                 "claude" | "anthropic" => BackendType::Claude,
                 "openai" => BackendType::OpenAI,
@@ -224,18 +278,14 @@ impl Default for ModelConfig {
                     BackendType::OpenAI
                 }
             }
+        } else if has_claude {
+            BackendType::Claude
+        } else if has_codex {
+            BackendType::Codex
+        } else if anthropic_api_key.is_some() {
+            BackendType::Claude
         } else {
-            // Auto-detect: prefer agentic backends if their CLI binary is on PATH,
-            // then fall back to API-key detection, then OpenAI (with trial key).
-            if has_binary_on_path("claude") {
-                BackendType::Claude
-            } else if has_binary_on_path("codex") {
-                BackendType::Codex
-            } else if anthropic_api_key.is_some() {
-                BackendType::Claude
-            } else {
-                BackendType::OpenAI
-            }
+            BackendType::OpenAI
         };
 
         // trial mode?
@@ -246,27 +296,23 @@ impl Default for ModelConfig {
             api_key
         };
 
-        let model = std::env::var("DAVE_MODEL")
-            .ok()
-            .unwrap_or_else(|| match backend {
-                BackendType::OpenAI => "gpt-4.1-mini".to_string(),
-                BackendType::Claude => "claude-sonnet-4.5".to_string(),
-                BackendType::Codex => AiProvider::Codex.default_model().to_string(),
-                BackendType::Remote => String::new(),
-            });
+        let model = env.model.clone().unwrap_or_else(|| match backend {
+            BackendType::OpenAI => "gpt-4.1-mini".to_string(),
+            BackendType::Claude => "claude-sonnet-4.5".to_string(),
+            BackendType::Codex => AiProvider::Codex.default_model().to_string(),
+            BackendType::Remote => String::new(),
+        });
 
         ModelConfig {
             trial,
             backend,
-            endpoint: std::env::var("DAVE_ENDPOINT").ok(),
+            endpoint: env.endpoint.clone(),
             model,
             api_key,
             anthropic_api_key,
         }
     }
-}
 
-impl ModelConfig {
     pub fn ai_mode(&self) -> AiMode {
         match self.backend {
             BackendType::Claude | BackendType::Codex => AiMode::Agentic,
@@ -354,5 +400,137 @@ impl ModelConfig {
         }
 
         cfg
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env_with_backend(backend: &str) -> EnvSnapshot {
+        EnvSnapshot {
+            backend: Some(backend.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// `DAVE_BACKEND` overrides auto-detection, including when both CLIs are on
+    /// PATH. An unrecognized value falls back to OpenAI rather than failing.
+    #[test]
+    fn explicit_backend_env_var_wins_over_path_detection() {
+        let cases = [
+            ("claude", BackendType::Claude),
+            ("anthropic", BackendType::Claude),
+            ("CLAUDE", BackendType::Claude),
+            ("openai", BackendType::OpenAI),
+            ("codex", BackendType::Codex),
+            ("nonsense", BackendType::OpenAI),
+        ];
+        for (value, expected) in cases {
+            let config = ModelConfig::from_env(&env_with_backend(value), true, true);
+            assert_eq!(
+                config.backend, expected,
+                "DAVE_BACKEND={value:?} must select {expected:?} whatever is on PATH"
+            );
+        }
+    }
+
+    /// With no `DAVE_BACKEND`: claude on PATH, then codex on PATH, then an
+    /// Anthropic key, then OpenAI. The PATH steps come first so a machine with
+    /// neither CLI — Android — never lands on an agentic backend.
+    #[test]
+    fn backend_auto_detect_precedence() {
+        let with_key = EnvSnapshot {
+            anthropic_api_key: Some("sk-ant-x".to_string()),
+            ..Default::default()
+        };
+        let bare = EnvSnapshot::default();
+
+        assert_eq!(
+            ModelConfig::from_env(&bare, true, true).backend,
+            BackendType::Claude,
+            "claude on PATH outranks codex"
+        );
+        assert_eq!(
+            ModelConfig::from_env(&bare, false, true).backend,
+            BackendType::Codex,
+            "codex on PATH is next"
+        );
+        assert_eq!(
+            ModelConfig::from_env(&with_key, false, false).backend,
+            BackendType::Claude,
+            "an Anthropic key selects Claude with no CLI installed"
+        );
+        assert_eq!(
+            ModelConfig::from_env(&bare, false, false).backend,
+            BackendType::OpenAI,
+            "nothing installed and no keys falls back to OpenAI"
+        );
+        // The key must not outrank a CLI that is actually present.
+        assert_eq!(
+            ModelConfig::from_env(&with_key, false, true).backend,
+            BackendType::Codex,
+            "codex on PATH outranks an Anthropic key"
+        );
+    }
+
+    /// Trial mode is OpenAI with no user-supplied key, and only then.
+    #[test]
+    fn trial_mode_only_when_openai_without_a_key() {
+        let bare = ModelConfig::from_env(&EnvSnapshot::default(), false, false);
+        assert!(bare.trial, "no keys, no CLIs: the OpenAI trial");
+        assert_eq!(bare.api_key(), Some(DAVE_TRIAL));
+        assert_eq!(bare.model(), "gpt-4.1-mini");
+
+        let with_key = ModelConfig::from_env(
+            &EnvSnapshot {
+                openai_api_key: Some("sk-user".to_string()),
+                ..Default::default()
+            },
+            false,
+            false,
+        );
+        assert!(!with_key.trial, "a user key is not trial mode");
+        assert_eq!(with_key.api_key(), Some("sk-user"));
+
+        let claude = ModelConfig::from_env(&env_with_backend("claude"), false, false);
+        assert!(!claude.trial, "trial mode is an OpenAI-only concept");
+        assert_eq!(claude.api_key(), None, "no OpenAI trial key on Claude");
+        assert_eq!(claude.model(), "claude-sonnet-4.5");
+    }
+
+    /// `DAVE_API_KEY` wins over `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` over
+    /// `CLAUDE_API_KEY`.
+    #[test]
+    fn api_key_precedence() {
+        let config = ModelConfig::from_env(
+            &EnvSnapshot {
+                dave_api_key: Some("sk-dave".to_string()),
+                openai_api_key: Some("sk-openai".to_string()),
+                anthropic_api_key: Some("sk-ant".to_string()),
+                claude_api_key: Some("sk-claude".to_string()),
+                ..Default::default()
+            },
+            false,
+            false,
+        );
+        assert_eq!(config.api_key(), Some("sk-dave"));
+        assert_eq!(config.anthropic_api_key.as_deref(), Some("sk-ant"));
+    }
+
+    /// `DAVE_MODEL` and `DAVE_ENDPOINT` are passed through as given.
+    #[test]
+    fn model_and_endpoint_come_from_the_environment() {
+        let config = ModelConfig::from_env(
+            &EnvSnapshot {
+                model: Some("my-model".to_string()),
+                endpoint: Some("http://localhost:1234/v1".to_string()),
+                ..Default::default()
+            },
+            true,
+            false,
+        );
+        assert_eq!(config.model(), "my-model");
+        assert_eq!(config.endpoint(), Some("http://localhost:1234/v1"));
     }
 }
