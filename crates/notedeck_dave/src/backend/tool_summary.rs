@@ -199,15 +199,28 @@ mod tests {
 
     #[test]
     fn bash_summary_shows_full_command_untruncated() {
-        // Long, multi-byte commands are shown in full: no truncation (which once
-        // risked slicing mid-UTF-8-char) and no trailing output-length count.
+        // Long, multi-byte commands are shown in full: no truncation, which once
+        // risked slicing mid-UTF-8-char. `cmd` is well past any old cutoff.
         let cmd = "🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥 git add crates/agentium-core/src/messages.rs crates/notedeck_dave/src/ui/dave.rs";
-        assert!(cmd.len() > 40);
         let input = json!({"command": cmd});
-        let summary = format_bash_summary(&input);
-        assert_eq!(summary, format!("`{cmd}`"));
-        // The uninformative "(N chars)" output count is gone.
-        assert!(!summary.contains("chars)"));
+        assert_eq!(format_bash_summary(&input), format!("`{cmd}`"));
+    }
+
+    #[test]
+    fn bash_summary_ignores_output_length() {
+        // The summary once carried a "(N chars)" count measured off the tool's
+        // *output*, not the command, which read as an uninformative
+        // "(13 chars)". Pin it where that count came from: the response is an
+        // input to `format_tool_summary`, and a large one must not change what
+        // Bash summarizes to.
+        let cmd = "git status";
+        let input = json!({ "command": cmd });
+        let long_response = json!({ "output": "x".repeat(5000) });
+        assert_eq!(
+            format_tool_summary("Bash", &input, &long_response),
+            format!("`{cmd}`"),
+            "the Bash summary is the command alone, whatever the output size"
+        );
     }
 
     #[test]
@@ -219,19 +232,29 @@ mod tests {
 
     #[test]
     fn truncate_output_multibyte_without_panic() {
-        // Create a string where the truncation point falls mid-emoji
+        // The cut lands on a byte that is a valid boundary, so only the
+        // newline-alignment applies: the first line goes, the tail is kept.
         let output = "line1\n🔥🔥🔥🔥🔥end\n"; // "line1\n" = 6 bytes, 5 emojis = 20 bytes, "end\n" = 4 bytes = 30 total
         let max_size = 25; // start = 30 - 25 = 5, which is valid (before \n)
-        let result = truncate_output(output, max_size);
-        assert!(result.starts_with("...\n"));
+        assert_eq!(
+            truncate_output(output, max_size),
+            "...\n🔥🔥🔥🔥🔥end\n",
+            "keeps the tail, cut at the newline"
+        );
 
-        // Now test where truncation point hits mid-emoji
+        // Now the cut lands mid-emoji — byte 3 is inside the first emoji
+        // (bytes 2..5), which panicked before `ceil_char_boundary`.
         let output2 = "ab🔥🔥🔥🔥🔥🔥🔥🔥end\n"; // "ab" = 2, 8 emojis = 32, "end\n" = 4 = 38 total
-        let max_size2 = 35; // start = 38 - 35 = 3, byte 3 is inside first emoji (bytes 2-5)
-        assert!(!output2.is_char_boundary(3));
-        // This would panic before the fix
-        let result2 = truncate_output(output2, max_size2);
-        assert!(result2.starts_with("...\n"));
+        let max_size2 = 35; // start = 38 - 35 = 3
+        assert_eq!(
+            truncate_output(output2, max_size2),
+            // The only newline in the kept tail is the trailing one, so
+            // newline-alignment consumes the whole remainder. Documenting the
+            // behaviour, not endorsing it — see
+            // headway:dave/coin-orient-flee.
+            "...\n",
+            "boundary is ceiled to 6, then aligned past the trailing newline"
+        );
     }
 
     // ---- Agent mirrors Task: "description (subagent_type)" ----
