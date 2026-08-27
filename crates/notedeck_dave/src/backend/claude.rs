@@ -1357,4 +1357,165 @@ mod tests {
         ];
         assert_eq!(shared::get_pending_user_messages(&messages), "a\nb\nc");
     }
+
+    /// The per-session state `run_stream` threads through
+    /// `handle_stream_message`, so a test can feed it real CLI messages and
+    /// read back exactly what the UI would receive.
+    struct StreamHarness {
+        tx: mpsc::Sender<DaveApiResponse>,
+        rx: mpsc::Receiver<DaveApiResponse>,
+        waker: Waker,
+        pending_tools: HashMap<String, (String, serde_json::Value)>,
+        subagent_stack: Vec<String>,
+        task_tracker: TaskTracker,
+    }
+
+    impl StreamHarness {
+        fn new() -> Self {
+            let (tx, rx) = mpsc::channel();
+            Self {
+                tx,
+                rx,
+                waker: Waker::noop(),
+                pending_tools: HashMap::new(),
+                subagent_stack: Vec::new(),
+                task_tracker: TaskTracker::new(),
+            }
+        }
+
+        /// Feed one message, in the wire shape the CLI emits it.
+        fn feed(&mut self, message: serde_json::Value) {
+            let message = serde_json::from_value::<ClaudeMessage>(message)
+                .expect("message should deserialize");
+            handle_stream_message(
+                message,
+                &self.tx,
+                &self.waker,
+                &mut self.pending_tools,
+                &mut self.subagent_stack,
+                &mut self.task_tracker,
+            );
+        }
+
+        /// Drain the channel, keeping the tool results.
+        fn tool_results(&self) -> Vec<crate::messages::ExecutedTool> {
+            self.rx
+                .try_iter()
+                .filter_map(|r| match r {
+                    DaveApiResponse::ToolResult(tool) => Some(tool),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    fn tool_use(id: &str, name: &str, input: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "type": "tool_use", "id": id, "name": name, "input": input })
+    }
+
+    /// Tool results arrive on a `user` message, nested one level deeper than the
+    /// SDK's own `content` field — see `parse_user_content_blocks`.
+    fn user_with(blocks: Vec<serde_json::Value>) -> serde_json::Value {
+        serde_json::json!({ "type": "user", "message": { "content": blocks } })
+    }
+
+    fn tool_result(tool_use_id: &str, content: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": content,
+            "is_error": false,
+        })
+    }
+
+    #[test]
+    fn tool_use_then_result_emits_an_executed_tool() {
+        let mut harness = StreamHarness::new();
+
+        harness.feed(serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [
+                tool_use("toolu_123", "Read", serde_json::json!({ "file_path": "/etc/hostname" })),
+            ]},
+        }));
+        assert!(
+            harness.pending_tools.contains_key("toolu_123"),
+            "the tool_use is held until its result lands"
+        );
+        assert!(
+            harness.tool_results().is_empty(),
+            "nothing is shown to the user until the tool has actually run"
+        );
+
+        harness.feed(user_with(vec![tool_result(
+            "toolu_123",
+            "hostname content",
+        )]));
+
+        assert!(
+            harness.pending_tools.is_empty(),
+            "a correlated tool_use is dropped from the pending map"
+        );
+        let results = harness.tool_results();
+        assert_eq!(results.len(), 1, "one result for one correlated tool_use");
+        assert_eq!(results[0].tool_name, "Read");
+        assert!(
+            !results[0].summary.is_empty(),
+            "the summary is what the chat row renders"
+        );
+    }
+
+    #[test]
+    fn tool_result_without_a_matching_tool_use_emits_nothing() {
+        let mut harness = StreamHarness::new();
+
+        harness.feed(user_with(vec![tool_result(
+            "toolu_unknown",
+            "some content",
+        )]));
+
+        assert!(
+            harness.tool_results().is_empty(),
+            "an uncorrelated result has no tool name or input to render"
+        );
+    }
+
+    #[test]
+    fn tool_results_correlate_out_of_order() {
+        let mut harness = StreamHarness::new();
+
+        harness.feed(serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [
+                tool_use("toolu_1", "Read", serde_json::json!({ "file_path": "/a" })),
+                tool_use("toolu_2", "Bash", serde_json::json!({ "command": "true" })),
+                tool_use("toolu_3", "Grep", serde_json::json!({ "pattern": "x" })),
+            ]},
+        }));
+        assert_eq!(harness.pending_tools.len(), 3);
+
+        // The CLI is free to return results in any order.
+        harness.feed(user_with(vec![tool_result("toolu_2", "bash output")]));
+        harness.feed(user_with(vec![tool_result("toolu_1", "file body")]));
+        harness.feed(user_with(vec![tool_result("toolu_3", "3 matches")]));
+
+        assert!(harness.pending_tools.is_empty());
+        let results = harness.tool_results();
+        let names: Vec<&str> = results.iter().map(|r| r.tool_name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Bash", "Read", "Grep"],
+            "each result is attributed to the tool_use it correlates with, \
+             not to arrival order"
+        );
+        assert_eq!(
+            results[0].output.as_deref(),
+            Some("bash output"),
+            "Bash output is kept verbatim for inline rendering"
+        );
+        assert_eq!(
+            results[1].output, None,
+            "a non-Bash tool is covered by its summary alone"
+        );
+    }
 }
