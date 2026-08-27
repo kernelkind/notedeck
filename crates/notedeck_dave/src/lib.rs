@@ -6656,7 +6656,12 @@ mod tests {
             ndb.process_event_with(&ev.to_event_json(), IngestMetadata::new().client(true))
                 .unwrap();
         }
-        let _ = ndb.wait_for_notes(sub, 3).await.unwrap();
+        // `wait_for_notes` treats its count as a per-await *maximum* and returns
+        // the first batch the stream yields, so it can hand back one note key
+        // while the other two are still being ingested. Every assertion below
+        // then reads a half-populated db. `wait_for_all_notes` accumulates until
+        // all three have landed.
+        ndb.wait_for_all_notes(sub, 3).await.unwrap();
 
         let reopened = dave
             .reopen_session(&ndb, account, sid)
@@ -6893,7 +6898,10 @@ mod tests {
             ndb.process_event_with(&ev.to_event_json(), IngestMetadata::new().client(true))
                 .unwrap();
         }
-        let _ = ndb.wait_for_notes(sub, 2).await.unwrap();
+        // `wait_for_all_notes` accumulates to the full count; `wait_for_notes`
+        // can return after the first tombstone, leaving the second invisible to
+        // the `process_pending_open` lookups below.
+        ndb.wait_for_all_notes(sub, 2).await.unwrap();
 
         // Click the remote chip: a resume command is queued for its host, and a
         // "Connecting…" placeholder stands in until the owning host revives it.
