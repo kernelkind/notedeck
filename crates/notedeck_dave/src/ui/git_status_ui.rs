@@ -305,11 +305,11 @@ mod tests {
 
     #[test]
     fn multibyte_branch_truncates_on_char_boundaries() {
-        // the cuts must land on char boundaries — no slice panics, and the
-        // visible portion stays within the byte budget
+        // 40 chars of 3 bytes each. The head cut at byte 12 already lands on a
+        // boundary, but the tail cut at byte 120 - 11 = 109 falls inside a char
+        // and has to be ceiled to 111 — so the tail is three chars, not four,
+        // and the result is one char shorter than the ASCII case.
         let branch = "ブランチ".repeat(10);
-        let abbreviated = abbreviate_branch(&branch);
-        let visible_len = abbreviated.len() - '…'.len_utf8();
-        assert!(visible_len <= MAX_BRANCH_LEN);
+        assert_eq!(abbreviate_branch(&branch), "ブランチ…ランチ");
     }
 }
