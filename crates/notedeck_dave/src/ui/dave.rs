@@ -1145,20 +1145,32 @@ impl<'a> DaveUi<'a> {
     /// layout. `arrow` is `Some` for a collapsible result (there's a body to
     /// reveal) and `None` for a plain one-liner. Returns the row response so a
     /// collapsible caller can sense clicks on it.
+    /// A compact one-line header shared by every tool result. The summary is
+    /// *truncated* (ellipsized) to the visible width rather than wrapped, so a
+    /// long Bash command — for Bash the summary is the full command, kept
+    /// untruncated by `format_bash_summary` — can never overrun the row or push
+    /// the layout past the viewport. The full command is revealed in the
+    /// expanded body (`tool_command_output_ui`).
+    ///
+    /// Pass `disclosure = Some((id, expanded))` for a collapsible row: the row
+    /// leads with a ▶/▼ chevron and the *whole line* (full available width, not
+    /// just the chevron) becomes a click target with a pointer cursor and a
+    /// subtle hover highlight — the returned response is that line-level click.
+    /// Pass `None` for a plain, non-interactive one-liner.
     fn exec_tool_header_ui(
         tool_name: &str,
         summary: &str,
-        arrow: Option<&str>,
+        disclosure: Option<(egui::Id, bool)>,
         ui: &mut egui::Ui,
     ) -> egui::Response {
-        // A compact one-line header shared by every tool result. The summary is
-        // *truncated* (ellipsized) to the visible width rather than wrapped, so
-        // a long Bash command — for Bash the summary is the full command, kept
-        // untruncated by `format_bash_summary` — can never overrun the row or
-        // push the layout past the viewport. The full command is revealed in the
-        // expanded body (`tool_command_output_ui`).
-        ui.horizontal(|ui| {
-            if let Some(arrow) = arrow {
+        // Reserve a paint slot *behind* the row content so a hover highlight can
+        // be filled in underneath the text once we know the interaction state.
+        let bg_idx = ui.painter().add(egui::Shape::Noop);
+        let full_width = ui.available_width();
+
+        let content = ui.horizontal(|ui| {
+            if let Some((_, expanded)) = disclosure {
+                let arrow = if expanded { "▼" } else { "▶" };
                 ui.add(egui::Label::new(
                     egui::RichText::new(arrow)
                         .size(10.0)
@@ -1182,8 +1194,37 @@ impl<'a> DaveUi<'a> {
                     .truncate(),
                 );
             }
-        })
-        .response
+        });
+
+        let Some((click_id, _)) = disclosure else {
+            return content.response;
+        };
+
+        // Sense a click over the *full-width* row rather than the wonky
+        // content-width rect the horizontal response would give — the whole
+        // line toggles the disclosure. The row is labels only (no interactive
+        // children), so a line-level click can't swallow anything. Re-sensing
+        // the horizontal response directly is unreliable, so allocate a
+        // dedicated interaction region over the row (as `responded_permission`
+        // does).
+        let row_rect = egui::Rect::from_min_size(
+            content.response.rect.min,
+            egui::vec2(full_width, content.response.rect.height()),
+        );
+        let resp = ui.interact(row_rect, click_id, egui::Sense::click());
+
+        if resp.hovered() {
+            ui.painter().set(
+                bg_idx,
+                egui::Shape::rect_filled(
+                    row_rect.expand2(egui::vec2(notedeck::tokens::SPACING_XS, 1.0)),
+                    notedeck::tokens::RADIUS_SM,
+                    ui.visuals().widgets.hovered.weak_bg_fill,
+                ),
+            );
+        }
+
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
     }
 
     /// Lay out `text` as a subdued, break-anywhere monospace block bounded to
@@ -1256,10 +1297,12 @@ impl<'a> DaveUi<'a> {
             let is_small = file_update.diff_lines().len() < 10;
             let expanded: bool = ui.data(|d| d.get_temp(expand_id).unwrap_or(is_small));
 
-            let arrow = if expanded { "▼" } else { "▶" };
-            let header_resp =
-                Self::exec_tool_header_ui(&result.tool_name, &result.summary, Some(arrow), ui)
-                    .interact(egui::Sense::click());
+            let header_resp = Self::exec_tool_header_ui(
+                &result.tool_name,
+                &result.summary,
+                Some((expand_id.with("header_click"), expanded)),
+                ui,
+            );
 
             if header_resp.clicked() {
                 ui.data_mut(|d| d.insert_temp(expand_id, !expanded));
@@ -1270,16 +1313,19 @@ impl<'a> DaveUi<'a> {
                 diff::file_update_ui(file_update, false, ui);
             }
         } else if let Some(output) = &result.output {
-            // Free-form tool output (bash stdout/stderr) — collapsed by default
-            // so a noisy command doesn't dominate the transcript; click to reveal
-            // the full command and its output together.
+            // Free-form tool output (bash stdout/stderr) — expanded by default so
+            // the command and its output are visible without a click, mirroring
+            // auto-accepted permission rows: the user never approved it up front,
+            // so what ran should stay on-screen. A user toggle still collapses it.
             let expand_id = ui.id().with("exec_output").with(&result.summary);
-            let expanded: bool = ui.data(|d| d.get_temp(expand_id).unwrap_or(false));
+            let expanded: bool = ui.data(|d| d.get_temp(expand_id).unwrap_or(true));
 
-            let arrow = if expanded { "▼" } else { "▶" };
-            let header_resp =
-                Self::exec_tool_header_ui(&result.tool_name, &result.summary, Some(arrow), ui)
-                    .interact(egui::Sense::click());
+            let header_resp = Self::exec_tool_header_ui(
+                &result.tool_name,
+                &result.summary,
+                Some((expand_id.with("header_click"), expanded)),
+                ui,
+            );
 
             if header_resp.clicked() {
                 ui.data_mut(|d| d.insert_temp(expand_id, !expanded));
@@ -3056,9 +3102,66 @@ mod tests {
         ]
     }
 
-    /// Visualize the tool-result rows in their default (collapsed) state: the
-    /// Bash-with-output row shows a ▶ disclosure, the others render as plain
-    /// one-liners. Render with `scripts/snapshot-test snapshot_executed_tool_results`.
+    /// Clicking anywhere on a collapsible tool-result summary line — not just
+    /// the chevron — toggles its body. Guards headway:dave/retire-garage-accuse:
+    /// the click target spans the *full width* of the row, so a click in the
+    /// empty space well past the summary text (nowhere near the chevron) still
+    /// toggles it. Bash-output rows start *expanded*, so the click here
+    /// collapses the body.
+    #[test]
+    fn clicking_tool_summary_line_toggles_body() {
+        let results = vec![crate::messages::ExecutedTool {
+            tool_name: "Bash".to_string(),
+            summary: "`ls -la crates`".to_string(),
+            output: Some("total 24\nCargo.toml".to_string()),
+            parent_task_id: None,
+            file_update: None,
+        }];
+        let mut harness = Harness::builder()
+            .with_size(egui::Vec2::new(420.0, 120.0))
+            .build_ui(move |ui| {
+                for result in &results {
+                    DaveUi::executed_tool_ui(result, ui);
+                }
+            });
+        harness.run();
+
+        // Expanded by default: the body renders the *bare* command (backticks
+        // stripped), so its presence proves the row starts open without a click.
+        harness.get_by_label("ls -la crates");
+
+        // Click the empty space to the far right of the summary text, well past
+        // both the chevron and the command, to prove the whole line is the hit
+        // target rather than a tiny region around the chevron.
+        let bounds = harness
+            .get_by_label("Bash")
+            .raw_bounds()
+            .expect("tool-name label bounds");
+        let y = ((bounds.y0 + bounds.y1) / 2.0) as f32;
+        let pos = egui::pos2(400.0, y);
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::PointerMoved(pos));
+        for pressed in [true, false] {
+            harness.input_mut().events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        harness.step();
+        harness.run();
+
+        // Body hidden: the click collapsed the row, so the bare command is gone.
+        assert!(harness.query_by_label("ls -la crates").is_none());
+    }
+
+    /// Visualize the tool-result rows in their default state: the
+    /// Bash-with-output row shows a ▼ disclosure with its body expanded, the
+    /// others render as plain one-liners. Render with
+    /// `scripts/snapshot-test snapshot_executed_tool_results`.
     #[test]
     #[ignore] // requires lavapipe — run via scripts/snapshot-test
     fn snapshot_executed_tool_results() {
@@ -3075,6 +3178,36 @@ mod tests {
 
         harness.run();
         harness.snapshot("executed_tool_results");
+    }
+
+    /// Visualize the *hover affordance* on a collapsible row: with the pointer
+    /// over the Bash-with-output row, the whole line gets a subtle rounded
+    /// highlight behind it, signalling that clicking anywhere on the line (not
+    /// just the chevron) toggles the body. Render with
+    /// `scripts/snapshot-test snapshot_executed_tool_results_hover`.
+    #[test]
+    #[ignore] // requires lavapipe — run via scripts/snapshot-test
+    fn snapshot_executed_tool_results_hover() {
+        let results = executed_tool_fixtures();
+        let mut harness = Harness::builder()
+            .with_size(egui::Vec2::new(420.0, 120.0))
+            .renderer(notedeck::software_renderer())
+            .build_ui(move |ui| {
+                for result in &results {
+                    DaveUi::executed_tool_ui(result, ui);
+                    ui.add_space(4.0);
+                }
+            });
+
+        // Park the pointer over the first (collapsible) row so the hover
+        // highlight paints. The first row sits a few px below the top margin.
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::PointerMoved(egui::pos2(200.0, 14.0)));
+        harness.run();
+        harness.snapshot("executed_tool_results_hover");
     }
 
     /// Visualize the Bash-with-output row expanded, revealing its stdout block.
@@ -3216,6 +3349,10 @@ mod tests {
             .renderer(notedeck::software_renderer())
             .build_ui(move |ui| {
                 ui.vertical(|ui| {
+                    // Bash-output rows start expanded; force the collapsed state
+                    // to exercise the header-truncation path this test guards.
+                    let expand_id = ui.id().with("exec_output").with(summary);
+                    ui.data_mut(|d| d.insert_temp(expand_id, false));
                     for result in &results {
                         DaveUi::executed_tool_ui(result, ui);
                         ui.add_space(4.0);
