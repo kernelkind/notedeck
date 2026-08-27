@@ -451,6 +451,41 @@ impl DispatchState {
     }
 }
 
+/// Index into `chat` at which queued (not-yet-dispatched) user messages start,
+/// or `None` when nothing is queued.
+///
+/// While streaming, `append_token` inserts an `Assistant` between the
+/// dispatched `User` and any queued `User`s, so every trailing `User` after
+/// that assistant is queued. Before the first token arrives there is no
+/// assistant yet, so the dispatched count of trailing `User`s is skipped —
+/// they all went out in the prompt (1 for a single dispatch, N for a batch).
+///
+/// This drives the "queued" indicator in `DaveUi::render_chat`. Tests must call
+/// it rather than reimplement it: a private copy in the test module cannot
+/// notice the production path changing, or going away.
+pub fn queued_from(
+    chat: &[Message],
+    is_working: bool,
+    dispatch_state: DispatchState,
+) -> Option<usize> {
+    if !is_working {
+        return None;
+    }
+
+    let last_non_user = chat.iter().rposition(|m| !matches!(m, Message::User(_)))?;
+
+    let first_trailing = last_non_user + 1;
+    let queued_start = if matches!(chat[last_non_user], Message::Assistant(ref m) if m.is_streaming())
+    {
+        // A streaming assistant already separates dispatched from queued.
+        first_trailing
+    } else {
+        first_trailing + dispatch_state.dispatched_count().max(1)
+    };
+
+    (queued_start < chat.len()).then_some(queued_start)
+}
+
 /// A single chat session with Dave
 pub struct ChatSession {
     pub id: SessionId,
@@ -2293,44 +2328,26 @@ mod tests {
         assert!(session.needs_redispatch_after_stream_end());
     }
 
-    /// Queued indicator detection: helper that mimics what the UI does
-    /// to find which messages are "queued".
-    fn find_queued_indices(
+    /// The user messages the UI would tag "queued", by text.
+    ///
+    /// Calls the production `queued_from` and applies the same predicate
+    /// `render_chat` does (`i >= queued_from`, for `Message::User` only), so
+    /// these cases fail when the production path changes.
+    fn queued_texts(
         chat: &[Message],
         is_working: bool,
         dispatch_state: DispatchState,
-    ) -> Vec<usize> {
-        if !is_working {
+    ) -> Vec<&str> {
+        let Some(qi) = queued_from(chat, is_working, dispatch_state) else {
             return vec![];
-        }
-        let last_non_user = chat.iter().rposition(|m| !matches!(m, Message::User(_)));
-        let queued_from = match last_non_user {
-            Some(i) if matches!(chat[i], Message::Assistant(ref m) if m.is_streaming()) => {
-                let first_trailing = i + 1;
-                if first_trailing < chat.len() {
-                    Some(first_trailing)
-                } else {
-                    None
-                }
-            }
-            Some(i) => {
-                let first_trailing = i + 1;
-                let skip = dispatch_state.dispatched_count().max(1);
-                let queued_start = first_trailing + skip;
-                if queued_start < chat.len() {
-                    Some(queued_start)
-                } else {
-                    None
-                }
-            }
-            None => None,
         };
-        match queued_from {
-            Some(qi) => (qi..chat.len())
-                .filter(|&i| matches!(chat[i], Message::User(_)))
-                .collect(),
-            None => vec![],
-        }
+        chat[qi..]
+            .iter()
+            .filter_map(|m| match m {
+                Message::User(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
@@ -2350,20 +2367,13 @@ mod tests {
         session.chat.push(Message::User("queued 2".into()));
 
         // Single dispatch
-        let queued = find_queued_indices(
+        let queued = queued_texts(
             &session.chat,
             true,
             DispatchState::AwaitingResponse { count: 1 },
         );
-        let queued_texts: Vec<&str> = queued
-            .iter()
-            .map(|&i| match &session.chat[i] {
-                Message::User(s) => s.as_str(),
-                _ => "?",
-            })
-            .collect();
         assert_eq!(
-            queued_texts,
+            queued,
             vec!["queued 1", "queued 2"],
             "dispatched message should not be marked as queued"
         );
@@ -2381,20 +2391,13 @@ mod tests {
 
         // Dispatch state doesn't matter here — streaming assistant
         // branch doesn't use the dispatched count
-        let queued = find_queued_indices(
+        let queued = queued_texts(
             &session.chat,
             true,
             DispatchState::AwaitingResponse { count: 1 },
         );
-        let queued_texts: Vec<&str> = queued
-            .iter()
-            .map(|&i| match &session.chat[i] {
-                Message::User(s) => s.as_str(),
-                _ => "?",
-            })
-            .collect();
         assert_eq!(
-            queued_texts,
+            queued,
             vec!["queued 1", "queued 2"],
             "all user messages after streaming assistant should be queued"
         );
@@ -2407,7 +2410,7 @@ mod tests {
         session.chat.push(Message::User("msg 1".into()));
         session.chat.push(Message::User("msg 2".into()));
 
-        let queued = find_queued_indices(&session.chat, false, DispatchState::Idle);
+        let queued = queued_texts(&session.chat, false, DispatchState::Idle);
         assert!(
             queued.is_empty(),
             "nothing should be queued when not working"
@@ -2425,7 +2428,7 @@ mod tests {
             )));
         session.chat.push(Message::User("only one".into()));
 
-        let queued = find_queued_indices(
+        let queued = queued_texts(
             &session.chat,
             true,
             DispatchState::AwaitingResponse { count: 1 },
@@ -2457,19 +2460,12 @@ mod tests {
         session.append_token("Found it.");
         session.chat.push(Message::User("queued".into()));
 
-        let queued = find_queued_indices(
+        let queued = queued_texts(
             &session.chat,
             true,
             DispatchState::AwaitingResponse { count: 1 },
         );
-        let queued_texts: Vec<&str> = queued
-            .iter()
-            .map(|&i| match &session.chat[i] {
-                Message::User(s) => s.as_str(),
-                _ => "?",
-            })
-            .collect();
-        assert_eq!(queued_texts, vec!["queued"]);
+        assert_eq!(queued, vec!["queued"]);
     }
 
     /// Batch dispatch: when 3 messages were dispatched together,
@@ -2487,7 +2483,7 @@ mod tests {
         session.chat.push(Message::User("c".into()));
 
         // All 3 were batch-dispatched
-        let queued = find_queued_indices(
+        let queued = queued_texts(
             &session.chat,
             true,
             DispatchState::AwaitingResponse { count: 3 },
@@ -2514,22 +2510,42 @@ mod tests {
         session.chat.push(Message::User("new queued".into()));
 
         // 3 were dispatched, 1 new arrival
-        let queued = find_queued_indices(
+        let queued = queued_texts(
             &session.chat,
             true,
             DispatchState::AwaitingResponse { count: 3 },
         );
-        let queued_texts: Vec<&str> = queued
-            .iter()
-            .map(|&i| match &session.chat[i] {
-                Message::User(s) => s.as_str(),
-                _ => "?",
-            })
-            .collect();
         assert_eq!(
-            queued_texts,
+            queued,
             vec!["new queued"],
             "only the message after the batch should be queued"
+        );
+    }
+
+    /// A working session whose dispatch state is `Idle` — nothing ever recorded
+    /// a count — must still treat the last trailing user message as dispatched.
+    /// That is what the `.max(1)` clamp is for; without it the message actually
+    /// being worked on renders as "queued".
+    #[test]
+    fn queued_indicator_working_without_dispatch_count() {
+        let mut session = test_session();
+        session
+            .chat
+            .push(Message::Assistant(AssistantMessage::from_text(
+                "prev reply".into(),
+            )));
+        session.chat.push(Message::User("dispatched".into()));
+
+        assert!(
+            queued_texts(&session.chat, true, DispatchState::Idle).is_empty(),
+            "the trailing user message is being worked on, not queued"
+        );
+
+        session.chat.push(Message::User("queued".into()));
+        assert_eq!(
+            queued_texts(&session.chat, true, DispatchState::Idle),
+            vec!["queued"],
+            "only the message after the dispatched one should be queued"
         );
     }
 
