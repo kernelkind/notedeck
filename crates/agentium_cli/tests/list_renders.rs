@@ -129,7 +129,10 @@ async fn list_renders_seeded_sessions() {
             "/home/u/other",
             "codex",
         );
-        ndb.wait_for_notes(sub, 2)
+        // `wait_for_all_notes` accumulates to the full count — `wait_for_notes`
+        // returns after *any* batch, which can race the two-event seed and let
+        // the subprocess below open a half-ingested db.
+        ndb.wait_for_all_notes(sub, 2)
             .await
             .expect("ingest seeded events");
     }
@@ -254,7 +257,10 @@ async fn list_deleted_scope_surfaces_tombstones() {
             "/home/u/spike",
             "claude",
         );
-        ndb.wait_for_notes(sub, 2)
+        // `wait_for_all_notes` accumulates to the full count — `wait_for_notes`
+        // returns after *any* batch, which can race the two-event seed and let
+        // the subprocess below open a half-ingested db.
+        ndb.wait_for_all_notes(sub, 2)
             .await
             .expect("ingest seeded events");
     }
