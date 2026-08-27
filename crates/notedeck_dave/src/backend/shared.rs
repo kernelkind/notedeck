@@ -473,6 +473,35 @@ mod tests {
         assert_eq!(get_pending_user_messages(&msgs), "");
     }
 
+    #[test]
+    fn get_pending_single_user() {
+        let msgs = vec![Message::User("hello".into())];
+        assert_eq!(get_pending_user_messages(&msgs), "hello");
+    }
+
+    #[test]
+    fn get_pending_stops_at_tool_response() {
+        // A tool call/response pair breaks the trailing run just like an
+        // assistant message does.
+        let msgs = vec![
+            Message::User("do something".into()),
+            Message::Assistant(AssistantMessage::from_text("ok".into())),
+            Message::ToolCalls(vec![crate::tools::ToolCall::invalid(
+                "c1".into(),
+                Some("Read".into()),
+                None,
+                "test".into(),
+            )]),
+            Message::ToolResponse(crate::tools::ToolResponse::error(
+                "c1".into(),
+                "result".into(),
+            )),
+            Message::User("queued 1".into()),
+            Message::User("queued 2".into()),
+        ];
+        assert_eq!(get_pending_user_messages(&msgs), "queued 1\nqueued 2");
+    }
+
     // ---- forward_permission_to_ui ----
 
     #[test]

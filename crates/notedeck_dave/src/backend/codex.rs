@@ -2076,7 +2076,7 @@ impl AiBackend for CodexBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{AssistantMessage, DaveApiResponse};
+    use crate::messages::DaveApiResponse;
     use serde_json::json;
     use std::time::Duration;
 
@@ -3615,91 +3615,6 @@ mod tests {
         let result =
             check_approval_or_forward(43, "Bash", json!({"command": "sudo rm -rf /"}), &tx, &waker);
         assert!(matches!(result, HandleResult::Rejected { rpc_id: 43, .. }));
-    }
-
-    // -----------------------------------------------------------------------
-    // get_pending_user_messages tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn pending_messages_single_user() {
-        let messages = vec![Message::User("hello".into())];
-        assert_eq!(shared::get_pending_user_messages(&messages), "hello");
-    }
-
-    #[test]
-    fn pending_messages_multiple_trailing_users() {
-        let messages = vec![
-            Message::User("first".into()),
-            Message::Assistant(AssistantMessage::from_text("reply".into())),
-            Message::User("second".into()),
-            Message::User("third".into()),
-            Message::User("fourth".into()),
-        ];
-        assert_eq!(
-            shared::get_pending_user_messages(&messages),
-            "second\nthird\nfourth"
-        );
-    }
-
-    #[test]
-    fn pending_messages_stops_at_non_user() {
-        let messages = vec![
-            Message::User("old".into()),
-            Message::User("also old".into()),
-            Message::Assistant(AssistantMessage::from_text("reply".into())),
-            Message::User("pending".into()),
-        ];
-        assert_eq!(shared::get_pending_user_messages(&messages), "pending");
-    }
-
-    #[test]
-    fn pending_messages_empty_when_last_is_assistant() {
-        let messages = vec![
-            Message::User("hello".into()),
-            Message::Assistant(AssistantMessage::from_text("reply".into())),
-        ];
-        assert_eq!(shared::get_pending_user_messages(&messages), "");
-    }
-
-    #[test]
-    fn pending_messages_empty_chat() {
-        let messages: Vec<Message> = vec![];
-        assert_eq!(shared::get_pending_user_messages(&messages), "");
-    }
-
-    #[test]
-    fn pending_messages_stops_at_tool_response() {
-        let messages = vec![
-            Message::User("do something".into()),
-            Message::Assistant(AssistantMessage::from_text("ok".into())),
-            Message::ToolCalls(vec![crate::tools::ToolCall::invalid(
-                "c1".into(),
-                Some("Read".into()),
-                None,
-                "test".into(),
-            )]),
-            Message::ToolResponse(crate::tools::ToolResponse::error(
-                "c1".into(),
-                "result".into(),
-            )),
-            Message::User("queued 1".into()),
-            Message::User("queued 2".into()),
-        ];
-        assert_eq!(
-            shared::get_pending_user_messages(&messages),
-            "queued 1\nqueued 2"
-        );
-    }
-
-    #[test]
-    fn pending_messages_preserves_order() {
-        let messages = vec![
-            Message::User("a".into()),
-            Message::User("b".into()),
-            Message::User("c".into()),
-        ];
-        assert_eq!(shared::get_pending_user_messages(&messages), "a\nb\nc");
     }
 
     // -----------------------------------------------------------------------
