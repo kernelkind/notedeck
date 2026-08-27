@@ -4821,16 +4821,16 @@ mod tests {
     /// and join handle, or `None` when the `codex` binary isn't installed so
     /// the caller can skip rather than fail.
     ///
-    /// These tests are `#[ignore]`d, but the snapshot CI job runs every ignored
-    /// test in this binary via `--ignored` (see `scripts/snapshot-test`), which
-    /// sweeps these real-binary tests up too.
+    /// These tests are `#[ignore]`d. The snapshot CI job runs the ignored tests
+    /// in this binary via `--ignored`, so it would sweep these real-binary tests
+    /// up too; `scripts/snapshot-test` excludes them by name (`--skip
+    /// test_real_codex`) — rename them and that exclusion has to move with them.
     ///
     /// They hit the live codex backend, so on a machine where codex is installed
     /// but its auth has lapsed the turn fails (expired refresh token) and the
-    /// sweep goes red — a login-dependent flake. To keep CI deterministic they
-    /// are opt-in: set `CODEX_LIVE_TEST=1` to actually exercise the real path
-    /// (locally, with valid auth). Unset — as in CI — they skip. A missing
-    /// `codex` binary skips too.
+    /// run goes red — a login-dependent flake. So they are opt-in: set
+    /// `CODEX_LIVE_TEST=1` to actually exercise the real path (locally, with
+    /// valid auth). Unset, they skip. A missing `codex` binary skips too.
     fn setup_real_codex_test() -> Option<(
         tokio_mpsc::Sender<SessionCommand>,
         mpsc::Receiver<DaveApiResponse>,
