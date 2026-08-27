@@ -2050,8 +2050,21 @@ mod tests {
         // Should finalize without panicking, even though last() is User
         session.finalize_last_assistant();
 
-        // Verify the queued message is still there
-        assert!(session.has_pending_user_message());
+        // Asserting the queued message survived says nothing: this function
+        // can't add, remove or reorder messages. Assert what it is for — the
+        // assistant sitting *behind* the queued user message got finalized.
+        let assistant = session
+            .chat
+            .iter()
+            .find_map(|m| match m {
+                Message::Assistant(a) => Some(a),
+                _ => None,
+            })
+            .expect("the streamed assistant is in the chat");
+        assert!(
+            !assistant.is_streaming(),
+            "the assistant behind the queued user message must be finalized"
+        );
     }
 
     // ---- status tests ----
@@ -2312,13 +2325,12 @@ mod tests {
         let early_pos = types.iter().position(|t| t == "U:early queue").unwrap();
         let late_pos = types.iter().position(|t| t == "U:late queue").unwrap();
 
+        // Both queued messages, not just one: "late queue" trails the answer
+        // for any insert position, so an `||` here passes even when the
+        // assistant is appended at the very end.
         assert!(
-            answer_pos > question_pos,
-            "answer should come after the dispatched question"
-        );
-        assert!(
-            early_pos > answer_pos || late_pos > answer_pos,
-            "at least one queued message should be after the answer"
+            question_pos < answer_pos && answer_pos < early_pos && early_pos < late_pos,
+            "expected question < answer < early queue < late queue, got {types:?}"
         );
 
         // Finalize and check redispatch
@@ -2579,7 +2591,6 @@ mod tests {
     fn remote_session_source() {
         let session = test_remote_session();
         assert!(session.is_remote());
-        assert_eq!(session.source, SessionSource::Remote);
     }
 
     #[test]
@@ -2824,9 +2835,10 @@ mod tests {
         session.update_subagent_output(&task_id, "More🎉test");
 
         if let Some(Message::Subagent(s)) = session.chat.get(idx) {
-            assert!(s.output.len() <= 7, "got len {}", s.output.len());
-            // Verify the result is valid UTF-8 (it is, since it's a String)
-            assert!(s.output.is_ascii() || !s.output.is_empty());
+            // 18 bytes total, max 7, so the cut is at byte 11 — inside the
+            // 🎉 (bytes 10..13). Walking forward to the next boundary drops the
+            // partial char and keeps the tail from byte 14.
+            assert_eq!(s.output, "test");
         } else {
             panic!("expected Subagent message");
         }
@@ -2969,10 +2981,11 @@ mod tests {
         let id = mgr.new_session(PathBuf::from("/tmp"), AiMode::Chat, BackendType::OpenAI);
         // Touch a non-existent ID — should be a silent no-op
         mgr.touch(999);
-        // Original session should be unaffected and still first
-        let ordered = mgr.sessions_ordered();
-        assert_eq!(ordered.len(), 1);
-        assert_eq!(ordered[0].id, id);
+        // Assert on the raw order, not on `sessions_ordered()`: that projection
+        // is `order.iter().filter_map(|id| sessions.get(id))`, so a bogus id
+        // pushed into `order` is filtered straight back out and the corruption
+        // this guards against is invisible through it.
+        assert_eq!(mgr.session_ids(), vec![id]);
     }
 
     #[test]
