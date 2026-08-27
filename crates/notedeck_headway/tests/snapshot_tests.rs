@@ -42,7 +42,7 @@ fn render_headway(ctx: &egui::Context, state: &mut HeadwayTestState) {
 
         let secret = state.account.secret_key.clone();
         let pubkey = state.account.pubkey;
-        let app_ctx = &mut state.notedeck.app_context(ctx);
+        let app_ctx = &mut state.notedeck.app_context();
         if let Some(resp) = app_ctx.accounts.add_account(Keypair::from_secret(secret)) {
             let txn = Transaction::new(app_ctx.ndb).expect("txn");
             resp.unk_id_action
@@ -62,7 +62,7 @@ fn render_headway(ctx: &egui::Context, state: &mut HeadwayTestState) {
         return;
     }
 
-    let mut app_ctx = state.notedeck.app_context(ctx);
+    let mut app_ctx = state.notedeck.app_context();
     // Mirror production: chrome runs `update` (sync poll + fan-out + seed) for
     // every opened app each frame, then `render` for the foreground one.
     state.headway.update(&mut app_ctx, ctx);
@@ -405,13 +405,12 @@ fn snapshot_headway_detail_inline_ref() {
 
     // Point the event-model card's description at the sync card. Scoped so the
     // `AppContext` (and its harness borrow) is dropped before we pump frames
-    // again; `ctx` is cloned out first because `state_mut` borrows the harness.
+    // again.
     let description = {
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
         let author = state.account.pubkey;
         let secret = state.account.secret_key.secret_bytes();
-        let app_ctx = &mut state.notedeck.app_context(&egui_ctx);
+        let app_ctx = &mut state.notedeck.app_context();
 
         let target_ref = card_ref(demo_card_id(
             app_ctx.ndb,
@@ -478,11 +477,10 @@ fn detail_pane_live_updates_open_card() {
     let new_title = "Define nostr event model for boards (edited live)";
     let new_desc = "Edited while the detail pane was open.";
     {
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
         let author = state.account.pubkey;
         let secret = state.account.secret_key.secret_bytes();
-        let app_ctx = &mut state.notedeck.app_context(&egui_ctx);
+        let app_ctx = &mut state.notedeck.app_context();
         let card = demo_card_id(app_ctx.ndb, &author, "Define nostr event model for boards");
         let signer = store::Signer::new(&secret, None);
 
@@ -533,15 +531,13 @@ async fn snapshot_note_inline_ref() {
 
     // Post a note referencing a seeded card, then flip the harness to view it
     // through NoteView. Scoped so the `AppContext` borrow is dropped before we
-    // pump frames; `ctx` is cloned out first because `state_mut` borrows the
-    // harness.
+    // pump frames.
     let card_title = "Sync cards across relays";
     let (ndb, sub) = {
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
         let author = state.account.pubkey;
         let secret = state.account.secret_key.secret_bytes();
-        let app_ctx = &mut state.notedeck.app_context(&egui_ctx);
+        let app_ctx = &mut state.notedeck.app_context();
 
         let target = card_ref(demo_card_id(app_ctx.ndb, &author, card_title));
         let content = format!("picking up {target} next week");
@@ -1062,9 +1058,8 @@ fn wait_for_saved_slug(
     loop {
         harness.run_ok();
         let saved = {
-            let egui_ctx = harness.ctx.clone();
             let state = harness.state_mut();
-            let app_ctx = &mut state.notedeck.app_context(&egui_ctx);
+            let app_ctx = &mut state.notedeck.app_context();
             event::load_board_pref(app_ctx.ndb, author)
         };
         if saved.as_ref().map(|c| c.slug.as_str()) == Some(slug) {
@@ -1129,9 +1124,8 @@ fn own_shared_board_folds_teammate_card_in_render() {
     let board_addr = event::board_address(&account.pubkey, store::BOARD_ID);
 
     {
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
-        let app_ctx = &mut state.notedeck.app_context(&egui_ctx);
+        let app_ctx = &mut state.notedeck.app_context();
         let ndb: &Ndb = app_ctx.ndb;
 
         // Register the channel root so nostrdb unwraps its kind-1081 envelopes on
@@ -1216,10 +1210,9 @@ fn opening_a_card_pushes_a_global_nav_entry() {
     harness.get_by_label(CARD).simulate_click();
     wait_for_label(&mut harness, "← Back");
 
-    let egui_ctx = harness.ctx.clone();
     let state = harness.state_mut();
     let author = state.account.pubkey;
-    let app_ctx = state.notedeck.app_context(&egui_ctx);
+    let app_ctx = state.notedeck.app_context();
     let card = demo_card_id(app_ctx.ndb, &author, CARD);
 
     // Nothing drains the Navigator in this chrome-less harness, so every request
@@ -1265,10 +1258,9 @@ fn render_nav_seeds_board_and_card_from_the_route_token() {
 
     const CARD: &str = "Define nostr event model for boards";
     let card = {
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
         let author = state.account.pubkey;
-        let app_ctx = state.notedeck.app_context(&egui_ctx);
+        let app_ctx = state.notedeck.app_context();
         demo_card_id(app_ctx.ndb, &author, CARD)
     };
 
@@ -1318,9 +1310,8 @@ fn chrome_nav_loop_card_open_then_back_returns_to_board() {
         harness.state_mut().nav_token = Some(stack.top().token.clone());
         harness.run_ok();
 
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
-        let app_ctx = state.notedeck.app_context(&egui_ctx);
+        let app_ctx = state.notedeck.app_context();
         let active = stack.top().app;
         for request in app_ctx.navigator.take() {
             match request {
@@ -1347,10 +1338,9 @@ fn chrome_nav_loop_card_open_then_back_returns_to_board() {
     // drains the resulting self-push into the stack.
     const CARD: &str = "Define nostr event model for boards";
     let card = {
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
         let author = state.account.pubkey;
-        let app_ctx = state.notedeck.app_context(&egui_ctx);
+        let app_ctx = state.notedeck.app_context();
         demo_card_id(app_ctx.ndb, &author, CARD)
     };
     harness.get_by_label(CARD).simulate_click();
@@ -1379,10 +1369,9 @@ fn chrome_nav_loop_card_open_then_back_returns_to_board() {
     // nowhere to return. It must PUSH instead, growing the stack to three.
     const SUBISSUE: &str = "Sync cards across relays";
     let subissue = {
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
         let author = state.account.pubkey;
-        let app_ctx = state.notedeck.app_context(&egui_ctx);
+        let app_ctx = state.notedeck.app_context();
         demo_card_id(app_ctx.ndb, &author, SUBISSUE)
     };
     // The subissue title shows up in more than one place in the parent detail (the
@@ -1449,9 +1438,8 @@ fn restart_reopens_saved_board_coordinate() {
     // Seed a distinct second own board carrying a card only it has, so which board
     // is active after the restart is unambiguous from what renders.
     {
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
-        let app_ctx = &mut state.notedeck.app_context(&egui_ctx);
+        let app_ctx = &mut state.notedeck.app_context();
         let ndb: &Ndb = app_ctx.ndb;
         let secret = account.secret_key.secret_bytes();
         store::seed_board(
@@ -1526,9 +1514,8 @@ fn unfolded_shared_board_keeps_the_switcher_reachable() {
     // Join alice's `ghost` board — a key-share and nothing else, so the shared fold
     // has no definition to resolve and stays empty for the rest of the test.
     {
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
-        let app_ctx = &mut state.notedeck.app_context(&egui_ctx);
+        let app_ctx = &mut state.notedeck.app_context();
         ingest_keyshare(
             app_ctx.ndb,
             &alice,
@@ -1568,9 +1555,8 @@ fn snapshot_switcher_same_slug_boards() {
     let bob = fixed_keypair(0xb0);
 
     {
-        let egui_ctx = harness.ctx.clone();
         let state = harness.state_mut();
-        let app_ctx = &mut state.notedeck.app_context(&egui_ctx);
+        let app_ctx = &mut state.notedeck.app_context();
         let ndb: &Ndb = app_ctx.ndb;
         let secret = account.secret_key.secret_bytes();
 

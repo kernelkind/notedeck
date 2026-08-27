@@ -2,6 +2,64 @@
 use std::array::TryFromSliceError;
 use thiserror::Error;
 
+/// Websocket failure details retained across the transport boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WebSocketError {
+    message: String,
+    raw_os_error: Option<i32>,
+}
+
+impl WebSocketError {
+    /// Build websocket error data without a structured OS error code.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            raw_os_error: None,
+        }
+    }
+
+    /// Return the original websocket error message.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Return the OS error code reported by the native websocket backend.
+    pub fn raw_os_error(&self) -> Option<i32> {
+        self.raw_os_error
+    }
+
+    pub(crate) fn with_context(mut self, context: impl std::fmt::Display) -> Self {
+        self.message = format!("{context}: {}", self.message);
+        self
+    }
+}
+
+impl std::fmt::Display for WebSocketError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.message.fmt(f)
+    }
+}
+
+impl std::error::Error for WebSocketError {}
+
+impl From<std::io::Error> for WebSocketError {
+    fn from(error: std::io::Error) -> Self {
+        Self {
+            message: error.to_string(),
+            raw_os_error: error.raw_os_error(),
+        }
+    }
+}
+
+impl From<tokio_tungstenite::tungstenite::Error> for WebSocketError {
+    fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
+        match error {
+            tokio_tungstenite::tungstenite::Error::Io(error) => error.into(),
+            error => Self::new(error.to_string()),
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("message is empty")]
@@ -37,6 +95,9 @@ pub enum Error {
 
     #[error("nostrdb error: {0}")]
     Nostrdb(#[from] nostrdb::Error),
+
+    #[error("websocket error: {0}")]
+    WebSocket(WebSocketError),
 
     #[error("{0}")]
     Generic(String),

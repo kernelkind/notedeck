@@ -1005,13 +1005,12 @@ fn sync_status(ctx: &AppContext) -> ui::SyncStatus {
         return ui::SyncStatus::LocalOnly;
     }
     let inspect = ctx.remote.relay_inspect();
-    let infos = inspect.relay_infos();
     let connected = private_relays.iter().any(|relay| {
         let RelayId::Websocket(url) = relay else {
             return false;
         };
-        infos
-            .iter()
+        inspect
+            .relay_infos()
             .any(|info| info.relay_url == url && info.status == RelayStatus::Connected)
     });
     if connected {

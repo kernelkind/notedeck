@@ -157,8 +157,7 @@ pub fn gift_wrapped_keyshare(
 /// polls to join the board (see [`teams`](notedeck_headway) — the roster lives in
 /// the db, not on disk).
 pub fn ingest_giftwrap(device: &mut DeviceHarness, giftwrap_json: &str) {
-    let egui_ctx = device.ctx.clone();
-    let app_ctx = &mut device.state_mut().notedeck.app_context(&egui_ctx);
+    let app_ctx = &mut device.state_mut().notedeck.app_context();
     app_ctx
         .ndb
         .process_event(&format!("[\"EVENT\",\"kg\",{giftwrap_json}]"))
@@ -203,8 +202,7 @@ pub fn seal_board_definition(
     title: &str,
     columns: &[ColumnDef],
 ) {
-    let egui_ctx = device.ctx.clone();
-    let app_ctx = &mut device.state_mut().notedeck.app_context(&egui_ctx);
+    let app_ctx = &mut device.state_mut().notedeck.app_context();
     store::ingest_signed(
         app_ctx.ndb,
         event::build_board(board_id, title, "", columns),
@@ -232,8 +230,7 @@ pub fn apply_sealed(
     channel: &SnsChannel,
     action: BoardAction,
 ) {
-    let egui_ctx = device.ctx.clone();
-    let app_ctx = &mut device.state_mut().notedeck.app_context(&egui_ctx);
+    let app_ctx = &mut device.state_mut().notedeck.app_context();
     let txn = Transaction::new(app_ctx.ndb).expect("txn");
     let view = event::load_shared_board(
         app_ctx.ndb,
@@ -262,8 +259,7 @@ pub fn shared_board(
     board_addr: &str,
     team_pubkey: &Pubkey,
 ) -> Option<BoardView> {
-    let egui_ctx = device.ctx.clone();
-    let app_ctx = &mut device.state_mut().notedeck.app_context(&egui_ctx);
+    let app_ctx = &mut device.state_mut().notedeck.app_context();
     let txn = Transaction::new(app_ctx.ndb).expect("txn");
     event::load_shared_board(
         app_ctx.ndb,
@@ -370,8 +366,7 @@ pub fn wait_for_comment_convergence(
 /// sealed edit's unwrapped rumor actually reached the receiver (propagation),
 /// independent of whether the fold counts it.
 pub fn local_note_count(device: &mut DeviceHarness, kind: u64) -> usize {
-    let egui_ctx = device.ctx.clone();
-    let app_ctx = &mut device.state_mut().notedeck.app_context(&egui_ctx);
+    let app_ctx = &mut device.state_mut().notedeck.app_context();
     let txn = Transaction::new(app_ctx.ndb).expect("txn");
     app_ctx
         .ndb

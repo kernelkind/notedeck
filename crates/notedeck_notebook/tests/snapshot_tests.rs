@@ -75,7 +75,7 @@ fn render_notebook(ctx: &egui::Context, state: &mut NotebookTestState) {
 
         let secret = state.account.secret_key.clone();
         let pubkey = state.account.pubkey;
-        let app_ctx = &mut state.notedeck.app_context(ctx);
+        let app_ctx = &mut state.notedeck.app_context();
         if let Some(resp) = app_ctx.accounts.add_account(Keypair::from_secret(secret)) {
             let txn = Transaction::new(app_ctx.ndb).expect("txn");
             resp.unk_id_action
@@ -105,7 +105,7 @@ fn render_notebook(ctx: &egui::Context, state: &mut NotebookTestState) {
         return;
     }
 
-    let mut app_ctx = state.notedeck.app_context(ctx);
+    let mut app_ctx = state.notedeck.app_context();
     // Mirror production: chrome runs `update` (sync poll + fan-out + seed) for
     // every opened app each frame, then `render` for the foreground one.
     state.notebook.update(&mut app_ctx, ctx);
@@ -499,9 +499,8 @@ fn snapshot_notebook_vault() {
     let mut harness = build_harness(egui::Vec2::new(1000.0, 700.0), false, true);
 
     let secret = harness.state().account.secret_key.secret_bytes();
-    let ctx = harness.ctx.clone();
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_vault(
             app_ctx.ndb,
             &secret,
@@ -534,9 +533,8 @@ fn snapshot_notebook_vault_delete() {
     let mut harness = build_harness(egui::Vec2::new(1000.0, 700.0), false, true);
 
     let secret = harness.state().account.secret_key.secret_bytes();
-    let ctx = harness.ctx.clone();
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_vault(
             app_ctx.ndb,
             &secret,
@@ -561,9 +559,8 @@ fn snapshot_notebook_vault_rename() {
     let mut harness = build_harness(egui::Vec2::new(1000.0, 700.0), false, true);
 
     let secret = harness.state().account.secret_key.secret_bytes();
-    let ctx = harness.ctx.clone();
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_vault(
             app_ctx.ndb,
             &secret,
@@ -590,9 +587,8 @@ fn snapshot_notebook_editor() {
 
     let secret = harness.state().account.secret_key.secret_bytes();
     let pubkey = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         let content = concat!(
             "# Q3 Planning\n\n",
             "Goals for the **quarter**, with a few *stretch* items.\n\n",
@@ -711,7 +707,6 @@ fn snapshot_notebook_note_embed() {
 
     let secret = harness.state().account.secret_key.secret_bytes();
     let author = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
     let reference = event::longform_naddr(&author, "embed-00").expect("naddr");
     // Seed the embed onto the app's active (auto-seeded) canvas, so it lands on the
     // foreground surface rather than a hard-coded id the app isn't showing.
@@ -722,7 +717,7 @@ fn snapshot_notebook_note_embed() {
         .expect("the app auto-seeded a canvas during warmup")
         .to_string();
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_embed_note(
             app_ctx.ndb,
             &secret,
@@ -761,9 +756,8 @@ fn snapshot_notebook_note_embed_drag() {
     let mut harness = build_harness(egui::Vec2::new(900.0, 560.0), false, true);
 
     let secret = harness.state().account.secret_key.secret_bytes();
-    let ctx = harness.ctx.clone();
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_embed_note(
             app_ctx.ndb,
             &secret,
@@ -875,7 +869,6 @@ fn snapshot_notebook_reference_chip() {
 
     let secret = harness.state().account.secret_key.secret_bytes();
     let author = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
     let title = "Q3 planning canvas node";
     let canvas_id = harness
         .state()
@@ -884,7 +877,7 @@ fn snapshot_notebook_reference_chip() {
         .expect("the app auto-seeded a canvas during warmup")
         .to_string();
     let node_ref = {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         let id = seed_ref_node(app_ctx.ndb, &author, &secret, &canvas_id, title);
         wordid::node_ref(id.bytes())
     };
@@ -923,7 +916,6 @@ fn open_pans_the_canvas_to_an_offscreen_node() {
 
     let secret = harness.state().account.secret_key.secret_bytes();
     let author = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
 
     // Seed a node far outside the initial viewport (which loads at the origin,
     // ~820x500) onto the app's active canvas — the one it auto-seeded during
@@ -937,7 +929,7 @@ fn open_pans_the_canvas_to_an_offscreen_node() {
         .expect("the app auto-seeded a canvas during warmup")
         .to_string();
     let node_note = {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_ref_node_at(
             app_ctx.ndb,
             &author,
@@ -1247,9 +1239,8 @@ fn drag_vault_note_creates_embed_node() {
 
     let secret = harness.state().account.secret_key.secret_bytes();
     let author = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_embed_note(
             app_ctx.ndb,
             &secret,
@@ -1302,9 +1293,8 @@ fn wait_for_longform(
     loop {
         harness.run_ok();
         let pubkey = harness.state().account.pubkey;
-        let ctx = harness.ctx.clone();
         let found = {
-            let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+            let app_ctx = harness.state_mut().notedeck.app_context();
             let txn = Transaction::new(app_ctx.ndb).expect("txn");
             load_longform(app_ctx.ndb, &txn, &pubkey, d).filter(&pred)
         };
@@ -1430,8 +1420,7 @@ fn create_and_edit_longform_via_editor() {
 /// app's own ndb.
 fn vault_len(harness: &mut Harness<'static, NotebookTestState>) -> usize {
     let pubkey = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
-    let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+    let app_ctx = harness.state_mut().notedeck.app_context();
     let txn = Transaction::new(app_ctx.ndb).expect("txn");
     list_longform(app_ctx.ndb, &txn, &pubkey).len()
 }
@@ -1453,8 +1442,7 @@ fn key_press(harness: &mut Harness<'static, NotebookTestState>, key: egui::Key) 
 /// The titles of the account's live vault notes, read through the app's own ndb.
 fn vault_titles(harness: &mut Harness<'static, NotebookTestState>) -> Vec<String> {
     let pubkey = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
-    let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+    let app_ctx = harness.state_mut().notedeck.app_context();
     let txn = Transaction::new(app_ctx.ndb).expect("txn");
     list_longform(app_ctx.ndb, &txn, &pubkey)
         .into_iter()
@@ -1472,9 +1460,8 @@ fn rename_note_via_vault_context_menu() {
 
     let secret = harness.state().account.secret_key.secret_bytes();
     let pubkey = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         for title in ["First draft", "Second draft"] {
             let input = LongformInput {
                 title: title.to_string(),
@@ -1528,9 +1515,8 @@ fn delete_note_via_vault_context_menu() {
     // Seed two longform notes directly (the create path is covered elsewhere).
     let secret = harness.state().account.secret_key.secret_bytes();
     let pubkey = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         for title in ["Keep me", "Delete me"] {
             let input = LongformInput {
                 title: title.to_string(),
@@ -1574,8 +1560,7 @@ fn delete_note_via_vault_context_menu() {
 /// app's own ndb via the vault projection.
 fn canvas_titles(harness: &mut Harness<'static, NotebookTestState>) -> Vec<String> {
     let pubkey = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
-    let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+    let app_ctx = harness.state_mut().notedeck.app_context();
     let txn = Transaction::new(app_ctx.ndb).expect("txn");
     list_canvases(app_ctx.ndb, &txn, &pubkey)
         .into_iter()
@@ -1587,8 +1572,7 @@ fn canvas_titles(harness: &mut Harness<'static, NotebookTestState>) -> Vec<Strin
 /// if it's gone (deleted / never folded).
 fn canvas_title_of(harness: &mut Harness<'static, NotebookTestState>, d: &str) -> Option<String> {
     let pubkey = harness.state().account.pubkey;
-    let ctx = harness.ctx.clone();
-    let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+    let app_ctx = harness.state_mut().notedeck.app_context();
     let txn = Transaction::new(app_ctx.ndb).expect("txn");
     load_canvas(app_ctx.ndb, &txn, &pubkey, d).map(|c| c.title)
 }
@@ -1799,9 +1783,8 @@ fn snapshot_notebook_vault_mixed() {
         build_harness_canvases(egui::Vec2::new(1000.0, 700.0), true, two_seed_canvases());
 
     let secret = harness.state().account.secret_key.secret_bytes();
-    let ctx = harness.ctx.clone();
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_vault(
             app_ctx.ndb,
             &secret,

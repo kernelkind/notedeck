@@ -8,8 +8,10 @@ use notedeck::{
 
 use crate::{
     accounts::AccountsRoute,
+    column::ColumnId,
+    deeplink::DeepLinkId,
     onboarding::Onboarding,
-    scoped_sub_owner_keys::onboarding_owner_key,
+    scoped_sub_owner_keys::{onboarding_owner_key, ThreadOwnerId},
     timeline::{kind::ColumnTitle, thread::Threads, ThreadSelection, TimelineCache, TimelineKind},
     ui::add_column::{AddAlgoRoute, AddColumnRoute},
     view_state::ViewState,
@@ -663,10 +665,15 @@ impl<R: Clone> Default for SingletonRouter<R> {
     }
 }
 
+enum RouteCleanup {
+    Returned { return_type: ReturnType },
+    Disposed { account_pk: Pubkey },
+}
+
 /// Centralized resource cleanup for popped routes.
-/// This handles cleanup for Timeline, Thread, and EditProfile routes.
+/// This handles cleanup for routes with owned caches, subscriptions, or UI state.
 #[allow(clippy::too_many_arguments)]
-pub fn cleanup_popped_route(
+pub(crate) fn cleanup_popped_route(
     route: &Route,
     timeline_cache: &mut TimelineCache,
     threads: &mut Threads,
@@ -675,23 +682,122 @@ pub fn cleanup_popped_route(
     ndb: &mut Ndb,
     scoped_subs: &mut ScopedSubApi,
     return_type: ReturnType,
-    col_index: usize,
+    column_id: ColumnId,
+) {
+    cleanup_route(
+        route,
+        column_id,
+        timeline_cache,
+        threads,
+        onboarding,
+        view_state,
+        ndb,
+        scoped_subs,
+        RouteCleanup::Returned { return_type },
+    );
+}
+
+/// Release the subscription owned by one popped global deep-link entry.
+///
+/// Deep links can only own timeline or thread routes. Their identity is a
+/// tagged thread owner, not a synthetic [`ColumnId`].
+pub(crate) fn cleanup_deeplink_route(
+    route: &Route,
+    id: DeepLinkId,
+    timeline_cache: &mut TimelineCache,
+    threads: &mut Threads,
+    ndb: &mut Ndb,
+    scoped_subs: &mut ScopedSubApi,
 ) {
     match route {
         Route::Timeline(kind) => {
-            if let Err(err) = timeline_cache.pop(kind, ndb, scoped_subs) {
-                tracing::error!("popping timeline had an error: {err} for {:?}", kind);
+            let account_pk = scoped_subs.selected_account_pubkey();
+            if let Err(err) = timeline_cache.pop_for_account(kind, account_pk, ndb, scoped_subs) {
+                tracing::error!("popping deep-link timeline had an error: {err} for {kind:?}");
             }
         }
         Route::Thread(selection) => {
-            threads.close(ndb, scoped_subs, selection, return_type, col_index);
+            threads.close(
+                ndb,
+                scoped_subs,
+                selection,
+                ReturnType::Click,
+                ThreadOwnerId::DeepLink(id),
+            );
         }
+        _ => tracing::error!("deep-link cleanup received unsupported route: {route:?}"),
+    }
+}
+
+/// Centralized resource cleanup for routes removed outside normal nav returns.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn dispose_removed_route(
+    route: &Route,
+    account_pk: Pubkey,
+    column_id: ColumnId,
+    timeline_cache: &mut TimelineCache,
+    threads: &mut Threads,
+    onboarding: &mut Onboarding,
+    view_state: &mut ViewState,
+    ndb: &mut Ndb,
+    scoped_subs: &mut ScopedSubApi,
+) {
+    cleanup_route(
+        route,
+        column_id,
+        timeline_cache,
+        threads,
+        onboarding,
+        view_state,
+        ndb,
+        scoped_subs,
+        RouteCleanup::Disposed { account_pk },
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cleanup_route(
+    route: &Route,
+    column_id: ColumnId,
+    timeline_cache: &mut TimelineCache,
+    threads: &mut Threads,
+    onboarding: &mut Onboarding,
+    view_state: &mut ViewState,
+    ndb: &mut Ndb,
+    scoped_subs: &mut ScopedSubApi,
+    cleanup: RouteCleanup,
+) {
+    match route {
+        Route::Timeline(kind) => {
+            let account_pk = match cleanup {
+                RouteCleanup::Returned { .. } => scoped_subs.selected_account_pubkey(),
+                RouteCleanup::Disposed { account_pk } => account_pk,
+            };
+            if let Err(err) = timeline_cache.pop_for_account(kind, account_pk, ndb, scoped_subs) {
+                tracing::error!("popping timeline had an error: {err} for {:?}", kind);
+            }
+        }
+        Route::Thread(selection) => match cleanup {
+            RouteCleanup::Returned { return_type } => {
+                threads.close(ndb, scoped_subs, selection, return_type, column_id);
+            }
+            RouteCleanup::Disposed { account_pk } => {
+                threads.dispose_route_for_account(
+                    ndb,
+                    scoped_subs,
+                    account_pk,
+                    column_id,
+                    selection,
+                );
+            }
+        },
         Route::EditProfile(pk) => {
             view_state.pubkey_to_profile_state.remove(pk);
         }
         Route::Accounts(AccountsRoute::Onboarding) => {
             onboarding.end_onboarding(ndb);
-            let _ = scoped_subs.drop_owner(onboarding_owner_key(col_index));
+            view_state.follow_packs = Default::default();
+            let _ = scoped_subs.drop_owner(onboarding_owner_key(column_id));
         }
         _ => {}
     }
@@ -704,7 +810,7 @@ mod tests {
 
     use crate::{timeline::ThreadSelection, Route};
     use enostr::Pubkey;
-    use notedeck::RootNoteIdBuf;
+    use notedeck::{NavStack, RootNoteIdBuf};
 
     #[test]
     fn test_thread_route_serialize() {
@@ -721,5 +827,37 @@ mod tests {
         parsed.serialize_tokens(&mut token_writer);
         assert_eq!(expected, parsed);
         assert_eq!(token_writer.str(), data_str);
+    }
+
+    #[test]
+    fn click_back_collapses_overlay_and_pop_returns_retained_top_route() {
+        let mut router = NavStack::new(vec![0]);
+        router.route_to_overlaid(1);
+        router.route_to_overlaid(2);
+
+        assert_eq!(router.routes(), &[0, 1, 2]);
+        router.go_back();
+        assert_eq!(router.routes(), &[0, 2]);
+
+        let removed = router.pop();
+
+        assert_eq!(removed, Some(2));
+        assert_eq!(router.routes(), &[0]);
+    }
+
+    #[test]
+    fn direct_route_disposal_clears_pending_return_state_without_forwarding() {
+        let mut router = NavStack::new(vec![0]);
+        router.route_to(1);
+        assert_eq!(router.go_back(), Some(0));
+        assert!(router.returning());
+
+        let removed = router.remove_top_route_for_disposal();
+
+        assert_eq!(removed, Some(1));
+        assert_eq!(router.routes(), &[0]);
+        assert!(!router.returning());
+        assert!(!router.navigating());
+        assert!(!router.go_forward());
     }
 }

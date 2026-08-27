@@ -75,28 +75,34 @@ impl<'a> NavTitle<'a> {
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<RenderNavAction> {
         let anim = header_anim();
 
-        notedeck_ui::padding(anim.padding, ui, |ui| {
-            let mut rect = ui.available_rect_before_wrap();
-            rect.set_height(anim.height);
+        // egui_nav gives its title and body the same parent id. Isolate header
+        // controls so a body click cannot activate a header widget with the same id.
+        ui.push_id(("column-nav-title", self.col_id), |ui| {
+            notedeck_ui::padding(anim.padding, ui, |ui| {
+                let mut rect = ui.available_rect_before_wrap();
+                rect.set_height(anim.height);
 
-            let mut child_ui = ui.new_child(
-                UiBuilder::new()
-                    .max_rect(rect)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            );
+                let mut child_ui = ui.new_child(
+                    UiBuilder::new()
+                        .max_rect(rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
 
-            let interact_rect = child_ui.interact(rect, child_ui.id().with("drag"), Sense::drag());
-            if interact_rect.drag_started_by(egui::PointerButton::Primary) {
-                child_ui
-                    .ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
+                let interact_rect =
+                    child_ui.interact(rect, child_ui.id().with("drag"), Sense::drag());
+                if interact_rect.drag_started_by(egui::PointerButton::Primary) {
+                    child_ui
+                        .ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
 
-            let r = self.title_bar(&mut child_ui);
+                let r = self.title_bar(&mut child_ui);
 
-            ui.advance_cursor_after_rect(rect);
+                ui.advance_cursor_after_rect(rect);
 
-            r
+                r
+            })
+            .inner
         })
         .inner
     }

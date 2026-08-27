@@ -6,14 +6,20 @@ use notedeck::{NoteAction, NoteContext};
 use notedeck_ui::note::NoteResponse;
 use notedeck_ui::{NoteOptions, NoteView};
 
-use crate::timeline::thread::{NoteSeenFlags, ParentState, Threads};
+use crate::{
+    column::ColumnId,
+    deeplink::DeepLinkId,
+    scoped_sub_owner_keys::ThreadOwnerId,
+    timeline::thread::{NoteSeenFlags, ParentState, Threads},
+};
 use notedeck::DragResponse;
 
 pub struct ThreadView<'a, 'd> {
     threads: &'a mut Threads,
     selected_note_id: &'a [u8; 32],
     note_options: NoteOptions,
-    col: usize,
+    owner: ThreadOwnerId,
+    scroll_id: egui::Id,
     note_context: &'a mut NoteContext<'d>,
 }
 
@@ -24,14 +30,36 @@ impl<'a, 'd> ThreadView<'a, 'd> {
         selected_note_id: &'a [u8; 32],
         note_options: NoteOptions,
         note_context: &'a mut NoteContext<'d>,
+        column_id: ColumnId,
         col: usize,
+    ) -> Self {
+        Self::new_for_owner(
+            threads,
+            selected_note_id,
+            note_options,
+            note_context,
+            ThreadOwnerId::Column(column_id),
+            Self::scroll_id(selected_note_id, col),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    /// Build a thread view for an internal column or deep-link owner identity.
+    pub(crate) fn new_for_owner(
+        threads: &'a mut Threads,
+        selected_note_id: &'a [u8; 32],
+        note_options: NoteOptions,
+        note_context: &'a mut NoteContext<'d>,
+        owner: ThreadOwnerId,
+        scroll_id: egui::Id,
     ) -> Self {
         ThreadView {
             threads,
             selected_note_id,
             note_options,
+            owner,
             note_context,
-            col,
+            scroll_id,
         }
     }
 
@@ -39,12 +67,16 @@ impl<'a, 'd> ThreadView<'a, 'd> {
         egui::Id::new(("threadscroll", selected_note_id, col))
     }
 
+    /// Build the scroll identity for a thread rendered by a global deep-link.
+    pub(crate) fn deep_link_scroll_id(selected_note_id: &[u8; 32], id: DeepLinkId) -> egui::Id {
+        egui::Id::new(("threadscroll", "deeplink", id, selected_note_id))
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) -> DragResponse<NoteAction> {
         let txn = Transaction::new(self.note_context.ndb).expect("txn");
 
-        let scroll_id = ThreadView::scroll_id(self.selected_note_id, self.col);
         let mut scroll_area = egui::ScrollArea::vertical()
-            .id_salt(scroll_id)
+            .id_salt(self.scroll_id)
             .animated(false)
             .auto_shrink([false, false])
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible);
@@ -83,14 +115,14 @@ impl<'a, 'd> ThreadView<'a, 'd> {
             return None;
         };
 
-        self.threads.update(
+        self.threads.update_for_owner(
             &cur_note,
             self.note_context.note_cache,
             self.note_context.ndb,
             txn,
             self.note_context.unknown_ids,
             self.note_context.accounts,
-            self.col,
+            self.owner,
         );
 
         let cur_node = self.threads.threads.get(&self.selected_note_id).unwrap();
@@ -408,3 +440,19 @@ const LINE_STROKE: fn(&egui::Ui) -> egui::Stroke = |ui: &egui::Ui| {
     stroke.width = 2.0;
     stroke
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deeplink::DeepLinkId;
+
+    #[test]
+    fn deep_link_scroll_state_does_not_alias_a_column_index() {
+        let selected_note_id = [0x42; 32];
+
+        assert_ne!(
+            ThreadView::scroll_id(&selected_note_id, 0),
+            ThreadView::deep_link_scroll_id(&selected_note_id, DeepLinkId::new(0)),
+        );
+    }
+}

@@ -12,13 +12,15 @@ use notedeck_ui::{ProfilePic, ProfilePreview};
 use std::f32::consts::PI;
 use tracing::{error, warn};
 
+use crate::deeplink::DeepLinkId;
 use crate::timeline::{
-    CompositeType, CompositeUnit, NoteUnit, ReactionUnit, RepostUnit, TimelineCache, TimelineKind,
-    TimelineTab, ZapUnit,
+    CompositeType, CompositeUnit, NoteUnit, ReactionUnit, RepostUnit, Timeline, TimelineCache,
+    TimelineKind, TimelineTab, ZapUnit,
 };
 use notedeck::DragResponse;
 use notedeck::{
-    note::root_note_id_from_selected_id, tr, Localization, NoteAction, NoteContext, ScrollInfo,
+    note::root_note_id_from_selected_id, tr, Localization, NoteAction, NoteContext, NoteRef,
+    ScrollInfo,
 };
 use notedeck_ui::{
     anim::{AnimationHelper, ICON_EXPANSION_MULTIPLE},
@@ -30,8 +32,32 @@ pub struct TimelineView<'a, 'd> {
     timeline_cache: &'a mut TimelineCache,
     note_options: NoteOptions,
     note_context: &'a mut NoteContext<'d>,
-    col: usize,
+    scroll_owner: TimelineScrollOwner,
     scroll_to_top: bool,
+}
+
+#[derive(Clone, Copy)]
+/// Identifies the UI entry whose timeline scroll state is being rendered.
+enum TimelineScrollOwner {
+    /// A timeline rendered at one deck-column display position.
+    Column(usize),
+    /// A timeline rendered by one transient global deep-link entry.
+    DeepLink(DeepLinkId),
+}
+
+impl TimelineScrollOwner {
+    fn scroll_id(self, timeline_id: &TimelineKind, timeline: &Timeline) -> egui::Id {
+        match self {
+            Self::Column(col) => egui::Id::new(("tlscroll", timeline.view_id(col))),
+            Self::DeepLink(id) => egui::Id::new((
+                "tlscroll",
+                "deeplink",
+                id,
+                timeline_id,
+                timeline.selected_view,
+            )),
+        }
+    }
 }
 
 impl<'a, 'd> TimelineView<'a, 'd> {
@@ -43,13 +69,46 @@ impl<'a, 'd> TimelineView<'a, 'd> {
         note_options: NoteOptions,
         col: usize,
     ) -> Self {
+        Self::new_with_scroll_owner(
+            timeline_id,
+            timeline_cache,
+            note_context,
+            note_options,
+            TimelineScrollOwner::Column(col),
+        )
+    }
+
+    /// Build a timeline view with UI state owned by one global deep-link.
+    pub(crate) fn new_for_deep_link(
+        timeline_id: &'a TimelineKind,
+        timeline_cache: &'a mut TimelineCache,
+        note_context: &'a mut NoteContext<'d>,
+        note_options: NoteOptions,
+        id: DeepLinkId,
+    ) -> Self {
+        Self::new_with_scroll_owner(
+            timeline_id,
+            timeline_cache,
+            note_context,
+            note_options,
+            TimelineScrollOwner::DeepLink(id),
+        )
+    }
+
+    fn new_with_scroll_owner(
+        timeline_id: &'a TimelineKind,
+        timeline_cache: &'a mut TimelineCache,
+        note_context: &'a mut NoteContext<'d>,
+        note_options: NoteOptions,
+        scroll_owner: TimelineScrollOwner,
+    ) -> Self {
         let scroll_to_top = false;
         TimelineView {
             timeline_id,
             timeline_cache,
             note_options,
             note_context,
-            col,
+            scroll_owner,
             scroll_to_top,
         }
     }
@@ -61,7 +120,7 @@ impl<'a, 'd> TimelineView<'a, 'd> {
             self.timeline_cache,
             self.note_options,
             self.note_context,
-            self.col,
+            self.scroll_owner,
             self.scroll_to_top,
         )
     }
@@ -69,15 +128,6 @@ impl<'a, 'd> TimelineView<'a, 'd> {
     pub fn scroll_to_top(mut self, enable: bool) -> Self {
         self.scroll_to_top = enable;
         self
-    }
-
-    pub fn scroll_id(
-        timeline_cache: &TimelineCache,
-        timeline_id: &TimelineKind,
-        col: usize,
-    ) -> Option<egui::Id> {
-        let timeline = timeline_cache.get(timeline_id)?;
-        Some(egui::Id::new(("tlscroll", timeline.view_id(col))))
     }
 }
 
@@ -89,7 +139,7 @@ fn timeline_ui(
     timeline_cache: &mut TimelineCache,
     mut note_options: NoteOptions,
     note_context: &mut NoteContext,
-    col: usize,
+    scroll_owner: TimelineScrollOwner,
     scroll_to_top: bool,
 ) -> DragResponse<NoteAction> {
     //padding(4.0, ui, |ui| ui.heading("Notifications"));
@@ -99,31 +149,24 @@ fn timeline_ui(
 
     */
 
-    let Some(scroll_id) = TimelineView::scroll_id(timeline_cache, timeline_id, col) else {
+    let Some(timeline) = timeline_cache.get_mut(timeline_id) else {
+        error!("tried to render timeline in column, but timeline was missing");
+        // TODO (jb55): render an error when the timeline is missing. This can
+        // happen if a timeline column is added without add_new_timeline_column.
         return DragResponse::none();
     };
+    let scroll_id = scroll_owner.scroll_id(timeline_id, timeline);
 
-    {
-        let timeline = if let Some(timeline) = timeline_cache.get_mut(timeline_id) {
-            timeline
-        } else {
-            error!("tried to render timeline in column, but timeline was missing");
-            // TODO (jb55): render error when timeline is missing?
-            // this shouldn't happen...
-            return DragResponse::none();
-        };
+    timeline.selected_view = tabs_ui(
+        ui,
+        note_context.i18n,
+        timeline.selected_view,
+        &timeline.views,
+    )
+    .inner;
 
-        timeline.selected_view = tabs_ui(
-            ui,
-            note_context.i18n,
-            timeline.selected_view,
-            &timeline.views,
-        )
-        .inner;
-
-        // need this for some reason??
-        ui.add_space(3.0);
-    };
+    // need this for some reason??
+    ui.add_space(3.0);
 
     let show_top_button_id = ui.id().with((scroll_id, "at_top"));
 
@@ -162,18 +205,6 @@ fn timeline_ui(
     }
 
     let scroll_output = scroll_area.show(ui, |ui| {
-        let timeline = if let Some(timeline) = timeline_cache.get(timeline_id) {
-            timeline
-        } else {
-            error!("tried to render timeline in column, but timeline was missing");
-            // TODO (jb55): render error when timeline is missing?
-            // this shouldn't happen...
-            //
-            // NOTE (jb55): it can easily happen if you add a timeline column without calling
-            // add_new_timeline_column, since that sets up the initial subs, etc
-            return None;
-        };
-
         let txn = Transaction::new(note_context.ndb).expect("failed to create txn");
 
         if matches!(timeline_id, TimelineKind::Notifications(_)) {
@@ -777,17 +808,11 @@ fn render_reaction_cluster(
         profiling::scope!("vec profile entries");
         reaction
             .reactions
-            .values()
-            .filter(|r| !mute.is_pk_muted(r.sender.bytes()))
-            .map(|r| (&r.sender, r.sender_profilekey))
-            .map(|(p, key)| {
-                let record = if let Some(key) = key {
-                    profiling::scope!("ndb by key");
-                    note_context.ndb.get_profile_by_key(txn, key).ok()
-                } else {
-                    profiling::scope!("ndb by pubkey");
-                    note_context.ndb.get_profile_by_pubkey(txn, p.bytes()).ok()
-                };
+            .iter()
+            .filter(|(_, r)| !mute.is_pk_muted(r.sender.bytes()))
+            .map(|(note_ref, r)| (note_ref, &r.sender, r.sender_profilekey))
+            .map(|(note_ref, p, key)| {
+                let record = profile_entry_record(note_context, txn, p, key, Some(*note_ref));
                 ProfileEntry { record, pk: p }
             })
             .collect()
@@ -1065,10 +1090,10 @@ fn render_repost_cluster(
 ) -> RenderEntryResponse {
     let profiles_to_show: Vec<ProfileEntry> = repost
         .reposts
-        .values()
-        .filter(|r| !mute.is_pk_muted(r.bytes()))
-        .map(|p| ProfileEntry {
-            record: note_context.ndb.get_profile_by_pubkey(txn, p.bytes()).ok(),
+        .iter()
+        .filter(|(_, r)| !mute.is_pk_muted(r.bytes()))
+        .map(|(note_ref, p)| ProfileEntry {
+            record: profile_entry_record(note_context, txn, p, None, Some(*note_ref)),
             pk: p,
         })
         .collect();
@@ -1097,17 +1122,16 @@ fn render_zap_cluster(
 ) -> RenderEntryResponse {
     let profiles_to_show: Vec<ProfileEntry> = zap
         .zaps
-        .values()
-        .filter(|z| !mute.is_pk_muted(z.sender.bytes()))
-        .map(|z| {
-            let record = if let Some(key) = z.sender_profilekey {
-                note_context.ndb.get_profile_by_key(txn, key).ok()
-            } else {
-                note_context
-                    .ndb
-                    .get_profile_by_pubkey(txn, z.sender.bytes())
-                    .ok()
-            };
+        .iter()
+        .filter(|(_, z)| !mute.is_pk_muted(z.sender.bytes()))
+        .map(|(note_ref, z)| {
+            let record = profile_entry_record(
+                note_context,
+                txn,
+                &z.sender,
+                z.sender_profilekey,
+                Some(*note_ref),
+            );
             ProfileEntry {
                 record,
                 pk: &z.sender,
@@ -1136,4 +1160,43 @@ enum RenderEntryResponse {
 struct ProfileEntry<'a> {
     record: Option<ProfileRecord<'a>>,
     pk: &'a Pubkey,
+}
+
+fn profile_entry_record<'a>(
+    note_context: &mut NoteContext,
+    txn: &'a Transaction,
+    pk: &Pubkey,
+    key: Option<nostrdb::ProfileKey>,
+    source_note_ref: Option<NoteRef>,
+) -> Option<ProfileRecord<'a>> {
+    let record = if let Some(key) = key {
+        profiling::scope!("ndb by key");
+        note_context.ndb.get_profile_by_key(txn, key).ok()
+    } else {
+        profiling::scope!("ndb by pubkey");
+        note_context.ndb.get_profile_by_pubkey(txn, pk.bytes()).ok()
+    };
+
+    if record.is_none() {
+        if let Some(source_note_ref) = source_note_ref {
+            if let Ok(source_note) = note_context.ndb.get_note_by_key(txn, source_note_ref.key) {
+                note_context.unknown_ids.add_pubkey_if_missing_from_note(
+                    note_context.ndb,
+                    txn,
+                    pk.bytes(),
+                    &source_note,
+                );
+            } else {
+                note_context
+                    .unknown_ids
+                    .add_pubkey_if_missing(note_context.ndb, txn, pk.bytes());
+            }
+        } else {
+            note_context
+                .unknown_ids
+                .add_pubkey_if_missing(note_context.ndb, txn, pk.bytes());
+        }
+    }
+
+    record
 }

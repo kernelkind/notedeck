@@ -51,7 +51,7 @@ pub use agentium_core::tools::QueryCall;
 /// [`tool_context`](crate::AppContext::tool_context) — the tool analogue of
 /// [`NoteContext`](crate::NoteContext). Tools open their own short-lived
 /// [`Transaction`]s from [`ndb`](Self::ndb) as needed.
-pub struct ToolContext<'a, 'pool> {
+pub struct ToolContext<'a> {
     pub ndb: &'a Ndb,
     pub note_cache: &'a mut NoteCache,
     pub accounts: &'a Accounts,
@@ -61,9 +61,9 @@ pub struct ToolContext<'a, 'pool> {
     /// where a mutating tool should report an error rather than silently drop the
     /// change. Relay targets and the signer come from [`accounts`](Self::accounts)
     /// (see [`Accounts::selected_account_private_relays`] and
-    /// [`Accounts::selected_filled`]); this supplies the outbox to publish
-    /// through, via [`fan_out_event_frame`](crate::fan_out_event_frame).
-    pub publish: Option<ExplicitPublishApi<'a, 'pool>>,
+    /// [`Accounts::selected_filled`]); this supplies the remote publish path
+    /// used by [`fan_out_event_frame`](crate::fan_out_event_frame).
+    pub publish: Option<ExplicitPublishApi<'a>>,
 }
 
 /// The result of running a [`ToolCall`].

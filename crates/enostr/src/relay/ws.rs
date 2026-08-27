@@ -3,16 +3,15 @@
 //! This owns the underlying TCP socket (via `tokio-tungstenite`) so the relay
 //! stack can observe connection liveness at the socket level rather than
 //! relying solely on application-level ping/pong timeouts. It exposes the same
-//! poll-friendly [`WsSender`]/[`WsReceiver`] pair the coordinator drives from
-//! the synchronous per-frame render loop: outbound frames are queued to a
-//! background tokio task, and inbound [`WsEvent`]s are drained non-blocking via
-//! [`WsReceiver::try_recv`].
+//! poll-friendly [`WsSender`]/[`WsReceiver`] pair the outbox service drives:
+//! outbound frames are queued to a background tokio task, and inbound
+//! [`WsEvent`]s are drained non-blocking via [`WsReceiver::try_recv`].
 //!
 //! This replaces the previous `ewebsock` dependency. We deliberately do not
 //! support a wasm/browser backend — notedeck ships native only, and owning the
 //! socket is what makes realtime, socket-level relay status possible.
 
-use crate::{Error, Result};
+use crate::{Error, Result, WebSocketError};
 use futures_util::{SinkExt, StreamExt};
 use socket2::{SockRef, TcpKeepalive};
 use std::net::SocketAddr;
@@ -60,7 +59,7 @@ pub enum WsEvent {
     /// A data frame arrived.
     Message(WsMessage),
     /// The connection failed at the socket or protocol level.
-    Error(String),
+    Error(WebSocketError),
 }
 
 /// Outbound half of a relay websocket connection.
@@ -80,7 +79,7 @@ impl WsSender {
     }
 }
 
-/// Inbound half of a relay websocket connection, drained from the render loop.
+/// Inbound half of a relay websocket connection, drained by the outbox service.
 pub struct WsReceiver {
     rx: UnboundedReceiver<WsEvent>,
 }
@@ -96,17 +95,19 @@ impl WsReceiver {
 /// Open a websocket connection to `url`, returning the poll-friendly channel
 /// halves immediately while the handshake proceeds on a background tokio task.
 ///
-/// `wakeup` is invoked whenever a new [`WsEvent`] is queued so the host can
-/// schedule a render-loop drain. Requires an active tokio runtime.
+/// `wakeup` is invoked whenever a new [`WsEvent`] is queued so the owning
+/// service can drain this connection. Requires an active Tokio runtime.
 pub fn connect<W>(url: &str, wakeup: W) -> Result<(WsSender, WsReceiver)>
 where
     W: Fn() + Send + Sync + 'static,
 {
     // Validate the request synchronously so a malformed URL fails on the
     // spot, matching the previous connect contract.
-    let request = url
-        .into_client_request()
-        .map_err(|e| Error::Generic(format!("invalid relay url {url}: {e}")))?;
+    let request = url.into_client_request().map_err(|err| {
+        Error::WebSocket(WebSocketError::new(format!(
+            "invalid relay url {url}: {err}"
+        )))
+    })?;
 
     let (out_tx, out_rx) = tokio::sync::mpsc::unbounded_channel::<WsEvent>();
     let (in_tx, in_rx) = tokio::sync::mpsc::unbounded_channel::<WsMessage>();
@@ -126,7 +127,8 @@ async fn run<W>(
 ) where
     W: Fn() + Send + Sync + 'static,
 {
-    // Queue an inbound event and wake the host. Returns false once the
+    // Queue before waking so the service cannot observe readiness while this
+    // connection's receive queue is still empty. Returns false once the
     // receiver half has been dropped, signalling the task to wind down.
     let emit = |ev: WsEvent| {
         if out_tx.send(ev).is_err() {
@@ -139,7 +141,7 @@ async fn run<W>(
     let (stream, local_addr) = match connect_stream(request).await {
         Ok(opened) => opened,
         Err(err) => {
-            emit(WsEvent::Error(err.to_string()));
+            emit(WsEvent::Error(err));
             return;
         }
     };
@@ -159,8 +161,8 @@ async fn run<W>(
                     let _ = write.close().await;
                     break;
                 };
-                if write.send(msg.into()).await.is_err() {
-                    emit(WsEvent::Closed);
+                if let Err(err) = write.send(msg.into()).await {
+                    emit(WsEvent::Error(err.into()));
                     break;
                 }
             }
@@ -174,7 +176,7 @@ async fn run<W>(
                         }
                     }
                     Some(Err(err)) => {
-                        emit(WsEvent::Error(err.to_string()));
+                        emit(WsEvent::Error(err.into()));
                         break;
                     }
                     None => {
@@ -194,14 +196,17 @@ async fn run<W>(
 #[allow(clippy::type_complexity)]
 async fn connect_stream(
     request: Request,
-) -> Result<(
-    WebSocketStream<MaybeTlsStream<TcpStream>>,
-    Option<SocketAddr>,
-)> {
+) -> std::result::Result<
+    (
+        WebSocketStream<MaybeTlsStream<TcpStream>>,
+        Option<SocketAddr>,
+    ),
+    WebSocketError,
+> {
     let uri = request.uri();
     let host = uri
         .host()
-        .ok_or_else(|| Error::Generic(format!("relay url has no host: {uri}")))?
+        .ok_or_else(|| WebSocketError::new(format!("relay url has no host: {uri}")))?
         .to_string();
     let port = uri.port_u16().unwrap_or_else(|| match uri.scheme_str() {
         Some("wss") | Some("https") => 443,
@@ -210,7 +215,9 @@ async fn connect_stream(
 
     let tcp = TcpStream::connect((host.as_str(), port))
         .await
-        .map_err(|e| Error::Generic(format!("tcp connect to {host}:{port} failed: {e}")))?;
+        .map_err(|err| {
+            WebSocketError::from(err).with_context(format!("tcp connect to {host}:{port} failed"))
+        })?;
 
     // The local address ties this connection to the interface it is routed
     // through, so the pool can drop it the instant that interface goes away.
@@ -228,7 +235,7 @@ async fn connect_stream(
 
     let (stream, _resp) = client_async_tls(request, tcp)
         .await
-        .map_err(|e| Error::Generic(e.to_string()))?;
+        .map_err(|err| WebSocketError::from(err).with_context("websocket handshake failed"))?;
     Ok((stream, local_addr))
 }
 

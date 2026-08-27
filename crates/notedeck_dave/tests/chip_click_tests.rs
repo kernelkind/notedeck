@@ -92,7 +92,7 @@ fn render(ctx: &egui::Context, state: &mut State) {
         ctx.style_mut(|s| s.animation_time = 0.0);
         let secret = state.account.secret_key.clone();
         let pubkey = state.account.pubkey;
-        let app_ctx = &mut state.notedeck.app_context(ctx);
+        let app_ctx = &mut state.notedeck.app_context();
         if let Some(resp) = app_ctx.accounts.add_account(Keypair::from_secret(secret)) {
             let txn = Transaction::new(app_ctx.ndb).expect("txn");
             resp.unk_id_action
@@ -103,7 +103,7 @@ fn render(ctx: &egui::Context, state: &mut State) {
         return;
     }
 
-    let mut app_ctx = state.notedeck.app_context(ctx);
+    let mut app_ctx = state.notedeck.app_context();
     let body = state.body.clone();
     let surface = state.surface;
     egui::CentralPanel::default().show(ctx, |ui| {
@@ -197,11 +197,10 @@ fn actions_after_chip_click(surface: Surface) -> usize {
     harness.run_steps(2);
 
     let secret = harness.state().account.secret_key.secret_bytes();
-    let ctx = harness.ctx.clone();
     let session_id = "claude-session-q3-planning";
     let title = "Refactor the session parser";
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_session(app_ctx.ndb, &secret, session_id, title, "working");
     }
     let session_ref = agentium_core::wordid::session_ref(session_id);

@@ -73,7 +73,7 @@ fn render_ref_chip(ctx: &egui::Context, state: &mut RefChipState) {
 
         let secret = state.account.secret_key.clone();
         let pubkey = state.account.pubkey;
-        let app_ctx = &mut state.notedeck.app_context(ctx);
+        let app_ctx = &mut state.notedeck.app_context();
         if let Some(resp) = app_ctx.accounts.add_account(Keypair::from_secret(secret)) {
             let txn = Transaction::new(app_ctx.ndb).expect("txn");
             resp.unk_id_action
@@ -84,7 +84,7 @@ fn render_ref_chip(ctx: &egui::Context, state: &mut RefChipState) {
         return;
     }
 
-    let mut app_ctx = state.notedeck.app_context(ctx);
+    let mut app_ctx = state.notedeck.app_context();
     let body = state.body.clone();
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.add_space(16.0);
@@ -161,11 +161,10 @@ fn snapshot_agentium_reference_chip() {
     let mut harness = build_harness();
 
     let secret = harness.state().account.secret_key.secret_bytes();
-    let ctx = harness.ctx.clone();
     let session_id = "claude-session-q3-planning";
     let title = "Refactor the session parser";
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_session(app_ctx.ndb, &secret, session_id, title, "working");
     }
     let session_ref = agentium_core::wordid::session_ref(session_id);
@@ -210,11 +209,10 @@ fn agentium_reference_chip_renders_in_table_cell() {
     let mut harness = build_harness();
 
     let secret = harness.state().account.secret_key.secret_bytes();
-    let ctx = harness.ctx.clone();
     let session_id = "claude-session-table-cell";
     let title = "Thread RefCtx into tables";
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_session(app_ctx.ndb, &secret, session_id, title, "working");
     }
     let session_ref = agentium_core::wordid::session_ref(session_id);
@@ -249,11 +247,10 @@ fn snapshot_agentium_deleted_chip() {
     let mut harness = build_harness();
 
     let secret = harness.state().account.secret_key.secret_bytes();
-    let ctx = harness.ctx.clone();
     let session_id = "claude-session-deleted-demo";
     let title = "Resume the parser refactor";
     {
-        let app_ctx = harness.state_mut().notedeck.app_context(&ctx);
+        let app_ctx = harness.state_mut().notedeck.app_context();
         seed_session(app_ctx.ndb, &secret, session_id, title, "deleted");
     }
     let session_ref = agentium_core::wordid::session_ref(session_id);
