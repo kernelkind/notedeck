@@ -1717,6 +1717,9 @@ mod tests {
         );
 
         let new_id = sm.active_id().unwrap();
+        // Without this the test is vacuous: a clone that creates nothing leaves
+        // the original active, and the original's requested_model is None too.
+        assert_ne!(new_id, orig_id, "clone must create a new session");
         assert!(
             sm.get(new_id).unwrap().details.requested_model.is_none(),
             "cloned default-model session should also have no model"
