@@ -60,8 +60,8 @@ struct Scope {
 struct ThreadRemoteSnapshot {
     /// Every local overlay/scope demanding this root request.
     owners: Vec<(MetaId, usize)>,
-    /// Union of current observed relay coverage from every owner scope.
-    observed_relays: HashSet<NormRelayUrl>,
+    /// Union of root and selected notes declared by the current owner scopes.
+    selected_notes: hashbrown::HashSet<NoteId>,
     /// Logging/debug only; this is not part of the remote identity.
     stack_len: usize,
 }
@@ -347,7 +347,6 @@ impl ThreadSubs {
     #[cfg(test)]
     fn remote_snapshot_for_root(
         &self,
-        ndb: &Ndb,
         account_pk: Pubkey,
         root_id: &RootNoteId,
     ) -> Option<ThreadRemoteSnapshot> {
@@ -373,14 +372,15 @@ impl ThreadSubs {
             .map(|(meta_id, scope_depth, _scope)| (*meta_id, *scope_depth))
             .collect::<Vec<_>>();
         let stack_len = scopes.iter().map(|(_, _, scope)| scope.stack.len()).sum();
-        let observed_relays = scopes
+        let selected_notes = scopes
             .iter()
-            .flat_map(|(_, _, scope)| observed_thread_relays(ndb, scope))
-            .collect::<HashSet<_>>();
+            .flat_map(|(_, _, scope)| scope.stack.iter().map(|sub| sub.selected_id))
+            .chain([*root_id])
+            .collect();
 
         Some(ThreadRemoteSnapshot {
             owners,
-            observed_relays,
+            selected_notes,
             stack_len,
         })
     }
@@ -457,6 +457,47 @@ fn unsubscribe_click(
         return Some(UnsubscribeOutcome::KeepOwner(root_id));
     }
     Some(UnsubscribeOutcome::DropOwner(scope.root_id))
+}
+
+/// A partial close must refresh remote seeds after removing later selections.
+#[test]
+fn partial_click_unsubscribe_refreshes_remaining_thread_seeds() {
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let mut ndb = Ndb::new(
+        tmp.path().to_str().expect("temp path"),
+        &nostrdb::Config::new(),
+    )
+    .expect("ndb");
+    let root = NoteId::new([1; 32]);
+    let earlier = NoteId::new([2; 32]);
+    let later = NoteId::new([3; 32]);
+    let subscribe = |selected_id: NoteId| {
+        let filters = vec![Filter::new().ids([selected_id.bytes()]).build()];
+        Sub {
+            selected_id,
+            sub: ndb.subscribe(&filters).expect("subscribe"),
+            _filters: filters,
+        }
+    };
+    let earlier_sub = subscribe(earlier);
+    let later_sub = subscribe(later);
+    let later_subscription = later_sub.sub;
+    ndb.unsubscribe(earlier_sub.sub)
+        .expect("force earlier subscription failure");
+    let mut scopes = vec![Scope {
+        root_id: root,
+        stack: vec![earlier_sub, later_sub],
+    }];
+    let selection =
+        ThreadSelection::from_root_id(notedeck::RootNoteIdBuf::new_unsafe(*root.bytes()));
+
+    let outcome = unsubscribe_click(&mut scopes, &mut ndb, &selection);
+
+    assert_eq!(outcome, Some(UnsubscribeOutcome::KeepOwner(root)));
+    assert_eq!(scopes.len(), 1);
+    assert_eq!(scopes[0].stack.len(), 1);
+    assert_eq!(scopes[0].stack[0].selected_id, earlier);
+    assert!(ndb.unsubscribe(later_subscription).is_err());
 }
 
 fn dispose_thread_scope(ndb: &mut Ndb, scope: Scope) {
@@ -600,15 +641,13 @@ fn thread_remote_sub_declaration(
 }
 
 #[cfg(test)]
-fn observed_thread_relays(ndb: &Ndb, scope: &Scope) -> HashSet<NormRelayUrl> {
-    observed_thread_relays_for_thread_scope(ndb, &scope.root_id, scope_initial_selected_ids(scope))
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::post::NewPost;
     use egui::Context;
+    use enostr::NormRelayUrl;
+    use hashbrown::HashSet;
+    use nostrdb::Transaction;
     use notedeck::{
         AppContext, Notedeck, RelayAction, RootNoteIdBuf, ScopedSubIdentity, ScopedSubReadiness,
     };
@@ -809,18 +848,21 @@ mod tests {
     }
 
     fn expected_thread_remote_config(
-        observed_relays: HashSet<NormRelayUrl>,
+        root: NoteId,
+        selected_ids: impl IntoIterator<Item = NoteId>,
         filters: Vec<Filter>,
         history_filters: Vec<Filter>,
         use_outbox_relays: bool,
     ) -> SubConfig {
-        let policy = remote_policy(use_outbox_relays);
         let builder = SubConfig::builder(filters)
             .full_history(FullHistoryConfig::new(history_filters))
             .accounts_read_important();
 
-        if policy.uses_observed_relay_coverage(!observed_relays.is_empty()) {
-            return builder.with_observed_relays(observed_relays).build();
+        if use_outbox_relays {
+            return builder
+                .with_author_outbox_augmentation()
+                .for_thread(root, selected_ids)
+                .build();
         }
 
         builder.build()
@@ -917,7 +959,7 @@ mod tests {
         );
 
         let snapshot = subs
-            .remote_snapshot_for_root(app_ctx.ndb, account_pk, &root_id)
+            .remote_snapshot_for_root(account_pk, &root_id)
             .expect("root snapshot");
         assert_eq!(snapshot.stack_len, 1);
         assert_readiness(
@@ -1194,11 +1236,17 @@ mod tests {
         );
 
         let snapshot = subs
-            .remote_snapshot_for_root(app_ctx.ndb, account_pk, &root_id)
+            .remote_snapshot_for_root(account_pk, &root_id)
             .expect("root snapshot");
         assert_eq!(snapshot.owners.len(), 2);
-        assert!(snapshot.observed_relays.contains(&bob_relay));
-        assert!(snapshot.observed_relays.contains(&carol_relay));
+        assert_eq!(
+            snapshot.selected_notes,
+            HashSet::from([
+                root_id,
+                NoteId::new(*bob_reply.id()),
+                NoteId::new(*carol_reply.id()),
+            ])
+        );
         drop(scoped_subs);
         drop(app_ctx);
         wait_for_scoped_live(&mut h, identity_a);
@@ -1216,11 +1264,13 @@ mod tests {
         );
 
         let snapshot = subs
-            .remote_snapshot_for_root(app_ctx.ndb, account_pk, &root_id)
+            .remote_snapshot_for_root(account_pk, &root_id)
             .expect("remaining root snapshot");
         assert_eq!(snapshot.owners.len(), 1);
-        assert!(snapshot.observed_relays.contains(&bob_relay));
-        assert!(!snapshot.observed_relays.contains(&carol_relay));
+        assert_eq!(
+            snapshot.selected_notes,
+            HashSet::from([root_id, NoteId::new(*bob_reply.id()),])
+        );
         assert_live(&scoped_subs, identity_a);
         assert_readiness(&scoped_subs, identity_b, ScopedSubReadiness::Missing);
     }
@@ -1333,7 +1383,7 @@ mod tests {
     }
 
     #[test]
-    fn observed_thread_relays_include_known_ancestor_relays() {
+    fn thread_scope_declares_selected_notes_for_backend_ancestry_discovery() {
         let mut h = ThreadHostHarness::new();
         let alice = enostr::FullKeypair::generate();
         let bob = enostr::FullKeypair::generate();
@@ -1363,23 +1413,34 @@ mod tests {
             stack: vec![tracked_sub(app_ctx.ndb, carol_reply.id())],
         };
 
-        let relays = observed_thread_relays(app_ctx.ndb, &scope);
-
-        assert!(relays.contains(&root_relay));
-        assert!(relays.contains(&parent_relay));
-        assert!(relays.contains(&selected_relay));
+        let (_, config) = thread_remote_sub_declaration(
+            &scope.root_id,
+            scope.stack.iter().map(|sub| sub.selected_id),
+            scope_remote_thread_filters(&scope.root_id),
+            scope_remote_thread_history_filters(&scope.root_id),
+            remote_policy(true),
+        );
+        assert_eq!(
+            config,
+            expected_thread_remote_config(
+                scope.root_id,
+                [NoteId::new(*carol_reply.id())],
+                scope_remote_thread_filters(&scope.root_id),
+                scope_remote_thread_history_filters(&scope.root_id),
+                true,
+            )
+        );
     }
 
     #[test]
-    fn thread_remote_sub_declaration_retains_observed_relays_with_baseline() {
+    fn thread_remote_sub_declaration_retains_selected_notes_with_baseline() {
         let root_id = NoteId::new([0x44; 32]);
-        let overlap_relay = NormRelayUrl::new("wss://overlap.example.com").expect("relay");
-        let observed_extra = NormRelayUrl::new("wss://thread.example.com").expect("relay");
+        let selected = NoteId::new([0x45; 32]);
         let live_filters = vec![Filter::new().kinds([1]).limit(10).build()];
         let history_filters = vec![Filter::new().kinds([1]).build()];
         let (key, config) = thread_remote_sub_declaration(
             &root_id,
-            HashSet::from_iter([overlap_relay.clone(), observed_extra.clone()]),
+            [root_id, selected],
             live_filters.clone(),
             history_filters.clone(),
             remote_policy(true),
@@ -1392,7 +1453,8 @@ mod tests {
         assert_eq!(
             config,
             expected_thread_remote_config(
-                HashSet::from_iter([overlap_relay, observed_extra]),
+                root_id,
+                [root_id, selected],
                 live_filters,
                 history_filters,
                 true,
@@ -1401,13 +1463,13 @@ mod tests {
     }
 
     #[test]
-    fn thread_remote_sub_declaration_falls_back_to_accounts_read_when_thread_relays_missing() {
+    fn thread_remote_sub_declaration_seeds_root_when_no_selected_notes_exist() {
         let root_id = NoteId::new([0x66; 32]);
         let live_filters = vec![Filter::new().kinds([1]).limit(10).build()];
         let history_filters = vec![Filter::new().kinds([1]).build()];
         let (_key, config) = thread_remote_sub_declaration(
             &root_id,
-            HashSet::new(),
+            [],
             live_filters.clone(),
             history_filters.clone(),
             remote_policy(true),
@@ -1415,7 +1477,7 @@ mod tests {
 
         assert_eq!(
             config,
-            expected_thread_remote_config(HashSet::new(), live_filters, history_filters, true)
+            expected_thread_remote_config(root_id, [], live_filters, history_filters, true)
         );
     }
 
@@ -1426,7 +1488,7 @@ mod tests {
         let history_filters = scope_remote_thread_history_filters(&root_id);
         let (_key, config) = thread_remote_sub_declaration(
             &root_id,
-            HashSet::new(),
+            [],
             live_filters.clone(),
             history_filters.clone(),
             remote_policy(true),
@@ -1462,19 +1524,19 @@ mod tests {
         assert!(history_values[1].get("kinds").is_none());
         assert_eq!(
             config,
-            expected_thread_remote_config(HashSet::new(), live_filters, history_filters, true)
+            expected_thread_remote_config(root_id, [], live_filters, history_filters, true)
         );
     }
 
     #[test]
-    fn thread_remote_sub_declaration_disable_outbox_relays_ignore_observed_relays() {
+    fn thread_remote_sub_declaration_disable_outbox_relays_omits_thread_discovery() {
         let root_id = NoteId::new([0x77; 32]);
-        let observed_relay = NormRelayUrl::new("wss://thread.example.com").expect("relay");
+        let selected = NoteId::new([0x78; 32]);
         let live_filters = vec![Filter::new().kinds([1]).limit(10).build()];
         let history_filters = vec![Filter::new().kinds([1]).build()];
         let (key, config) = thread_remote_sub_declaration(
             &root_id,
-            HashSet::from_iter([observed_relay]),
+            [selected],
             live_filters.clone(),
             history_filters.clone(),
             remote_policy(false),
@@ -1486,7 +1548,7 @@ mod tests {
         );
         assert_eq!(
             config,
-            expected_thread_remote_config(HashSet::new(), live_filters, history_filters, false)
+            expected_thread_remote_config(root_id, [], live_filters, history_filters, false)
         );
     }
 }

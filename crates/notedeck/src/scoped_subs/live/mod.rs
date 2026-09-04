@@ -1094,6 +1094,55 @@ fn apply_one_routed_live_plan_relay(
     }
 }
 
+#[test]
+fn thread_route_refreshes_exact_ids_when_authors_and_config_shape_are_unchanged() {
+    use super::ScopedSubOutboxOp;
+
+    let ids = OutboxIdRegistry::new();
+    let relay = NormRelayUrl::new("wss://thread.example.com").unwrap();
+    let policy = RoutedLivePolicy {
+        demand_priority: RelayDemandPriority::Opportunistic,
+        routing_preference: RelayRoutingPreference::NoPreference,
+        relay_url_source: RelayUrlSource::RemoteAdvertised,
+    };
+    let mut plan = PlannedRoutedRelay {
+        relay,
+        relay_priority: RoutedRelayPriority::default(),
+        filters: vec![Filter::new().ids([&[1; 32]]).build()],
+        authors_by_filter_index: HashMap::from([(0, HashSet::new())]),
+    };
+    let ((state, result), ops) = refresh_routed_live_state(
+        &ids,
+        None,
+        policy,
+        None,
+        Some(1),
+        std::slice::from_ref(&plan),
+    );
+    assert_eq!(result, RouteWorkResult::Complete);
+    assert_eq!(ops.into_ops().len(), 1);
+    plan.filters = vec![Filter::new().ids([&[2; 32]]).build()];
+    let ((state, result), ops) = refresh_routed_live_state(
+        &ids,
+        state,
+        policy,
+        None,
+        Some(2),
+        std::slice::from_ref(&plan),
+    );
+    assert_eq!(result, RouteWorkResult::Complete);
+    let ops = ops.into_ops();
+    assert_eq!(
+        ops.len(),
+        1,
+        "same-author ancestry expansion needs a replacement REQ"
+    );
+    assert!(matches!(&ops[0], ScopedSubOutboxOp::SetLive { filters, .. }
+        if filters[0].same_canonical_attributes(&plan.filters[0])));
+    let (_, ops) = refresh_routed_live_state(&ids, state, policy, None, Some(3), &[plan]);
+    assert!(ops.is_empty(), "identical routes do not resend");
+}
+
 fn cleanup_one_removed_routed_live_relay(
     state: &mut RoutedLiveState,
     pending: &RoutedLivePendingPlan,

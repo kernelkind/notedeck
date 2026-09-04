@@ -905,3 +905,75 @@ impl SubConfig {
         self
     }
 }
+
+/// Selected thread notes are retained demand and must invalidate an old declaration.
+#[test]
+fn thread_outbox_seeds_affect_config_equality() {
+    let root = enostr::NoteId::new([1; 32]);
+    let first = enostr::NoteId::new([2; 32]);
+    let second = enostr::NoteId::new([3; 32]);
+    let config = |selected: Vec<enostr::NoteId>| {
+        SubConfig::builder(vec![Filter::new().kinds([1]).event(root.bytes()).build()])
+            .accounts_read_important()
+            .with_author_outbox_augmentation()
+            .for_thread(root, selected)
+            .build()
+    };
+
+    assert_eq!(
+        config(vec![first, second]),
+        config(vec![second, first, first])
+    );
+    assert_ne!(config(vec![first]), config(vec![second]));
+    assert_eq!(
+        config(vec![first]).thread_notes(),
+        Some(&HashSet::from([root, first]))
+    );
+    let author_config =
+        SubConfig::builder(vec![Filter::new().authors([&[4; 32]]).kinds([1]).build()])
+            .accounts_read_important()
+            .with_author_outbox_augmentation()
+            .build();
+    assert_eq!(author_config.thread_notes(), None);
+}
+
+/// Shared thread demand unions owner selections and removes departed owners' seeds.
+#[test]
+fn thread_outbox_seeds_merge_for_compatible_owners() {
+    let root = enostr::NoteId::new([1; 32]);
+    let first = enostr::NoteId::new([2; 32]);
+    let second = enostr::NoteId::new([3; 32]);
+    let config = |root: enostr::NoteId, selected: enostr::NoteId| {
+        SubConfig::builder(vec![Filter::new().kinds([1]).event(root.bytes()).build()])
+            .full_history(FullHistoryConfig::new(vec![Filter::new()
+                .kinds([1])
+                .event(root.bytes())
+                .build()]))
+            .accounts_read_important()
+            .with_author_outbox_augmentation()
+            .for_thread(root, [selected])
+            .build()
+    };
+    let first_config = config(root, first);
+    let second_config = config(root, second);
+    let merged = SubConfig::merged_owner_configs(&[&first_config, &second_config])
+        .expect("shared thread config");
+    assert_eq!(
+        merged.thread_notes(),
+        Some(&HashSet::from([root, first, second]))
+    );
+    assert_eq!(
+        SubConfig::merged_owner_configs(&[&first_config]),
+        Some(first_config.clone())
+    );
+    assert_eq!(
+        SubConfig::merged_owner_configs(&[&second_config, &first_config]),
+        Some(merged)
+    );
+
+    let different_root = config(enostr::NoteId::new([5; 32]), second);
+    assert_eq!(
+        SubConfig::merged_owner_configs(&[&first_config, &different_root]),
+        Some(different_root)
+    );
+}

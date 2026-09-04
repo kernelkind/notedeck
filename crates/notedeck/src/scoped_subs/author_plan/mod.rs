@@ -1264,6 +1264,209 @@ fn planned_routed_relay_from_send(route: SendPlannedRoutedRelay) -> PlannedRoute
     }
 }
 
+#[test]
+fn thread_plan_job_only_builds_a_snapshot_without_subscribing() {
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let ndb = Ndb::new(tmp.path().to_str().expect("path"), &nostrdb::Config::new()).expect("ndb");
+    let missing = NoteId::new([42; 32]);
+    let spec = SubConfig::builder(vec![nostrdb::Filter::new().ids([missing.bytes()]).build()])
+        .accounts_read_important()
+        .with_author_outbox_augmentation()
+        .for_thread(missing, [])
+        .build();
+    let inputs = AuthorOutboxPlanInputs::new(&HashSet::new(), &spec);
+    let job = AuthorOutboxPlanJobRequest::new(
+        AuthorOutboxPlanSlotId(1),
+        AuthorOutboxBuildStage::Initial,
+        &inputs,
+    );
+
+    let completion = job.run(ndb.clone());
+
+    assert_eq!(
+        ndb.subscription_count(),
+        0,
+        "a planning job must return its snapshot without creating a subscription"
+    );
+    assert_eq!(
+        completion
+            .result
+            .thread
+            .expect("thread result")
+            .expect("thread snapshot")
+            .missing_ids,
+        HashSet::from([missing])
+    );
+}
+
+#[test]
+fn thread_plan_reuses_partial_routes_rebuilds_on_ingestion_and_cleans_up_owners() {
+    use super::config::{ResolvedSubScope, SubKey};
+    use super::ScopedSubOutboxOp;
+    use crate::test_utils::{nip65_write_relay_note_for_test, wait_for_nip65_for_test};
+    use enostr::FullKeypair;
+    use futures_util::FutureExt;
+    use nostrdb::{Config, NoteBuilder, Transaction};
+
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let ndb = Ndb::new(tmp.path().to_str().unwrap(), &Config::new()).expect("ndb");
+    let author = FullKeypair::generate();
+    let parent = NoteId::new([12; 32]);
+    let selected = NoteBuilder::new()
+        .kind(1)
+        .created_at(1)
+        .content("reply")
+        .start_tag()
+        .tag_str("e")
+        .tag_id(parent.bytes())
+        .tag_str("wss://hint.example.com/inbox")
+        .tag_str("reply")
+        .sign(&author.secret_key.secret_bytes())
+        .build()
+        .expect("note");
+    ndb.process_client_event(&selected.json().unwrap())
+        .expect("ingest");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let txn = Transaction::new(&ndb).unwrap();
+        if ndb.get_note_by_id(&txn, selected.id()).is_ok() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "note not ingested");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let selected_id = NoteId::new(*selected.id());
+    let spec = SubConfig::builder(vec![Filter::new().ids([selected.id()]).build()])
+        .accounts_read_important()
+        .with_author_outbox_augmentation()
+        .for_thread(selected_id, [])
+        .build();
+    let reads = HashSet::from([NormRelayUrl::new("wss://account.example.com").unwrap()]);
+    let scoped = ScopedSubKey {
+        scope: ResolvedSubScope::Global,
+        key: SubKey::new("thread"),
+    };
+    let second = ScopedSubKey {
+        scope: ResolvedSubScope::Global,
+        key: SubKey::new("second"),
+    };
+    let account = Pubkey::new([1; 32]);
+    let ids = OutboxIdRegistry::new();
+    let mut runtime = AuthorOutboxPlanRuntime::default();
+    let request = |scoped| AuthorOutboxPlanAdvanceRequest {
+        account_pubkey: account,
+        scoped,
+        account_read_relays: &reads,
+        spec: &spec,
+    };
+    let initial = runtime.advance(request(scoped.clone()));
+    assert!(matches!(initial.advance, AuthorOutboxPlanAdvance::Pending));
+    let mut jobs = initial.effects.into_effects();
+    assert_eq!(jobs.len(), 1);
+    let ScopedSubEffect::StartAuthorOutboxPlanJob(job) = jobs.pop().unwrap();
+    let completion = job.run(ndb.clone());
+    assert_eq!(ndb.subscription_count(), 0);
+    let (owners, ops, effects) = runtime.apply_plan_slot_ready(&ids, completion, &reads, &ndb);
+    assert_eq!(ndb.subscription_count(), 1);
+    assert_eq!(
+        owners,
+        vec![scoped.clone()],
+        "hint route is ready before relay-list EOSE"
+    );
+    assert!(ops.into_ops().iter().any(|op| matches!(op, ScopedSubOutboxOp::StartFetch { filters, .. }
+        if filters.iter().any(|filter| filter.same_canonical_attributes(&Filter::new().ids([parent.bytes()]).build())))));
+    assert!(runtime
+        .slots
+        .values()
+        .next()
+        .unwrap()
+        .thread
+        .as_ref()
+        .unwrap()
+        .discovery
+        .is_some());
+    let mut jobs = effects.into_effects();
+    assert_eq!(jobs.len(), 1, "first subscription requires a catch-up job");
+    let ScopedSubEffect::StartAuthorOutboxPlanJob(job) = jobs.pop().unwrap();
+    let (_, ops, effects) = runtime.apply_plan_slot_ready(&ids, job.run(ndb.clone()), &reads, &ndb);
+    assert!(ops.is_empty(), "catch-up retains the baseline fetch");
+    assert!(
+        effects.into_effects().is_empty(),
+        "unchanged coverage is ready"
+    );
+    let shared = runtime.advance(request(second.clone()));
+    assert!(matches!(
+        shared.advance,
+        AuthorOutboxPlanAdvance::Ready { .. }
+    ));
+    assert!(shared.effects.into_effects().is_empty());
+    assert_eq!(runtime.slots.len(), 1);
+    assert!(runtime.remove_scoped(&scoped).is_empty());
+    assert_eq!(ndb.subscription_count(), 1, "other owner retains the watch");
+    assert!(runtime.next_thread_change().now_or_never().is_none());
+
+    let list = nip65_write_relay_note_for_test(&author, &["wss://author.example.com"]);
+    ndb.process_client_event(&list.json().unwrap())
+        .expect("relay list ingestion");
+    wait_for_nip65_for_test(&ndb, &author.pubkey);
+    let changed = runtime
+        .next_thread_change()
+        .now_or_never()
+        .expect("relay-list notification");
+    let effects = runtime.apply_thread_change(changed);
+    let mut jobs = effects.into_effects();
+    assert_eq!(jobs.len(), 1, "new relay list rebuilds without EOSE");
+    assert!(
+        runtime
+            .apply_thread_change(changed)
+            .into_effects()
+            .is_empty(),
+        "one snapshot job at a time"
+    );
+    let ScopedSubEffect::StartAuthorOutboxPlanJob(job) = jobs.pop().unwrap();
+    let (owners, ops, effects) =
+        runtime.apply_plan_slot_ready(&ids, job.run(ndb.clone()), &reads, &ndb);
+    assert!(effects.into_effects().is_empty());
+    assert_eq!(owners, vec![second.clone()]);
+    assert!(
+        ops.is_empty(),
+        "unchanged missing IDs do not restart the baseline fetch"
+    );
+    assert_eq!(
+        ndb.subscription_count(),
+        1,
+        "unchanged coverage retains the existing watch"
+    );
+    let slot = runtime.slots.values().next().unwrap();
+    let routes = &slot.ready_plan().unwrap().routes.live_routed_relays;
+    assert!(routes
+        .iter()
+        .any(|route| route.relay.as_str() == "wss://author.example.com/"));
+    assert!(routes
+        .iter()
+        .any(|route| route.relay.as_str() == "wss://hint.example.com/inbox"));
+    let cleanup = runtime.deactivate_account(account).into_ops();
+    assert!(cleanup
+        .iter()
+        .any(|op| matches!(op, ScopedSubOutboxOp::ClearFetch { .. })));
+    assert!(runtime.slots.is_empty());
+    assert_eq!(ndb.subscription_count(), 0);
+
+    // A job finishing after the last owner closes cannot resurrect subscriptions.
+    let mut jobs = runtime
+        .advance(request(second.clone()))
+        .effects
+        .into_effects();
+    let ScopedSubEffect::StartAuthorOutboxPlanJob(job) = jobs.pop().unwrap();
+    let completion = job.run(ndb.clone());
+    runtime.remove_scoped(&second);
+    assert!(runtime
+        .apply_plan_slot_ready(&ids, completion, &reads, &ndb)
+        .0
+        .is_empty());
+    assert_eq!(ndb.subscription_count(), 0);
+}
+
 #[cfg(test)]
 mod tests {
     use super::discovery::{
@@ -1383,11 +1586,22 @@ mod tests {
             match effect {
                 ScopedSubEffect::StartAuthorOutboxPlanJob(request) => {
                     let completion = request.run(ndb.clone());
-                    bridge.with_returned_outbox(|ids| {
-                        let (_, outbox_ops) =
-                            runtime.apply_plan_slot_ready(ids, completion, account_read_relays);
-                        outbox_ops
+                    let next_effects = bridge.with_returned_outbox(|ids| {
+                        let (_, outbox_ops, next_effects) = runtime.apply_plan_slot_ready(
+                            ids,
+                            completion,
+                            account_read_relays,
+                            ndb,
+                        );
+                        (next_effects, outbox_ops)
                     });
+                    apply_author_outbox_effects_for_test(
+                        runtime,
+                        bridge,
+                        account_read_relays,
+                        ndb,
+                        next_effects,
+                    );
                 }
             }
         }
@@ -1503,11 +1717,11 @@ mod tests {
             .kinds([1])
             .build();
         let filter = SendFilter::try_from_filter(filter).expect("sendable test filter");
-        let input = SendAuthorOutboxPlanJobInput {
+        let input = SendAuthorOutboxPlanJobInput::AuthorFilters(SendAuthorOutboxPlanConfig {
             account_read_relays: HashSet::new(),
             live_filters: send_plan_filters(&[filter]),
             full_history_filters: Vec::new(),
-        };
+        });
 
         let result = build_author_outbox_plan(ndb, input);
 
@@ -1839,6 +2053,7 @@ mod tests {
             ready_slot_id,
             AuthorOutboxPlanSlot {
                 inputs: AuthorOutboxPlanInputs::new(&account_read_relays, &spec),
+                thread: None,
                 owners: HashSet::from([ready_owner.clone()]),
                 state: AuthorOutboxPlanState::Ready(CachedAuthorOutboxPlan {
                     generation: 42,
@@ -1929,6 +2144,7 @@ mod tests {
             .build();
         let send_filter = SendFilter::try_from_filter(filter).expect("send filter");
         let result = SendAuthorOutboxPlanJobResult {
+            thread: None,
             live_routed_relays: vec![SendPlannedRoutedRelay {
                 relay: relay.clone(),
                 relay_priority: RoutedRelayPriority::default(),
@@ -1963,6 +2179,7 @@ mod tests {
         let send_filter = SendFilter::try_from_filter(filter).expect("send filter");
         let route_count = 20;
         let result = SendAuthorOutboxPlanJobResult {
+            thread: None,
             live_routed_relays: (0..route_count)
                 .map(|index| SendPlannedRoutedRelay {
                     relay: NormRelayUrl::new(&format!(

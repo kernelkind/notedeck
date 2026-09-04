@@ -123,6 +123,10 @@ ancestor fetch, and unfinished relay-list discovery. Disabling outbox replaces
 the declaration with ordinary selected-account coverage. `UnknownIds` and the
 bridge's selected-account one-shot API are unchanged.
 
+The regression tests in `columns_e2e.rs` run the real host, scoped subscriptions,
+relay transport, and NDB against local WebSocket relays, including late ancestor
+and relay-list arrival. They are not interactive GUI verification.
+
 ## Development Workflow
 
 ### Setting Up Your Environment

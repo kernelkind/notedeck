@@ -76,3 +76,73 @@ impl ThreadSnapshot {
         }
     }
 }
+
+#[test]
+fn thread_snapshot_retains_missing_parents_and_their_routing_hints() {
+    use enostr::{NormRelayUrl, NoteId, Pubkey};
+    use hashbrown::HashSet;
+    use nostrdb::{Config, IngestMetadata, Ndb, NoteBuilder, Transaction};
+    use std::time::{Duration, Instant};
+
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let ndb = Ndb::new(tmp.path().to_str().expect("path"), &Config::new()).expect("ndb");
+    let root_id = NoteId::new([11; 32]);
+    let parent_id = NoteId::new([12; 32]);
+    let root_author = Pubkey::new([2; 32]);
+    let parent_author = Pubkey::new([3; 32]);
+    let selected = NoteBuilder::new()
+        .kind(1)
+        .created_at(1)
+        .content("selected reply")
+        .start_tag()
+        .tag_str("e")
+        .tag_id(root_id.bytes())
+        .tag_str("wss://root.example.com")
+        .tag_str("root")
+        .tag_id(root_author.bytes())
+        .start_tag()
+        .tag_str("e")
+        .tag_id(parent_id.bytes())
+        .tag_str("wss://parent.example.com")
+        .tag_str("reply")
+        .tag_id(parent_author.bytes())
+        .sign(&[1; 32])
+        .build()
+        .expect("selected note");
+    ndb.process_event_with(
+        &selected.json().expect("json"),
+        IngestMetadata::new()
+            .client(true)
+            .relay("wss://observed.example.com"),
+    )
+    .expect("ingest selected note");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let txn = Transaction::new(&ndb).expect("txn");
+        if ndb.get_note_by_id(&txn, selected.id()).is_ok() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "selected note was not ingested");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let selected_id = NoteId::new(*selected.id());
+    let snapshot = ThreadSnapshot::load(&ndb, &HashSet::from([selected_id])).expect("snapshot");
+    assert_eq!(
+        snapshot.note_ids,
+        HashSet::from([selected_id, root_id, parent_id])
+    );
+    assert_eq!(snapshot.missing_ids, HashSet::from([root_id, parent_id]));
+    assert_eq!(
+        snapshot.authors,
+        HashSet::from([Pubkey::new(*selected.pubkey()), root_author, parent_author])
+    );
+    assert_eq!(
+        snapshot.relays,
+        HashSet::from([
+            NormRelayUrl::new("wss://root.example.com").expect("relay"),
+            NormRelayUrl::new("wss://parent.example.com").expect("relay"),
+            NormRelayUrl::new("wss://observed.example.com").expect("relay"),
+        ])
+    );
+}

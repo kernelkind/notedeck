@@ -512,6 +512,47 @@ fn valid_dns_label(label: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
+/// Remote relay hints may identify a websocket endpoint below the domain root.
+/// Percent-encoded bytes and strings resembling another URL remain path data;
+/// for example, `nostramsterdam.vpx.moewss` remains the parsed authority below.
+#[test]
+fn remote_advertised_policy_allows_bounded_websocket_paths() {
+    for endpoint in [
+        "wss://basspistol.org/inbox".to_owned(),
+        "wss://relay.example.com/path".to_owned(),
+        "wss://relay.example.com/path%0b".to_owned(),
+        "wss://relay.example.com/path%20with-space".to_owned(),
+        "wss://nostramsterdam.vpx.moewss//nostr.primz.org".to_owned(),
+        "wss://rsslay.wss//relay.nostr.info%0b%20nostr.net".to_owned(),
+        format!("wss://relay.example.com/{}", "a".repeat(2048 - 24)),
+    ] {
+        let relay = NormRelayUrl::new(&endpoint).expect("valid websocket endpoint");
+        assert!(
+            relay.allowed_for_source(RelayUrlSource::RemoteAdvertised),
+            "remote-advertised websocket endpoint should be allowed: {endpoint}"
+        );
+    }
+}
+
+/// Accepting endpoint paths must preserve relay URL credentials and host checks.
+#[test]
+fn remote_advertised_paths_preserve_url_restrictions() {
+    for endpoint in [
+        "wss://user:pass@relay.example.com/inbox".to_owned(),
+        "wss://relay.example.com/inbox?token=secret".to_owned(),
+        "wss://relay.example.com/inbox#fragment".to_owned(),
+        "ws://127.0.0.1:7777/inbox".to_owned(),
+        "ws://relay.local/inbox".to_owned(),
+        format!("wss://relay.example.com/{}", "a".repeat(2049 - 24)),
+    ] {
+        let relay = NormRelayUrl::new(&endpoint).expect("syntactically valid endpoint");
+        assert!(
+            !relay.allowed_for_source(RelayUrlSource::RemoteAdvertised),
+            "remote-advertised websocket endpoint should be rejected: {endpoint}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,13 +642,8 @@ mod tests {
             "wss://user@relay.example.com",
             "wss://user:pass@relay.example.com",
             "wss://relay.example.com/#fragment",
-            "wss://relay.example.com/path",
             "wss://relay.example.com/?q=relay",
-            "wss://relay.example.com/path%0b",
-            "wss://relay.example.com/path%20with-space",
             "wss://relay.example.com/?q=%7f",
-            "wss://nostramsterdam.vpx.moewss//nostr.primz.org",
-            "wss://rsslay.wss//relay.nostr.info%0b%20nostr.net",
         ] {
             let relay = NormRelayUrl::new(url).expect("syntactically valid relay URL");
             assert!(
