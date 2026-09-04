@@ -2,7 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use enostr::{
-    FullHistoryConfig, NormRelayUrl, Pubkey, RelayDemandPriority, RelayRoutingPreference,
+    FullHistoryConfig, NormRelayUrl, NoteId, Pubkey, RelayDemandPriority, RelayRoutingPreference,
     RelayUrlSource,
 };
 use hashbrown::HashSet;
@@ -215,6 +215,8 @@ pub struct SubConfig {
     /// Optional background full-history reconciliation request paired to this
     /// scoped subscription.
     pub(super) full_history: Option<SubFullHistoryConfig>,
+    /// Root and selected thread notes used to discover ancestry and author relays.
+    pub(super) thread_notes: Option<HashSet<NoteId>>,
 }
 
 /// Sendable full-history filter set retained by one scoped-sub config.
@@ -252,6 +254,7 @@ impl SubFullHistoryConfig {
 impl PartialEq for SubConfig {
     fn eq(&self, other: &Self) -> bool {
         self.execution == other.execution
+            && self.thread_notes == other.thread_notes
             && same_canonical_send_filter_set(&self.filters, &other.filters)
             && full_history_configs_have_same_canonical_attributes(
                 self.full_history.as_ref(),
@@ -277,6 +280,7 @@ impl SubConfig {
             execution: SubExecution::AccountsRead { baseline },
             filters,
             full_history: None,
+            thread_notes: None,
         }
     }
 
@@ -290,6 +294,7 @@ impl SubConfig {
             execution: SubExecution::Explicit { relays, policy },
             filters,
             full_history: None,
+            thread_notes: None,
         }
     }
 
@@ -310,7 +315,13 @@ impl SubConfig {
             },
             filters,
             full_history: None,
+            thread_notes: None,
         }
+    }
+
+    /// Borrow the root and selected notes retained for thread outbox discovery.
+    pub(super) fn thread_notes(&self) -> Option<&HashSet<NoteId>> {
+        self.thread_notes.as_ref()
     }
 
     /// Runtime author-outbox relay policy, if this config has one.
@@ -372,6 +383,7 @@ impl SubConfig {
             },
             filters,
             full_history: None,
+            thread_notes: None,
         }
     }
 
@@ -392,8 +404,29 @@ impl SubConfig {
         )
     }
 
+    /// Union compatible owners' thread notes or explicit relays under one scoped key.
     pub(super) fn merged_owner_configs(configs: &[&SubConfig]) -> Option<SubConfig> {
-        let latest = configs.last()?.to_owned().clone();
+        let mut latest = configs.last()?.to_owned().clone();
+        if let Some(thread_notes) = &mut latest.thread_notes {
+            if configs.iter().any(|config| {
+                config.thread_notes.is_none()
+                    || config.execution != latest.execution
+                    || !same_canonical_send_filter_set(&config.filters, &latest.filters)
+                    || !full_history_configs_have_same_canonical_attributes(
+                        config.full_history.as_ref(),
+                        latest.full_history.as_ref(),
+                    )
+            }) {
+                return Some(latest);
+            }
+            for config in configs {
+                if let Some(owner_notes) = &config.thread_notes {
+                    thread_notes.extend(owner_notes);
+                }
+            }
+            return Some(latest);
+        }
+
         let latest_additive = configs
             .iter()
             .rev()
@@ -637,6 +670,7 @@ impl AccountsReadBuilder {
             baseline: self.baseline,
             author_outbox,
             full_history: self.full_history,
+            thread_notes: None,
         }
     }
 
@@ -720,9 +754,23 @@ pub struct AuthorOutboxBuilder {
     baseline: SubRelayPolicy,
     author_outbox: SubRelayPolicy,
     full_history: Option<SubFullHistoryConfig>,
+    thread_notes: Option<HashSet<NoteId>>,
 }
 
 impl AuthorOutboxBuilder {
+    /// Discover author relays and missing ancestors from this root and its selections.
+    ///
+    /// These notes are routing inputs. The retained live and history filters keep
+    /// their original shape and remain shared by owners of the same thread root.
+    pub fn for_thread(
+        mut self,
+        root: NoteId,
+        selected_ids: impl IntoIterator<Item = NoteId>,
+    ) -> Self {
+        self.thread_notes = Some(selected_ids.into_iter().chain([root]).collect());
+        self
+    }
+
     /// Add or replace generic full-history catchup on the resolved scoped-sub relay set.
     pub fn full_history(mut self, full_history: FullHistoryConfig) -> Self {
         self.full_history = normalize_full_history_policy(Some(full_history));
@@ -731,12 +779,14 @@ impl AuthorOutboxBuilder {
 
     /// Finish building the baseline-plus-author-outbox scoped subscription config.
     pub fn build(self) -> SubConfig {
-        SubConfig::accounts_read_with_author_outbox_parts(
+        let mut config = SubConfig::accounts_read_with_author_outbox_parts(
             self.filters,
             self.baseline,
             self.author_outbox,
         )
-        .with_full_history(self.full_history)
+        .with_full_history(self.full_history);
+        config.thread_notes = self.thread_notes;
+        config
     }
 }
 

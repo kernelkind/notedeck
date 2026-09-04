@@ -1,6 +1,11 @@
-use enostr::{NormRelayUrl, OutboxIdRegistry, OutboxSubId, Pubkey, RelayReqStatus};
+use enostr::{
+    NormRelayUrl, NoteId, OutboxIdRegistry, OutboxSubId, Pubkey, RelayReqStatus, RelayUrlPkgs,
+    RelayUrlPolicy,
+};
+use futures_util::{future::poll_fn, StreamExt};
 use hashbrown::{HashMap, HashSet};
-use nostrdb::{Ndb, SendFilter};
+use nostrdb::{Filter, Ndb, SendFilter};
+use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use super::config::{ScopedSubKey, SubConfig};
@@ -12,8 +17,13 @@ use crate::author_outbox::{
 };
 
 mod discovery;
+mod thread;
 
 use discovery::{start_relay_list_discovery, RelayListDiscovery, RelayListDiscoveryAdvance};
+use thread::{build_thread_plan, ThreadPlanSnapshot, ThreadWatch};
+
+const THREAD_PLAN_RETRY_DELAY: Duration = Duration::from_millis(100);
+const THREAD_PLAN_RETRY_MAX: Duration = Duration::from_secs(60);
 
 const RELAY_LIST_INGESTION_WAIT_DELAYS: [Duration; 6] = [
     Duration::from_millis(50),
@@ -32,7 +42,7 @@ struct AuthorOutboxPlanOwner {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(super) struct AuthorOutboxPlanSlotId(u64);
+pub(crate) struct AuthorOutboxPlanSlotId(u64);
 
 /// Input snapshot that must still match before a cached plan can be reused.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,7 +115,18 @@ pub(crate) struct AuthorOutboxPlanJobCompletion {
 }
 
 /// Owned sendable data needed by one background author-outbox plan job.
-struct SendAuthorOutboxPlanJobInput {
+enum SendAuthorOutboxPlanJobInput {
+    /// Route authors named by the configured filters.
+    AuthorFilters(SendAuthorOutboxPlanConfig),
+    /// Route the ancestry of the required thread note IDs.
+    Thread {
+        config: SendAuthorOutboxPlanConfig,
+        note_ids: HashSet<NoteId>,
+    },
+}
+
+/// Relay coverage and filters shared by both background plan kinds.
+struct SendAuthorOutboxPlanConfig {
     account_read_relays: HashSet<NormRelayUrl>,
     live_filters: Vec<SendPlanFilter>,
     full_history_filters: Vec<SendPlanFilter>,
@@ -124,6 +145,7 @@ struct SendAuthorOutboxPlanJobResult {
     live_routed_relays: Vec<SendPlannedRoutedRelay>,
     full_history_routed_relays: Vec<SendPlannedRoutedRelay>,
     missing_authors: HashSet<Pubkey>,
+    thread: Option<Result<ThreadPlanSnapshot, nostrdb::Error>>,
 }
 
 /// Current shared author-outbox plan lifecycle for one input snapshot.
@@ -131,10 +153,118 @@ struct AuthorOutboxPlanSlot {
     inputs: AuthorOutboxPlanInputs,
     owners: HashSet<AuthorOutboxPlanOwner>,
     state: AuthorOutboxPlanState,
+    thread: Option<ThreadPlanState>,
+}
+
+/// Dynamic thread inputs and the last usable routes while a replacement builds.
+/// Owned by the same plan slot as relay-list discovery, never by the UI.
+struct ThreadPlanState {
+    watch: Option<ThreadWatch>,
+    /// Only failed reads or subscription setup use a timer; arrivals wake the stream.
+    retry_after: Option<Instant>,
+    /// Next failure's delay, doubled up to the cap and reset after recovery.
+    retry_delay: Duration,
+    available_plan: Option<CachedAuthorOutboxPlan>,
+    missing_ids: HashSet<NoteId>,
+    baseline_fetch: Option<OutboxSubId>,
+    /// Shared discovery implementation, kept alive across ancestry snapshots.
+    discovery: Option<RelayListDiscovery>,
+    requested_authors: HashSet<Pubkey>,
+}
+
+impl Default for ThreadPlanState {
+    fn default() -> Self {
+        Self {
+            watch: None,
+            retry_after: None,
+            retry_delay: THREAD_PLAN_RETRY_DELAY,
+            available_plan: None,
+            missing_ids: HashSet::new(),
+            baseline_fetch: None,
+            discovery: None,
+            requested_authors: HashSet::new(),
+        }
+    }
+}
+
+impl ThreadPlanState {
+    /// Back off consecutive read/setup failures, including across planning jobs.
+    fn record_failed_attempt(&mut self) {
+        self.retry_after = Some(Instant::now() + self.retry_delay);
+        self.retry_delay = self
+            .retry_delay
+            .saturating_mul(2)
+            .min(THREAD_PLAN_RETRY_MAX);
+    }
+
+    /// Discover each newly encountered author once per thread plan lifetime.
+    /// Existing discovery legs retain their normal EOSE/retry policy while
+    /// arriving ancestors extend the set of authors being discovered.
+    fn discover_authors(
+        &mut self,
+        ids: &OutboxIdRegistry,
+        missing: HashSet<Pubkey>,
+        reads: &HashSet<NormRelayUrl>,
+    ) -> ScopedSubOutboxOps {
+        if reads.is_empty() {
+            return ScopedSubOutboxOps::default();
+        }
+        let new_authors = missing
+            .into_iter()
+            .filter(|author| self.requested_authors.insert(*author))
+            .collect::<HashSet<_>>();
+        if new_authors.is_empty() {
+            return ScopedSubOutboxOps::default();
+        }
+        let (discovery, ops) = start_relay_list_discovery(ids, new_authors, reads.clone());
+        if let Some(existing) = &mut self.discovery {
+            existing.chunks.extend(discovery.chunks);
+        } else {
+            self.discovery = Some(discovery);
+        }
+        ops
+    }
+
+    /// Keep selected-account coverage for missing ancestors independent of
+    /// author relay-list availability. Replace the fetch only when IDs change.
+    fn request_missing_ids(
+        &mut self,
+        missing_ids: HashSet<NoteId>,
+        ids: &OutboxIdRegistry,
+        inputs: &AuthorOutboxPlanInputs,
+    ) -> ScopedSubOutboxOps {
+        let mut ops = ScopedSubOutboxOps::default();
+        if self.missing_ids == missing_ids {
+            return ops;
+        }
+        self.missing_ids = missing_ids;
+        if let Some(id) = self.baseline_fetch.take() {
+            ops.clear_fetch(id);
+        }
+        if self.missing_ids.is_empty() || inputs.account_read_relays.is_empty() {
+            return ops;
+        }
+        let mut missing = self.missing_ids.iter().copied().collect::<Vec<_>>();
+        missing.sort_unstable_by_key(|id| *id.bytes());
+        let id = ids.next_sub_id();
+        let policy = inputs.spec.baseline_policy();
+        ops.start_fetch(
+            id,
+            vec![Filter::new().ids(missing.iter().map(NoteId::bytes)).build()],
+            RelayUrlPkgs::new(
+                inputs.account_read_relays.clone(),
+                RelayUrlPolicy::explicit(policy.demand_priority(), policy.routing_preference()),
+            ),
+        );
+        self.baseline_fetch = Some(id);
+        ops
+    }
 }
 
 enum AuthorOutboxPlanState {
     BuildingInitial,
+    /// No successful initial thread snapshot yet; retry at the error deadline.
+    WaitingForThreadRetry,
     DiscoveringRelays {
         discovery: RelayListDiscovery,
         original_missing_author_count: usize,
@@ -200,7 +330,8 @@ pub(super) struct AuthorOutboxPlanAdvanceResult<'a> {
     pub(super) effects: ScopedSubEffects,
 }
 
-/// Retained frozen author-outbox plans and in-flight relay-list discovery.
+/// Shared author-outbox planner. Author-filter plans remain frozen; thread
+/// plans rebuild on NDB ingestion while retaining their relay-list discovery.
 pub(super) struct AuthorOutboxPlanRuntime {
     owner_slots: HashMap<AuthorOutboxPlanOwner, AuthorOutboxPlanSlotId>,
     slots: HashMap<AuthorOutboxPlanSlotId, AuthorOutboxPlanSlot>,
@@ -220,12 +351,73 @@ impl Default for AuthorOutboxPlanRuntime {
 }
 
 impl AuthorOutboxPlanRuntime {
-    /// Return the next relay-list discovery retry deadline.
+    /// Return the next discovery or failed-thread-plan retry deadline.
     pub(super) fn next_deadline(&self) -> Option<Instant> {
         self.slots
             .values()
             .filter_map(AuthorOutboxPlanSlot::next_deadline)
             .min()
+    }
+
+    /// Await a relevant NDB arrival without a timer or a task per thread.
+    ///
+    /// Do not consume notifications while a job is running: the subscription's
+    /// queue retains them for a subsequent job. Cancelling this wait keeps the
+    /// streams in their slots, so other bridge activity cannot lose arrivals.
+    pub(super) async fn next_thread_change(&mut self) -> AuthorOutboxPlanSlotId {
+        poll_fn(|cx| {
+            for (slot_id, slot) in &mut self.slots {
+                if slot.state.is_building() {
+                    continue;
+                }
+                let Some(thread) = &mut slot.thread else {
+                    continue;
+                };
+                let Some(watch) = &mut thread.watch else {
+                    continue;
+                };
+                match watch.poll_next_unpin(cx) {
+                    Poll::Ready(Some(())) => return Poll::Ready(*slot_id),
+                    Poll::Ready(None) => {
+                        // An ended stream must be replaced, never selected repeatedly.
+                        thread.watch = None;
+                        return Poll::Ready(*slot_id);
+                    }
+                    Poll::Pending => {}
+                }
+            }
+            Poll::Pending
+        })
+        .await
+    }
+
+    /// Schedule one new thread plan while preserving the last completed routes.
+    /// Used by NDB notifications, expanded subscription coverage, and failed-job retries.
+    pub(super) fn apply_thread_change(
+        &mut self,
+        slot_id: AuthorOutboxPlanSlotId,
+    ) -> ScopedSubEffects {
+        let mut effects = ScopedSubEffects::default();
+        let Some(slot) = self.slots.get_mut(&slot_id) else {
+            return effects;
+        };
+        if slot.state.is_building() {
+            return effects;
+        }
+        let Some(thread) = &mut slot.thread else {
+            return effects;
+        };
+        thread.retry_after = None;
+        let previous = std::mem::replace(&mut slot.state, AuthorOutboxPlanState::BuildingInitial);
+        if let AuthorOutboxPlanState::Ready(plan) = previous {
+            thread.available_plan = Some(plan);
+        }
+        effects.push(ScopedSubEffect::from(AuthorOutboxPlanJobRequest::new(
+            slot_id,
+            AuthorOutboxBuildStage::Initial,
+            &slot.inputs,
+        )));
+        effects
     }
 
     /// Drop every cached or in-flight owner binding for one scoped subscription.
@@ -259,7 +451,8 @@ impl AuthorOutboxPlanRuntime {
     }
 
     /// Drop in-flight ownership tied to an inactive account while retaining
-    /// completed frozen plans for fast switch-back.
+    /// completed frozen author-filter plans for fast switch-back. Thread watches
+    /// belong only to the active account and are rebuilt on switch-back.
     pub(super) fn deactivate_account(&mut self, account_pubkey: Pubkey) -> ScopedSubOutboxOps {
         let owners = self
             .owner_slots
@@ -268,11 +461,11 @@ impl AuthorOutboxPlanRuntime {
                 if owner.account_pubkey != account_pubkey {
                     return None;
                 }
-                let is_ready = self
+                let retain = self
                     .slots
                     .get(slot_id)
-                    .is_some_and(AuthorOutboxPlanSlot::is_ready);
-                (!is_ready).then_some(owner.clone())
+                    .is_some_and(|slot| slot.thread.is_none() && slot.is_ready());
+                (!retain).then_some(owner.clone())
             })
             .collect::<Vec<_>>();
         let mut outbox_ops = ScopedSubOutboxOps::default();
@@ -321,7 +514,7 @@ impl AuthorOutboxPlanRuntime {
         };
 
         if let Some(slot) = self.slots.get(&slot_id) {
-            if let AuthorOutboxPlanState::Ready(plan) = &slot.state {
+            if let Some(plan) = slot.ready_plan() {
                 return AuthorOutboxPlanAdvanceResult {
                     advance: AuthorOutboxPlanAdvance::Ready {
                         routes: &plan.routes,
@@ -382,6 +575,10 @@ impl AuthorOutboxPlanRuntime {
         self.slots.insert(
             slot_id,
             AuthorOutboxPlanSlot {
+                thread: inputs
+                    .spec
+                    .thread_notes()
+                    .map(|_| ThreadPlanState::default()),
                 inputs,
                 owners: HashSet::from([owner]),
                 state: Self::building_state(AuthorOutboxBuildStage::Initial),
@@ -404,10 +601,19 @@ impl AuthorOutboxPlanRuntime {
         let Some(slot) = self.slots.remove(&slot_id) else {
             return ScopedSubOutboxOps::default();
         };
-        if let AuthorOutboxPlanState::DiscoveringRelays { discovery, .. } = slot.state {
-            return discovery.unsubscribe_all();
+        let mut ops = ScopedSubOutboxOps::default();
+        if let Some(thread) = slot.thread {
+            if let Some(id) = thread.baseline_fetch {
+                ops.clear_fetch(id);
+            }
+            if let Some(discovery) = thread.discovery {
+                ops.extend(discovery.unsubscribe_all());
+            }
         }
-        ScopedSubOutboxOps::default()
+        if let AuthorOutboxPlanState::DiscoveringRelays { discovery, .. } = slot.state {
+            ops.extend(discovery.unsubscribe_all());
+        }
+        ops
     }
 
     /// Apply one relay request status fact to discovery slots that own the
@@ -422,8 +628,12 @@ impl AuthorOutboxPlanRuntime {
             .slots
             .iter()
             .filter_map(|(slot_id, slot)| {
-                matches!(slot.state, AuthorOutboxPlanState::DiscoveringRelays { .. })
-                    .then_some(*slot_id)
+                (matches!(slot.state, AuthorOutboxPlanState::DiscoveringRelays { .. })
+                    || slot
+                        .thread
+                        .as_ref()
+                        .is_some_and(|thread| thread.discovery.is_some()))
+                .then_some(*slot_id)
             })
             .collect::<Vec<_>>();
 
@@ -445,17 +655,19 @@ impl AuthorOutboxPlanRuntime {
         ids: &OutboxIdRegistry,
         completion: AuthorOutboxPlanJobCompletion,
         account_read_relays: &HashSet<NormRelayUrl>,
-    ) -> (Vec<ScopedSubKey>, ScopedSubOutboxOps) {
+        ndb: &Ndb,
+    ) -> (Vec<ScopedSubKey>, ScopedSubOutboxOps, ScopedSubEffects) {
         let slot_id = completion.slot_id;
-        let outbox_ops = self.apply_build_result(ids, completion, account_read_relays);
+        let (outbox_ops, effects) =
+            self.apply_build_result(ids, completion, account_read_relays, ndb);
         if !self.slot_is_ready(slot_id) {
-            return (Vec::new(), outbox_ops);
+            return (Vec::new(), outbox_ops, effects);
         }
 
-        (self.slot_scoped_keys(slot_id), outbox_ops)
+        (self.slot_scoped_keys(slot_id), outbox_ops, effects)
     }
 
-    /// Apply retained relay-list discovery retry and ingestion-wait deadlines.
+    /// Apply discovery retries, ingestion waits, and failed-thread-plan retries.
     pub(super) fn apply_relay_list_discovery_retry_due(
         &mut self,
         now: Instant,
@@ -464,12 +676,9 @@ impl AuthorOutboxPlanRuntime {
             .slots
             .iter()
             .filter_map(|(slot_id, slot)| {
-                matches!(
-                    slot.state,
-                    AuthorOutboxPlanState::DiscoveringRelays { .. }
-                        | AuthorOutboxPlanState::WaitingForRelayListIngestion(_)
-                )
-                .then_some(*slot_id)
+                slot.next_deadline()
+                    .is_some_and(|deadline| deadline <= now)
+                    .then_some(*slot_id)
             })
             .collect::<Vec<_>>();
 
@@ -488,19 +697,87 @@ impl AuthorOutboxPlanRuntime {
         ids: &OutboxIdRegistry,
         completion: AuthorOutboxPlanJobCompletion,
         account_read_relays: &HashSet<NormRelayUrl>,
-    ) -> ScopedSubOutboxOps {
+        ndb: &Ndb,
+    ) -> (ScopedSubOutboxOps, ScopedSubEffects) {
         let AuthorOutboxPlanJobCompletion {
             slot_id,
             build_stage,
-            result,
+            mut result,
         } = completion;
-        let Some(slot) = self.slots.get_mut(&slot_id) else {
-            return ScopedSubOutboxOps::default();
+        let Some(slot) = self.slots.get(&slot_id) else {
+            return (ScopedSubOutboxOps::default(), ScopedSubEffects::default());
         };
         if !slot.state.matches_build_stage(build_stage) {
-            return ScopedSubOutboxOps::default();
+            return (ScopedSubOutboxOps::default(), ScopedSubEffects::default());
         }
 
+        if let Some(snapshot) = result.thread.take() {
+            let snapshot = match snapshot {
+                Ok(snapshot) => snapshot,
+                Err(err) => {
+                    tracing::warn!(?err, "failed to read thread routing context");
+                    let slot = self.slots.get_mut(&slot_id).expect("validated plan slot");
+                    let thread = slot
+                        .thread
+                        .as_mut()
+                        .expect("thread snapshot for thread inputs");
+                    // Failure does not mean that ancestors or routes disappeared.
+                    // Keep the prior subscription, queued arrivals, and fetches.
+                    thread.record_failed_attempt();
+                    slot.state = thread
+                        .available_plan
+                        .take()
+                        .map(AuthorOutboxPlanState::Ready)
+                        .unwrap_or(AuthorOutboxPlanState::WaitingForThreadRetry);
+                    return (ScopedSubOutboxOps::default(), ScopedSubEffects::default());
+                }
+            };
+            let missing_authors = std::mem::take(&mut result.missing_authors);
+            let cached = self.cached_plan_from_job_result(result);
+            let slot = self.slots.get_mut(&slot_id).expect("validated plan slot");
+            let thread = slot
+                .thread
+                .as_mut()
+                .expect("thread snapshot for thread inputs");
+            thread.retry_after = None;
+            let needs_watch = thread
+                .watch
+                .as_ref()
+                .is_none_or(|watch| !watch.covers(&snapshot.note_ids, &snapshot.authors));
+            let catch_up = if needs_watch {
+                match ThreadWatch::new(ndb, snapshot.note_ids, snapshot.authors) {
+                    Ok(watch) => {
+                        // Install before dropping the old subscription or scheduling
+                        // another job. That job also catches arrivals preceding setup.
+                        thread.watch = Some(watch);
+                        true
+                    }
+                    Err(err) => {
+                        tracing::warn!(?err, "failed to subscribe to thread routing changes");
+                        thread.record_failed_attempt();
+                        false
+                    }
+                }
+            } else {
+                false
+            };
+            // A successful read alone must not reset failed subscription setup.
+            if thread.retry_after.is_none() {
+                thread.retry_delay = THREAD_PLAN_RETRY_DELAY;
+            }
+            let mut ops = thread.request_missing_ids(snapshot.missing_ids, ids, &slot.inputs);
+            ops.extend(thread.discover_authors(ids, missing_authors, account_read_relays));
+            thread.available_plan = None;
+            slot.state = AuthorOutboxPlanState::Ready(cached);
+            let effects = if catch_up {
+                self.apply_thread_change(slot_id)
+            } else {
+                ScopedSubEffects::default()
+            };
+            return (ops, effects);
+        }
+
+        let slot = self.slots.get_mut(&slot_id).expect("validated plan slot");
         if build_stage == AuthorOutboxBuildStage::Initial
             && !result.missing_authors.is_empty()
             && !account_read_relays.is_empty()
@@ -515,7 +792,7 @@ impl AuthorOutboxPlanRuntime {
                 discovery,
                 original_missing_author_count,
             };
-            return outbox_ops;
+            return (outbox_ops, ScopedSubEffects::default());
         }
 
         if let AuthorOutboxBuildStage::AfterRelayListDiscovery {
@@ -535,7 +812,7 @@ impl AuthorOutboxPlanRuntime {
                         Instant::now(),
                     ),
                 );
-                return ScopedSubOutboxOps::default();
+                return (ScopedSubOutboxOps::default(), ScopedSubEffects::default());
             }
         }
 
@@ -543,7 +820,7 @@ impl AuthorOutboxPlanRuntime {
         if let Some(slot) = self.slots.get_mut(&slot_id) {
             slot.state = AuthorOutboxPlanState::Ready(cached);
         }
-        ScopedSubOutboxOps::default()
+        (ScopedSubOutboxOps::default(), ScopedSubEffects::default())
     }
 
     fn apply_relay_req_status_to_discovery_slot(
@@ -557,6 +834,16 @@ impl AuthorOutboxPlanRuntime {
             let Some(slot) = self.slots.get_mut(&slot_id) else {
                 return (ScopedSubOutboxOps::default(), ScopedSubEffects::default());
             };
+            if let Some(thread) = &mut slot.thread {
+                let Some(discovery) = &mut thread.discovery else {
+                    return (ScopedSubOutboxOps::default(), ScopedSubEffects::default());
+                };
+                let (advance, ops) = discovery.apply_relay_req_status(id, relay, status);
+                if advance == RelayListDiscoveryAdvance::Complete {
+                    thread.discovery = None;
+                }
+                return (ops, ScopedSubEffects::default());
+            }
             let AuthorOutboxPlanState::DiscoveringRelays {
                 discovery,
                 original_missing_author_count,
@@ -585,6 +872,32 @@ impl AuthorOutboxPlanRuntime {
         slot_id: AuthorOutboxPlanSlotId,
         now: Instant,
     ) -> (ScopedSubOutboxOps, ScopedSubEffects) {
+        let retry_thread = self.slots.get(&slot_id).is_some_and(|slot| {
+            !slot.state.is_building()
+                && slot
+                    .thread
+                    .as_ref()
+                    .and_then(|thread| thread.retry_after)
+                    .is_some_and(|deadline| now >= deadline)
+        });
+        if retry_thread {
+            return (
+                ScopedSubOutboxOps::default(),
+                self.apply_thread_change(slot_id),
+            );
+        }
+        if let Some(slot) = self.slots.get_mut(&slot_id) {
+            if let Some(thread) = &mut slot.thread {
+                let Some(discovery) = &mut thread.discovery else {
+                    return (ScopedSubOutboxOps::default(), ScopedSubEffects::default());
+                };
+                let (advance, ops) = discovery.apply_retry_due(now);
+                if advance == RelayListDiscoveryAdvance::Complete {
+                    thread.discovery = None;
+                }
+                return (ops, ScopedSubEffects::default());
+            }
+        }
         match self.slots.get(&slot_id).map(|slot| &slot.state) {
             Some(AuthorOutboxPlanState::DiscoveringRelays { .. }) => {
                 self.apply_discovery_retry_due_to_slot(slot_id, now)
@@ -710,22 +1023,53 @@ impl AuthorOutboxPlanRuntime {
 }
 
 impl AuthorOutboxPlanSlot {
+    /// Keep usable thread routes available during the next background rebuild.
+    fn ready_plan(&self) -> Option<&CachedAuthorOutboxPlan> {
+        if let AuthorOutboxPlanState::Ready(plan) = &self.state {
+            return Some(plan);
+        }
+        self.thread.as_ref()?.available_plan.as_ref()
+    }
+
     fn is_ready(&self) -> bool {
-        matches!(self.state, AuthorOutboxPlanState::Ready(_))
+        self.ready_plan().is_some()
     }
 
     fn next_deadline(&self) -> Option<Instant> {
-        match &self.state {
+        let discovery = match &self.state {
             AuthorOutboxPlanState::DiscoveringRelays { discovery, .. } => discovery.next_deadline(),
             AuthorOutboxPlanState::WaitingForRelayListIngestion(wait) => Some(wait.ready_at),
             AuthorOutboxPlanState::BuildingInitial
+            | AuthorOutboxPlanState::WaitingForThreadRetry
             | AuthorOutboxPlanState::BuildingAfterRelayListDiscovery { .. }
             | AuthorOutboxPlanState::Ready(_) => None,
-        }
+        };
+        let retry = self
+            .thread
+            .as_ref()
+            .filter(|_| !self.state.is_building())
+            .and_then(|thread| thread.retry_after);
+        let thread_discovery = self
+            .thread
+            .as_ref()
+            .and_then(|thread| thread.discovery.as_ref())
+            .and_then(RelayListDiscovery::next_deadline);
+        discovery
+            .into_iter()
+            .chain(retry)
+            .chain(thread_discovery)
+            .min()
     }
 }
 
 impl AuthorOutboxPlanState {
+    fn is_building(&self) -> bool {
+        matches!(
+            self,
+            Self::BuildingInitial | Self::BuildingAfterRelayListDiscovery { .. }
+        )
+    }
+
     fn matches_build_stage(&self, build_stage: AuthorOutboxBuildStage) -> bool {
         match (self, build_stage) {
             (AuthorOutboxPlanState::BuildingInitial, AuthorOutboxBuildStage::Initial) => true,
@@ -771,7 +1115,7 @@ fn relay_list_ingestion_wait_delay(attempt: u8) -> Duration {
 fn send_author_outbox_plan_job_input(
     inputs: &AuthorOutboxPlanInputs,
 ) -> SendAuthorOutboxPlanJobInput {
-    SendAuthorOutboxPlanJobInput {
+    let config = SendAuthorOutboxPlanConfig {
         account_read_relays: inputs.account_read_relays.clone(),
         live_filters: send_plan_filters(inputs.spec.filters()),
         full_history_filters: inputs
@@ -779,6 +1123,13 @@ fn send_author_outbox_plan_job_input(
             .full_history_config()
             .map(|full_history| send_plan_filters(full_history.filters()))
             .unwrap_or_default(),
+    };
+    match inputs.spec.thread_notes() {
+        Some(note_ids) => SendAuthorOutboxPlanJobInput::Thread {
+            config,
+            note_ids: note_ids.clone(),
+        },
+        None => SendAuthorOutboxPlanJobInput::AuthorFilters(config),
     }
 }
 
@@ -797,6 +1148,21 @@ fn build_author_outbox_plan(
     ndb: Ndb,
     input: SendAuthorOutboxPlanJobInput,
 ) -> SendAuthorOutboxPlanJobResult {
+    match input {
+        SendAuthorOutboxPlanJobInput::AuthorFilters(config) => {
+            build_author_filter_plan(ndb, config)
+        }
+        SendAuthorOutboxPlanJobInput::Thread { config, note_ids } => {
+            build_thread_plan(ndb, config, note_ids)
+        }
+    }
+}
+
+/// Build routes for the authors named by the configured live and history filters.
+fn build_author_filter_plan(
+    ndb: Ndb,
+    input: SendAuthorOutboxPlanConfig,
+) -> SendAuthorOutboxPlanJobResult {
     let authors = send_plan_filter_authors(&input.live_filters, &input.full_history_filters);
     let directory = RelayDirectorySnapshot::from_ndb_authors(&ndb, &authors);
     let missing_authors = directory.missing_authors(&authors);
@@ -809,6 +1175,7 @@ fn build_author_outbox_plan(
         ),
     );
     SendAuthorOutboxPlanJobResult {
+        thread: None,
         live_routed_relays: send_routed_relays(routes.live_routed_relays),
         full_history_routed_relays: send_routed_relays(routes.full_history_routed_relays),
         missing_authors,

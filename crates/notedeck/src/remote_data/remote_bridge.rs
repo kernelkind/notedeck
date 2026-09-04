@@ -363,7 +363,7 @@ pub(crate) enum RemotePublishCommand {
 enum BridgeActorInput {
     Ui(RemoteIntentBatch),
     SetMaxWebsocketConnections(Option<usize>),
-    AuthorOutboxPlanCompleted(AuthorOutboxPlanJobCompletion),
+    AuthorOutboxPlanCompleted(Box<AuthorOutboxPlanJobCompletion>),
     AuthorOutboxDiscoveryRetryDue,
     Shutdown,
 }
@@ -392,7 +392,9 @@ impl AuthorOutboxEffectRunner {
             move || request.run(ndb),
             move |completion| {
                 if inputs
-                    .send(BridgeActorInput::AuthorOutboxPlanCompleted(completion))
+                    .send(BridgeActorInput::AuthorOutboxPlanCompleted(Box::new(
+                        completion,
+                    )))
                     .is_err()
                 {
                     tracing::debug!(
@@ -780,8 +782,7 @@ async fn run_remote_bridge(
             input = inputs.recv() => {
                 input.unwrap_or(BridgeActorInput::Shutdown)
             }
-            output = actor.settlement.next() => {
-                let actions = actor.settlement.settle_outbox_output(output);
+            actions = actor.settlement.next() => {
                 actor.run_settlement_actions(actions);
                 continue;
             }
@@ -810,8 +811,16 @@ impl BridgeOutboxSettlement {
         self.scoped.next_author_outbox_retry_deadline()
     }
 
-    fn next(&mut self) -> impl Future<Output = OutboxServiceOutput> + '_ {
-        self.outbox.next()
+    /// Settle the next network output or matching NDB arrival without a timer.
+    /// Cancelling this wait leaves both services and their subscriptions owned.
+    async fn next(&mut self) -> Vec<BridgeSettlementAction> {
+        tokio::select! {
+            output = self.outbox.next() => self.settle_outbox_output(output),
+            slot_id = self.scoped.next_author_outbox_thread_change() => {
+                let delta = self.scoped.apply_author_outbox_thread_change(slot_id);
+                self.settle_scoped_delta(delta)
+            }
+        }
     }
 
     fn apply_scoped_account_initialized(&mut self, pubkey: Pubkey) -> ScopedSubDelta {
@@ -852,11 +861,13 @@ impl BridgeOutboxSettlement {
         selected_account_pubkey: Pubkey,
         account_read_relays: &HashSet<NormRelayUrl>,
         completion: AuthorOutboxPlanJobCompletion,
+        ndb: &Ndb,
     ) -> Vec<BridgeSettlementAction> {
         let delta = self.scoped.apply_author_outbox_plan_completed(
             selected_account_pubkey,
             account_read_relays,
             completion,
+            ndb,
         );
         self.settle_scoped_delta(delta)
     }
@@ -1004,6 +1015,8 @@ impl BridgeOutboxSettlement {
 struct RemoteBridge<'a> {
     settlement: BridgeOutboxSettlement,
     author_outbox_effects: AuthorOutboxEffectRunner,
+    /// Database used to install watches after background plan completion.
+    ndb: &'a Ndb,
     events: &'a RemoteBridgeEventSink,
     accounts: Option<BridgeAccountState>,
 }
@@ -1029,6 +1042,7 @@ impl<'a> RemoteBridge<'a> {
         Self {
             settlement,
             author_outbox_effects,
+            ndb,
             events,
             accounts: None,
         }
@@ -1045,7 +1059,7 @@ impl<'a> RemoteBridge<'a> {
                 .settlement
                 .apply_max_websocket_connections(max_connections),
             BridgeActorInput::AuthorOutboxPlanCompleted(completion) => {
-                self.apply_author_outbox_plan_completed(completion)
+                self.apply_author_outbox_plan_completed(*completion)
             }
             BridgeActorInput::AuthorOutboxDiscoveryRetryDue => {
                 self.settlement.apply_author_outbox_discovery_retry_due()
@@ -1183,6 +1197,7 @@ impl<'a> RemoteBridge<'a> {
             selected_account_pubkey,
             &account_read_relays,
             completion,
+            self.ndb,
         )
     }
 }

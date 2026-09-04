@@ -662,6 +662,7 @@ pub(super) fn baseline_sub_config(spec: &SubConfig) -> SubConfig {
         },
         filters: spec.filters.clone(),
         full_history: spec.full_history.clone(),
+        thread_notes: None,
     }
 }
 
@@ -1062,6 +1063,13 @@ fn apply_one_routed_live_plan_relay(
         return;
     };
 
+    let filters_changed = existing_leg.desired_filters.len() != plan.filters.len()
+        || existing_leg
+            .desired_filters
+            .iter()
+            .zip(&plan.filters)
+            .any(|(old, new)| !old.same_canonical_attributes(new));
+    existing_leg.pending_route_shape_refresh |= pending.route_shape_changed || filters_changed;
     existing_leg.desired_filters = plan.filters.clone();
     existing_leg.authors_by_filter_index = plan.authors_by_filter_index.clone();
     if existing_leg.relay_priority != plan.relay_priority {
@@ -1071,8 +1079,7 @@ fn apply_one_routed_live_plan_relay(
             &mut state.pending_relay_set,
             existing_leg.relay.clone(),
         );
-    } else if pending.route_shape_changed {
-        existing_leg.pending_route_shape_refresh = true;
+    } else if existing_leg.pending_route_shape_refresh {
         enqueue_pending_routed_relay(
             &mut state.pending_relays,
             &mut state.pending_relay_set,

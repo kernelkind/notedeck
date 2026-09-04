@@ -461,8 +461,12 @@ fn canonicalize_url(url: String) -> String {
     }
 }
 
+/// Accept bounded WebSocket endpoint paths without changing URL authority.
+/// Credentials, fragments, and queries retain the remote-advertised restrictions;
+/// host eligibility is checked separately after normal URL parsing.
 fn remote_advertised_url_parts_allowed(url: &Url) -> bool {
-    if !url.username().is_empty()
+    if url.as_str().len() > 2048
+        || !url.username().is_empty()
         || url.password().is_some()
         || url.fragment().is_some()
         || url.query().is_some()
@@ -470,7 +474,7 @@ fn remote_advertised_url_parts_allowed(url: &Url) -> bool {
         return false;
     }
 
-    url.path() == "/"
+    true
 }
 
 fn public_domain_host_allowed(domain: &str) -> bool {
