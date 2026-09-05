@@ -300,6 +300,8 @@ pub(crate) struct BridgeAccountState {
     selected_pubkey: Pubkey,
     read_relays: HashSet<NormRelayUrl>,
     write_relays: Vec<RelayId>,
+    /// Configured discovery coverage, already restricted by forced-relay policy.
+    bootstrap_relays: HashSet<NormRelayUrl>,
 }
 
 impl BridgeAccountState {
@@ -312,7 +314,14 @@ impl BridgeAccountState {
             selected_pubkey,
             read_relays,
             write_relays,
+            bootstrap_relays: HashSet::new(),
         }
+    }
+
+    /// Add host-configured discovery relays without changing account reads or writes.
+    pub(crate) fn with_bootstrap_relays(mut self, relays: HashSet<NormRelayUrl>) -> Self {
+        self.bootstrap_relays = relays;
+        self
     }
 
     fn selected_pubkey(&self) -> Pubkey {
@@ -1135,6 +1144,9 @@ impl<'a> RemoteBridge<'a> {
     }
 
     fn apply_account_changed(&mut self, account: BridgeAccountState) -> ScopedSubDelta {
+        self.settlement
+            .scoped
+            .set_bootstrap_relays(&account.bootstrap_relays);
         let previous = self.accounts.replace(account);
         let new_pubkey = self.account_state().selected_pubkey();
         let new_read_relays = self.account_state().read_relays().clone();
@@ -1142,7 +1154,10 @@ impl<'a> RemoteBridge<'a> {
             Some(previous) if previous.selected_pubkey() != new_pubkey => {
                 self.apply_scoped_account_switched(previous.selected_pubkey(), new_pubkey)
             }
-            Some(previous) if previous.read_relays() != &new_read_relays => {
+            Some(previous)
+                if previous.read_relays() != &new_read_relays
+                    || previous.bootstrap_relays != self.account_state().bootstrap_relays =>
+            {
                 self.apply_scoped_account_read_relays_changed(new_pubkey)
             }
             None => self.apply_scoped_account_initialized(new_pubkey),

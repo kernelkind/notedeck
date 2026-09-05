@@ -479,6 +479,19 @@ impl Accounts {
         )
     }
 
+    /// Additional bootstrap coverage for relay lists and authorless missing events.
+    /// Forced relays override this coverage; an injected empty set stays empty.
+    pub(crate) fn discovery_bootstrap_relays(&self) -> HashSet<NormRelayUrl> {
+        if !self.relay_defaults.forced_relays.is_empty() {
+            return HashSet::new();
+        }
+        self.relay_defaults
+            .bootstrap_relays
+            .iter()
+            .map(|relay| relay.url.clone())
+            .collect()
+    }
+
     /// Return the selected account's advertised NIP-65 relays with marker metadata.
     pub fn selected_account_advertised_relays(
         &self,

@@ -203,6 +203,11 @@ fn advance_author_outbox_plan(
 }
 
 impl ScopedSubRuntime {
+    /// Update discovery coverage before the bridge applies the account transition.
+    pub(crate) fn set_bootstrap_relays(&mut self, relays: &HashSet<NormRelayUrl>) {
+        self.author_outbox_plans.bootstrap_relays.clone_from(relays);
+    }
+
     /// Create a runtime that allocates outbox ids from the bridge-owned outbox
     /// service namespace.
     pub(crate) fn with_ids(ids: OutboxIdRegistry) -> Self {

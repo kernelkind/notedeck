@@ -25,6 +25,8 @@ pub(super) struct ThreadPlanSnapshot {
     pub(super) authors: HashSet<Pubkey>,
     /// Exact IDs that the account-read baseline still needs to fetch.
     pub(super) missing_ids: HashSet<NoteId>,
+    /// Missing IDs without a claimed author, eligible for bootstrap exact-ID fetches.
+    pub(super) missing_ids_without_author: HashSet<NoteId>,
 }
 
 /// Runtime-owned subscription retained across planning jobs.
@@ -132,6 +134,7 @@ pub(super) fn build_thread_plan(
             note_ids: snapshot.note_ids,
             authors: snapshot.authors,
             missing_ids: snapshot.missing_ids,
+            missing_ids_without_author: snapshot.missing_ids_without_author,
         })),
     }
 }

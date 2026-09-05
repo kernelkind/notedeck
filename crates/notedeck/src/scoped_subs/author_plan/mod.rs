@@ -48,13 +48,19 @@ pub(crate) struct AuthorOutboxPlanSlotId(u64);
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct AuthorOutboxPlanInputs {
     account_read_relays: HashSet<NormRelayUrl>,
+    bootstrap_relays: HashSet<NormRelayUrl>,
     spec: SubConfig,
 }
 
 impl AuthorOutboxPlanInputs {
-    fn new(account_read_relays: &HashSet<NormRelayUrl>, spec: &SubConfig) -> Self {
+    fn new(
+        account_read_relays: &HashSet<NormRelayUrl>,
+        bootstrap_relays: &HashSet<NormRelayUrl>,
+        spec: &SubConfig,
+    ) -> Self {
         Self {
             account_read_relays: account_read_relays.clone(),
+            bootstrap_relays: bootstrap_relays.clone(),
             spec: spec.clone(),
         }
     }
@@ -165,8 +171,8 @@ struct ThreadPlanState {
     /// Next failure's delay, doubled up to the cap and reset after recovery.
     retry_delay: Duration,
     available_plan: Option<CachedAuthorOutboxPlan>,
-    missing_ids: HashSet<NoteId>,
-    baseline_fetch: Option<OutboxSubId>,
+    baseline_fetch: MissingIdFetch,
+    bootstrap_fetch: MissingIdFetch,
     /// Shared discovery implementation, kept alive across ancestry snapshots.
     discovery: Option<RelayListDiscovery>,
     requested_authors: HashSet<Pubkey>,
@@ -179,8 +185,8 @@ impl Default for ThreadPlanState {
             retry_after: None,
             retry_delay: THREAD_PLAN_RETRY_DELAY,
             available_plan: None,
-            missing_ids: HashSet::new(),
-            baseline_fetch: None,
+            baseline_fetch: MissingIdFetch::default(),
+            bootstrap_fetch: MissingIdFetch::default(),
             discovery: None,
             requested_authors: HashSet::new(),
         }
@@ -204,9 +210,9 @@ impl ThreadPlanState {
         &mut self,
         ids: &OutboxIdRegistry,
         missing: HashSet<Pubkey>,
-        reads: &HashSet<NormRelayUrl>,
+        relays: &HashSet<NormRelayUrl>,
     ) -> ScopedSubOutboxOps {
-        if reads.is_empty() {
+        if relays.is_empty() {
             return ScopedSubOutboxOps::default();
         }
         let new_authors = missing
@@ -216,7 +222,7 @@ impl ThreadPlanState {
         if new_authors.is_empty() {
             return ScopedSubOutboxOps::default();
         }
-        let (discovery, ops) = start_relay_list_discovery(ids, new_authors, reads.clone());
+        let (discovery, ops) = start_relay_list_discovery(ids, new_authors, relays.clone());
         if let Some(existing) = &mut self.discovery {
             existing.chunks.extend(discovery.chunks);
         } else {
@@ -224,39 +230,47 @@ impl ThreadPlanState {
         }
         ops
     }
+}
 
-    /// Keep selected-account coverage for missing ancestors independent of
-    /// author relay-list availability. Replace the fetch only when IDs change.
-    fn request_missing_ids(
+/// One exact-ID fetch retained across thread snapshots, with normal one-shot EOSE cleanup.
+/// Remembering the requested IDs and relays prevents resending an unchanged fetch.
+#[derive(Default)]
+struct MissingIdFetch {
+    missing_ids: HashSet<NoteId>,
+    relays: HashSet<NormRelayUrl>,
+    id: Option<OutboxSubId>,
+}
+
+impl MissingIdFetch {
+    /// Replace the one-shot only when its missing IDs or destination relays change.
+    fn update(
         &mut self,
         missing_ids: HashSet<NoteId>,
+        relays: HashSet<NormRelayUrl>,
         ids: &OutboxIdRegistry,
-        inputs: &AuthorOutboxPlanInputs,
+        policy: RelayUrlPolicy,
     ) -> ScopedSubOutboxOps {
         let mut ops = ScopedSubOutboxOps::default();
-        if self.missing_ids == missing_ids {
+        if self.missing_ids == missing_ids && self.relays == relays {
             return ops;
         }
         self.missing_ids = missing_ids;
-        if let Some(id) = self.baseline_fetch.take() {
+        self.relays = relays;
+        if let Some(id) = self.id.take() {
             ops.clear_fetch(id);
         }
-        if self.missing_ids.is_empty() || inputs.account_read_relays.is_empty() {
+        if self.missing_ids.is_empty() || self.relays.is_empty() {
             return ops;
         }
         let mut missing = self.missing_ids.iter().copied().collect::<Vec<_>>();
         missing.sort_unstable_by_key(|id| *id.bytes());
         let id = ids.next_sub_id();
-        let policy = inputs.spec.baseline_policy();
         ops.start_fetch(
             id,
             vec![Filter::new().ids(missing.iter().map(NoteId::bytes)).build()],
-            RelayUrlPkgs::new(
-                inputs.account_read_relays.clone(),
-                RelayUrlPolicy::explicit(policy.demand_priority(), policy.routing_preference()),
-            ),
+            RelayUrlPkgs::new(self.relays.clone(), policy),
         );
-        self.baseline_fetch = Some(id);
+        self.id = Some(id);
         ops
     }
 }
@@ -333,6 +347,8 @@ pub(super) struct AuthorOutboxPlanAdvanceResult<'a> {
 /// Shared author-outbox planner. Author-filter plans remain frozen; thread
 /// plans rebuild on NDB ingestion while retaining their relay-list discovery.
 pub(super) struct AuthorOutboxPlanRuntime {
+    /// Injected discovery destinations, captured in each immutable plan input.
+    pub(super) bootstrap_relays: HashSet<NormRelayUrl>,
     owner_slots: HashMap<AuthorOutboxPlanOwner, AuthorOutboxPlanSlotId>,
     slots: HashMap<AuthorOutboxPlanSlotId, AuthorOutboxPlanSlot>,
     next_slot_id: u64,
@@ -342,6 +358,7 @@ pub(super) struct AuthorOutboxPlanRuntime {
 impl Default for AuthorOutboxPlanRuntime {
     fn default() -> Self {
         Self {
+            bootstrap_relays: HashSet::new(),
             owner_slots: HashMap::new(),
             slots: HashMap::new(),
             next_slot_id: 1,
@@ -502,7 +519,7 @@ impl AuthorOutboxPlanRuntime {
             account_pubkey,
             scoped,
         };
-        let inputs = AuthorOutboxPlanInputs::new(account_read_relays, spec);
+        let inputs = AuthorOutboxPlanInputs::new(account_read_relays, &self.bootstrap_relays, spec);
         let (slot_id, outbox_ops, slot_effects) = self.ensure_owner_slot(owner, inputs);
         effects.extend(slot_effects);
         let Some(slot_id) = slot_id else {
@@ -603,8 +620,10 @@ impl AuthorOutboxPlanRuntime {
         };
         let mut ops = ScopedSubOutboxOps::default();
         if let Some(thread) = slot.thread {
-            if let Some(id) = thread.baseline_fetch {
-                ops.clear_fetch(id);
+            for fetch in [thread.baseline_fetch, thread.bootstrap_fetch] {
+                if let Some(id) = fetch.id {
+                    ops.clear_fetch(id);
+                }
             }
             if let Some(discovery) = thread.discovery {
                 ops.extend(discovery.unsubscribe_all());
@@ -711,6 +730,11 @@ impl AuthorOutboxPlanRuntime {
             return (ScopedSubOutboxOps::default(), ScopedSubEffects::default());
         }
 
+        let discovery_relays = account_read_relays
+            .union(&slot.inputs.bootstrap_relays)
+            .cloned()
+            .collect::<HashSet<_>>();
+
         if let Some(snapshot) = result.thread.take() {
             let snapshot = match snapshot {
                 Ok(snapshot) => snapshot,
@@ -732,6 +756,14 @@ impl AuthorOutboxPlanRuntime {
                     return (ScopedSubOutboxOps::default(), ScopedSubEffects::default());
                 }
             };
+            // Account reads already have an explicit exact-ID fetch. A planned
+            // author route may still be unadmitted, so it cannot replace this demand.
+            let bootstrap_relays = slot
+                .inputs
+                .bootstrap_relays
+                .difference(&slot.inputs.account_read_relays)
+                .cloned()
+                .collect();
             let missing_authors = std::mem::take(&mut result.missing_authors);
             let cached = self.cached_plan_from_job_result(result);
             let slot = self.slots.get_mut(&slot_id).expect("validated plan slot");
@@ -765,8 +797,22 @@ impl AuthorOutboxPlanRuntime {
             if thread.retry_after.is_none() {
                 thread.retry_delay = THREAD_PLAN_RETRY_DELAY;
             }
-            let mut ops = thread.request_missing_ids(snapshot.missing_ids, ids, &slot.inputs);
-            ops.extend(thread.discover_authors(ids, missing_authors, account_read_relays));
+            let policy = slot.inputs.spec.baseline_policy();
+            let policy =
+                RelayUrlPolicy::explicit(policy.demand_priority(), policy.routing_preference());
+            let mut ops = thread.baseline_fetch.update(
+                snapshot.missing_ids,
+                slot.inputs.account_read_relays.clone(),
+                ids,
+                policy,
+            );
+            ops.extend(thread.bootstrap_fetch.update(
+                snapshot.missing_ids_without_author,
+                bootstrap_relays,
+                ids,
+                policy,
+            ));
+            ops.extend(thread.discover_authors(ids, missing_authors, &discovery_relays));
             thread.available_plan = None;
             slot.state = AuthorOutboxPlanState::Ready(cached);
             let effects = if catch_up {
@@ -780,14 +826,11 @@ impl AuthorOutboxPlanRuntime {
         let slot = self.slots.get_mut(&slot_id).expect("validated plan slot");
         if build_stage == AuthorOutboxBuildStage::Initial
             && !result.missing_authors.is_empty()
-            && !account_read_relays.is_empty()
+            && !discovery_relays.is_empty()
         {
             let original_missing_author_count = result.missing_authors.len();
-            let (discovery, outbox_ops) = start_relay_list_discovery(
-                ids,
-                result.missing_authors,
-                account_read_relays.clone(),
-            );
+            let (discovery, outbox_ops) =
+                start_relay_list_discovery(ids, result.missing_authors, discovery_relays);
             slot.state = AuthorOutboxPlanState::DiscoveringRelays {
                 discovery,
                 original_missing_author_count,

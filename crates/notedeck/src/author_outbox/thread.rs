@@ -15,6 +15,8 @@ pub(crate) struct ThreadSnapshot {
     pub(crate) authors: HashSet<Pubkey>,
     /// Referenced notes absent from this database snapshot.
     pub(crate) missing_ids: HashSet<NoteId>,
+    /// Missing IDs with no claimed author on any encountered root/reply reference.
+    pub(crate) missing_ids_without_author: HashSet<NoteId>,
     /// Allowed observed relays and NIP-10 root/reply relay hints.
     pub(crate) relays: HashSet<NormRelayUrl>,
 }
@@ -28,6 +30,7 @@ impl ThreadSnapshot {
     pub(crate) fn load(ndb: &Ndb, seeds: &HashSet<NoteId>) -> Result<Self, Error> {
         let txn = Transaction::new(ndb)?;
         let mut snapshot = Self::default();
+        let mut ids_with_claimed_authors = HashSet::new();
         let mut pending = seeds.iter().copied().collect::<Vec<_>>();
         while let Some(id) = pending.pop() {
             if !snapshot.note_ids.insert(id) {
@@ -60,9 +63,16 @@ impl ThreadSnapshot {
                     .and_then(|tag| tag.get_id(4))
                 {
                     snapshot.authors.insert(Pubkey::new(*author));
+                    ids_with_claimed_authors.insert(NoteId::new(*reference.id));
                 }
             }
         }
+        // Another reference may name an author after this missing ID was visited.
+        snapshot.missing_ids_without_author = snapshot
+            .missing_ids
+            .difference(&ids_with_claimed_authors)
+            .copied()
+            .collect();
         Ok(snapshot)
     }
 

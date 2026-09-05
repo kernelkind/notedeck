@@ -115,6 +115,12 @@ Read/setup failures back off from 100 ms, doubling up to 60 seconds; a successfu
 snapshot with subscription coverage resets the delay.
 Relay-list discovery uses the existing `RelayListDiscovery` requests and remains
 alive while ancestry changes. Usable routes do not wait for discovery EOSE.
+Both author-filter and thread discovery query the selected read relays plus the
+configured bootstrap set. Missing ancestors without a claimed author also get
+exact-ID one-shots on bootstrap relays outside the selected read set. These
+are explicit configured-relay requests, not remote-advertised hints; ordinary
+account reads stay unchanged. Forced-relay configuration disables the additional
+bootstrap coverage, and an injected empty bootstrap set remains empty.
 NDB does not notify when an already-stored note gains another observed relay;
 that metadata is picked up on the next snapshot rebuild.
 
