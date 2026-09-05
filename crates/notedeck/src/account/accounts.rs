@@ -826,6 +826,69 @@ mod tests {
         _job_pool: JobPool,
     }
 
+    /// Injected metadata defaults respect forced relays without changing account reads.
+    #[test]
+    fn discovery_bootstrap_respects_overrides_and_preserves_account_reads() {
+        let read = NormRelayUrl::new("wss://account-read.example.com").expect("read relay");
+        let bootstrap =
+            NormRelayUrl::new("wss://injected-bootstrap.example.com").expect("bootstrap relay");
+        let forced = NormRelayUrl::new("wss://forced.example.com").expect("forced relay");
+        for (force, inject_bootstrap, configure_read) in [
+            (false, true, true),
+            (true, true, true),
+            (false, false, true),
+            (false, false, false),
+        ] {
+            let tmp = TempDir::new().expect("temp dir");
+            let mut ndb =
+                Ndb::new(tmp.path().to_str().expect("path"), &Config::new()).expect("ndb");
+            let txn = Transaction::new(&ndb).expect("transaction");
+            let forced_relays = if force {
+                vec![forced.to_string()]
+            } else {
+                Vec::new()
+            };
+            let bootstrap_relays = if inject_bootstrap {
+                vec![bootstrap.to_string()]
+            } else {
+                Vec::new()
+            };
+            let mut accounts = Accounts::new(
+                None,
+                forced_relays,
+                bootstrap_relays,
+                FALLBACK_PUBKEY(),
+                &mut ndb,
+                &txn,
+                &mut UnknownIds::default(),
+            );
+            if configure_read {
+                accounts
+                    .cache
+                    .selected_mut()
+                    .data
+                    .relay
+                    .advertised
+                    .insert(RelaySpec::new(read.clone(), true, false));
+            }
+            let expected_reads = if force {
+                HashSet::from([forced.clone()])
+            } else if configure_read {
+                HashSet::from([read.clone()])
+            } else {
+                HashSet::new()
+            };
+            let expected_bootstrap = if inject_bootstrap && !force {
+                HashSet::from([bootstrap.clone()])
+            } else {
+                HashSet::new()
+            };
+            assert_eq!(accounts.selected_account_read_relays(), expected_reads);
+            assert_eq!(accounts.discovery_bootstrap_relays(), expected_bootstrap);
+            assert_eq!(accounts.selected_account_read_relays(), expected_reads);
+        }
+    }
+
     impl AccountRemoteHarness {
         fn new() -> Self {
             Self::with_forced_relays(Vec::new())

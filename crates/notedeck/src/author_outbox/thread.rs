@@ -88,6 +88,90 @@ impl ThreadSnapshot {
 }
 
 #[test]
+fn thread_snapshot_uses_all_references_to_identify_missing_ids_without_authors() {
+    use nostrdb::{Config, NoteBuilder};
+    use std::time::{Duration, Instant};
+
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let ndb = Ndb::new(tmp.path().to_str().expect("path"), &Config::new()).expect("ndb");
+    let first = NoteId::new([11; 32]);
+    let second = NoteId::new([12; 32]);
+    let unclaimed = NoteId::new([13; 32]);
+    let missing_seed = NoteId::new([14; 32]);
+    let claimed_author = Pubkey::new([2; 32]);
+    let mut seeds = HashSet::from([missing_seed]);
+    let mut inserted = Vec::new();
+    for (created_at, root_author, reply_author) in [(1, true, false), (2, false, true)] {
+        let mut builder = NoteBuilder::new()
+            .kind(1)
+            .created_at(created_at)
+            .content("references share missing ancestors")
+            .start_tag()
+            .tag_str("e")
+            .tag_id(first.bytes())
+            .tag_str("")
+            .tag_str("root");
+        if root_author {
+            builder = builder.tag_id(claimed_author.bytes());
+        }
+        builder = builder
+            .start_tag()
+            .tag_str("e")
+            .tag_id(second.bytes())
+            .tag_str("")
+            .tag_str("reply");
+        if reply_author {
+            builder = builder.tag_id(claimed_author.bytes());
+        }
+        let note = builder.sign(&[1; 32]).build().expect("note");
+        let id = NoteId::new(*note.id());
+        seeds.insert(id);
+        inserted.push(id);
+        ndb.process_client_event(&note.json().expect("json"))
+            .expect("ingest note");
+    }
+    let unclaimed_ref = NoteBuilder::new()
+        .kind(1)
+        .created_at(3)
+        .content("ancestor without claimed author")
+        .start_tag()
+        .tag_str("e")
+        .tag_id(unclaimed.bytes())
+        .tag_str("")
+        .tag_str("reply")
+        .sign(&[1; 32])
+        .build()
+        .expect("note");
+    let unclaimed_ref_id = NoteId::new(*unclaimed_ref.id());
+    seeds.insert(unclaimed_ref_id);
+    inserted.push(unclaimed_ref_id);
+    ndb.process_client_event(&unclaimed_ref.json().expect("json"))
+        .expect("ingest note");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let txn = Transaction::new(&ndb).expect("txn");
+        if inserted
+            .iter()
+            .all(|id| ndb.get_note_by_id(&txn, id.bytes()).is_ok())
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "notes were not ingested");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let snapshot = ThreadSnapshot::load(&ndb, &seeds).expect("snapshot");
+    assert_eq!(
+        snapshot.missing_ids,
+        HashSet::from([first, second, unclaimed, missing_seed])
+    );
+    assert_eq!(
+        snapshot.missing_ids_without_author,
+        HashSet::from([unclaimed, missing_seed])
+    );
+}
+
+#[test]
 fn thread_snapshot_retains_missing_parents_and_their_routing_hints() {
     use enostr::{NormRelayUrl, NoteId, Pubkey};
     use hashbrown::HashSet;

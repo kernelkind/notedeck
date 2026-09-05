@@ -194,6 +194,60 @@ fn thread_routes(
 }
 
 #[test]
+fn thread_plan_retains_missing_ids_without_authors_for_bootstrap_fetches() {
+    use nostrdb::{Config, NoteBuilder, Transaction};
+    use std::time::{Duration, Instant};
+
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let ndb = Ndb::new(tmp.path().to_str().expect("path"), &Config::new()).expect("ndb");
+    let root = NoteId::new([11; 32]);
+    let parent = NoteId::new([12; 32]);
+    let baseline = NormRelayUrl::new("wss://baseline.example.com").expect("relay");
+    let hint = NormRelayUrl::new("wss://hint.example.com/inbox").expect("relay");
+    let selected = NoteBuilder::new()
+        .kind(1)
+        .created_at(2)
+        .content("selected reply")
+        .start_tag()
+        .tag_str("e")
+        .tag_id(root.bytes())
+        .tag_str(baseline.as_str())
+        .tag_str("root")
+        .tag_id(&[2; 32])
+        .start_tag()
+        .tag_str("e")
+        .tag_id(parent.bytes())
+        .tag_str(hint.as_str())
+        .tag_str("reply")
+        .sign(&[1; 32])
+        .build()
+        .expect("selected");
+    ndb.process_client_event(&selected.json().expect("json"))
+        .expect("ingest selected");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let txn = Transaction::new(&ndb).expect("txn");
+        if ndb.get_note_by_id(&txn, selected.id()).is_ok() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "note was not ingested");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let result = build_thread_plan(
+        ndb,
+        SendAuthorOutboxPlanConfig {
+            account_read_relays: HashSet::from([baseline]),
+            live_filters: Vec::new(),
+            full_history_filters: Vec::new(),
+        },
+        HashSet::from([root, NoteId::new(*selected.id())]),
+    );
+    let snapshot = result.thread.expect("thread").expect("snapshot");
+    assert_eq!(snapshot.missing_ids, HashSet::from([root, parent]));
+    assert_eq!(snapshot.missing_ids_without_author, HashSet::from([parent]));
+}
+
+#[test]
 fn thread_plan_preserves_reply_filters_and_fetches_missing_parents_by_exact_id() {
     use super::{SendAuthorOutboxPlanConfig, SendPlanFilter};
     use enostr::{NormRelayUrl, NoteId};
@@ -754,6 +808,7 @@ fn thread_plan_failure_retains_coverage_until_a_successful_retry() {
         .as_ref()
         .expect("thread")
         .baseline_fetch
+        .id
         .expect("baseline fetch");
     assert_eq!(
         slot.ready_plan()
@@ -818,8 +873,8 @@ fn thread_plan_failure_retains_coverage_until_a_successful_retry() {
         1
     );
     let thread = slot.thread.as_ref().expect("thread");
-    assert_eq!(thread.baseline_fetch, Some(baseline_fetch));
-    assert_eq!(thread.missing_ids, HashSet::from([parent]));
+    assert_eq!(thread.baseline_fetch.id, Some(baseline_fetch));
+    assert_eq!(thread.baseline_fetch.missing_ids, HashSet::from([parent]));
 
     let mut retry_jobs = runtime
         .apply_relay_list_discovery_retry_due(Instant::now() + THREAD_PLAN_RETRY_DELAY)
@@ -848,7 +903,7 @@ fn thread_plan_failure_retains_coverage_until_a_successful_retry() {
         2
     );
     let thread = slot.thread.as_ref().expect("thread");
-    assert_eq!(thread.baseline_fetch, Some(baseline_fetch));
+    assert_eq!(thread.baseline_fetch.id, Some(baseline_fetch));
     assert!(thread.watch.is_some());
     assert_eq!(ndb.subscription_count(), 1);
 }
